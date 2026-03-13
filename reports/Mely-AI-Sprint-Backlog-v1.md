@@ -1,4 +1,4 @@
-# MiroFish Sprint Backlog v1（12 周）
+# Mely AI Sprint Backlog v1（12 周）
 
 - 目标：把规划转成可执行迭代
 - 节奏：双周 Sprint，共 6 个 Sprint

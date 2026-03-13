@@ -1,4 +1,4 @@
-# MiroFish 技术架构图与时序（Mermaid）v1
+# Mely AI 技术架构图与时序（Mermaid）v1
 
 - 版本：v1.0
 - 日期：2026-03-13

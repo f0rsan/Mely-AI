@@ -1,4 +1,4 @@
-# MiroFish MVP 任务拆解（Jira 导入草案）
+# Mely AI MVP 任务拆解（Jira 导入草案）
 
 ## Epic A：基础工程
 - A1 初始化 monorepo（web/api/packages）
