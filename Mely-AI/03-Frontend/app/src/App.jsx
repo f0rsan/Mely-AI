@@ -102,7 +102,7 @@ export default function App() {
     return (
       <main className="page center">
         <form className="panel" onSubmit={handleLogin}>
-          <h1>Mely AI Mock Login</h1>
+          <h1>Mely AI Login</h1>
           <p>Demo account is prefilled.</p>
           <label>Email<input value={email} onChange={(e) => setEmail(e.target.value)} /></label>
           <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
@@ -158,10 +158,10 @@ export default function App() {
             ))}
           </div>
           <div className="row">
-            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Type and send..." />
-            <button onClick={handleSend}>Send</button>
+            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Type and send..." disabled />
+            <button onClick={handleSend} disabled>Send</button>
           </div>
-          <small>{status}</small>
+          <small>Message API 未实现，当前聊天发送已禁用。{status ? `（${status}）` : ''}</small>
         </section>
       </section>
     </main>

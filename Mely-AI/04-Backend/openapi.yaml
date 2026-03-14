@@ -28,6 +28,30 @@ paths:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
 
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Missing credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /auth/me:
     get:
       tags: [Auth]
@@ -68,6 +92,13 @@ paths:
     get:
       tags: [Session]
       summary: List sessions
+      parameters:
+        - in: query
+          name: projectId
+          required: false
+          schema:
+            type: string
+          description: filter sessions by project id
       responses:
         '200':
           description: Sessions list
@@ -75,6 +106,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionListResponse'
+        '404':
+          description: project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     post:
       tags: [Session]
       summary: Create session
@@ -122,6 +159,21 @@ components:
         name: { type: string }
         email: { type: string, format: email }
         role: { type: string, enum: [owner, editor, viewer] }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 1 }
+
+    LoginResponse:
+      type: object
+      required: [token, user]
+      properties:
+        token: { type: string }
+        user:
+          $ref: '#/components/schemas/User'
 
     Project:
       type: object
