@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { authApi, projectsApi, modelsApi, sessionsApi } from './api/mockApi';
+import { authApi, projectsApi, modelsApi, sessionsApi } from './api/httpApi';
 
 export default function App() {
   const [token, setToken] = useState(authApi.getToken());
@@ -62,12 +62,7 @@ export default function App() {
   }
 
   async function handleCreateProject() {
-    if (!newProjectName.trim()) return;
-    const created = await projectsApi.create({ name: newProjectName.trim() });
-    const next = [...projects, created];
-    setProjects(next);
-    setProjectId(created.id);
-    setNewProjectName('');
+    setStatus('Project create API not enabled in current backend milestone');
   }
 
   async function handleCreateSession() {
@@ -82,9 +77,13 @@ export default function App() {
     if (!sessionId || !input.trim()) return;
     const text = input.trim();
     setInput('');
-    await sessionsApi.sendMessage({ sessionId, content: text });
-    const refreshed = await sessionsApi.list(projectId);
-    setSessions(refreshed);
+    try {
+      await sessionsApi.sendMessage({ sessionId, content: text });
+      const refreshed = await sessionsApi.list(projectId);
+      setSessions(refreshed);
+    } catch (err) {
+      setStatus(err.message || 'send failed');
+    }
   }
 
   async function handleLogout() {

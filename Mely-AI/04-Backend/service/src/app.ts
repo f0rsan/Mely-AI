@@ -8,6 +8,23 @@ export function buildApp() {
     return { status: "ok", service: "mely-ai-backend", timestamp: new Date().toISOString() };
   });
 
+  app.post<{ Body: { email?: string; password?: string } }>("/auth/login", async (request, reply) => {
+    const { email, password } = request.body ?? {};
+    if (!email || !password) {
+      reply.code(400);
+      return { error: { code: "BAD_REQUEST", message: "email and password are required", details: {} } };
+    }
+    return {
+      token: "token_demo_mely",
+      user: {
+        id: "user_mock_001",
+        name: "Mely Demo User",
+        email,
+        role: "owner",
+      },
+    };
+  });
+
   app.get("/auth/me", async () => {
     return {
       id: "user_mock_001",
