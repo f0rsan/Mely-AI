@@ -94,10 +94,16 @@ export function listModels(): ModelInfo[] {
   }));
 }
 
-export function listSessions(): SessionInfo[] {
-  const rows = db
-    .prepare("SELECT id, project_id, title, status, created_at FROM chat_session ORDER BY created_at DESC")
-    .all() as Array<{ id: string; project_id: string; title: string; status: "active" | "archived"; created_at: string }>;
+export function listSessions(projectId?: string): SessionInfo[] {
+  const rows = (projectId
+    ? db
+        .prepare(
+          "SELECT id, project_id, title, status, created_at FROM chat_session WHERE project_id = ? ORDER BY created_at DESC"
+        )
+        .all(projectId)
+    : db
+        .prepare("SELECT id, project_id, title, status, created_at FROM chat_session ORDER BY created_at DESC")
+        .all()) as Array<{ id: string; project_id: string; title: string; status: "active" | "archived"; created_at: string }>;
 
   return rows.map((row) => ({
     id: row.id,

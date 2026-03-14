@@ -59,8 +59,9 @@ export const modelsApi = {
 };
 
 export const sessionsApi = {
-  async list() {
-    const data = await request('/sessions');
+  async list(projectId) {
+    const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+    const data = await request(`/sessions${qs}`);
     return (data.items || []).map((s) => ({ ...s, messages: [] }));
   },
   async create({ projectId, title }) {
