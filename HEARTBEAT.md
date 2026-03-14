@@ -5,6 +5,7 @@
 - If current time is at/after each full hour and no Mely AI update has been sent in this hour, send a concise progress update to the user.
 - Progress update template:
   - 当前里程碑
+  - 总体完成百分比（0-100%）
   - 本小时完成
   - 下一小时计划
   - 风险/阻塞（若无则写“无阻塞”）
