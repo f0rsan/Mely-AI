@@ -4,9 +4,11 @@ import path from "node:path";
 import type { ModelInfo, Project, SessionExportInfo, SessionInfo } from "./types.js";
 
 const DATA_DIR = path.resolve(process.cwd(), "data");
+const EXPORT_DIR = path.join(DATA_DIR, "exports");
 const DB_PATH = path.join(DATA_DIR, "mely-ai.sqlite");
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(EXPORT_DIR, { recursive: true });
 
 const db = new DatabaseSync(DB_PATH);
 db.exec("PRAGMA journal_mode = WAL;");
@@ -185,8 +187,56 @@ export function createSessionExport(input: { sessionId: string; format: "jsonl" 
   const row = db.prepare("SELECT COUNT(*) as c FROM session_export").get() as { c: number | bigint };
   const next = Number(row.c) + 1;
   const id = `exp_${String(next).padStart(3, "0")}`;
-  const fileUri = `/exports/${input.sessionId}/${id}.${input.format}`;
-  const sampleCount = 10;
+
+  const session = db
+    .prepare("SELECT id, project_id, title, status, created_at FROM chat_session WHERE id = ? LIMIT 1")
+    .get(input.sessionId) as
+    | { id: string; project_id: string; title: string; status: "active" | "archived"; created_at: string }
+    | undefined;
+
+  if (!session) {
+    throw new Error(`session ${input.sessionId} not found`);
+  }
+
+  const sessionDir = path.join(EXPORT_DIR, input.sessionId);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const filename = `${id}.${input.format}`;
+  const absPath = path.join(sessionDir, filename);
+
+  const payload = {
+    id: session.id,
+    projectId: session.project_id,
+    title: session.title,
+    status: session.status,
+    createdAt: session.created_at,
+    exportedAt: createdAt,
+  };
+
+  if (input.format === "jsonl") {
+    fs.writeFileSync(absPath, `${JSON.stringify(payload)}\n`, "utf8");
+  } else if (input.format === "csv") {
+    const header = "id,projectId,title,status,createdAt,exportedAt\n";
+    const rowCsv = [
+      payload.id,
+      payload.projectId,
+      payload.title,
+      payload.status,
+      payload.createdAt,
+      payload.exportedAt,
+    ]
+      .map((v) => `"${String(v).replaceAll('"', '""')}"`)
+      .join(",");
+    fs.writeFileSync(absPath, `${header}${rowCsv}\n`, "utf8");
+  } else {
+    fs.writeFileSync(
+      absPath,
+      `Session Export\nID: ${payload.id}\nProject: ${payload.projectId}\nTitle: ${payload.title}\nStatus: ${payload.status}\nCreatedAt: ${payload.createdAt}\nExportedAt: ${payload.exportedAt}\n`,
+      "utf8"
+    );
+  }
+
+  const fileUri = absPath;
+  const sampleCount = 1;
 
   db.prepare(
     "INSERT INTO session_export (id, session_id, format, file_uri, sample_count, created_at) VALUES (?, ?, ?, ?, ?, ?)"
