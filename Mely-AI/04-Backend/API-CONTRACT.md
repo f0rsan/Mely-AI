@@ -1,4 +1,4 @@
-# Melt AI v0.1 API / Data Contract Baseline
+# Mely AI v0.1 API / Data Contract Baseline
 
 > Status: **Frozen for Sprint 1 (P0)**  
 > Last updated: 2026-03-14
@@ -50,8 +50,8 @@ Error code baseline:
 ```json
 {
   "id": "user_mock_001",
-  "name": "Melt Demo User",
-  "email": "demo@melt.ai",
+  "name": "Mely Demo User",
+  "email": "demo@mely.ai",
   "role": "owner"
 }
 ```

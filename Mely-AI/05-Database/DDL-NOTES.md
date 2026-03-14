@@ -1,4 +1,4 @@
-# Melt AI v0.1 DDL Notes
+# Mely AI v0.1 DDL Notes
 
 > Source of truth: `05-Database/schema.sql`
 

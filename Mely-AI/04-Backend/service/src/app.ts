@@ -6,14 +6,14 @@ export function buildApp() {
   const app = Fastify({ logger: true });
 
   app.get("/health", async () => {
-    return { status: "ok", service: "melt-ai-backend", timestamp: new Date().toISOString() };
+    return { status: "ok", service: "mely-ai-backend", timestamp: new Date().toISOString() };
   });
 
   app.get("/auth/me", async () => {
     return {
       id: "user_mock_001",
-      name: "Melt Demo User",
-      email: "demo@melt.ai",
+      name: "Mely Demo User",
+      email: "demo@mely.ai",
       role: "owner",
     };
   });

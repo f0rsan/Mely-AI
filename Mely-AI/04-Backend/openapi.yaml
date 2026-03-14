@@ -1,9 +1,9 @@
 openapi: 3.0.3
 info:
-  title: Melt AI Backend API
+  title: Mely AI Backend API
   version: 0.1.0
   description: |
-    Melt AI v0.1 P0 baseline APIs.
+    Mely AI v0.1 P0 baseline APIs.
 servers:
   - url: http://127.0.0.1:3000
     description: local dev
@@ -109,7 +109,7 @@ components:
           example: ok
         service:
           type: string
-          example: melt-ai-backend
+          example: mely-ai-backend
         timestamp:
           type: string
           format: date-time
