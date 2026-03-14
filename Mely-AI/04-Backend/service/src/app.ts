@@ -10,8 +10,16 @@ import {
   sessionExists,
 } from "./db.js";
 
+const DEMO_TOKEN = "token_demo_mely";
+
 function fail(code: string, message: string, details: Record<string, unknown> = {}) {
   return { error: { code, message, details } };
+}
+
+function isAuthorized(authHeader?: string) {
+  if (!authHeader) return false;
+  const [scheme, token] = authHeader.split(" ");
+  return scheme?.toLowerCase() === "bearer" && token === DEMO_TOKEN;
 }
 
 export function buildApp() {
@@ -38,7 +46,11 @@ export function buildApp() {
     };
   });
 
-  app.get("/auth/me", async () => {
+  app.get("/auth/me", async (request, reply) => {
+    if (!isAuthorized(request.headers.authorization)) {
+      reply.code(401);
+      return fail("UNAUTHORIZED", "invalid or missing bearer token");
+    }
     return {
       id: "user_mock_001",
       name: "Mely Demo User",
@@ -47,17 +59,29 @@ export function buildApp() {
     };
   });
 
-  app.get("/projects", async () => {
+  app.get("/projects", async (request, reply) => {
+    if (!isAuthorized(request.headers.authorization)) {
+      reply.code(401);
+      return fail("UNAUTHORIZED", "invalid or missing bearer token");
+    }
     const items = listProjects();
     return { items, total: items.length };
   });
 
-  app.get("/models", async () => {
+  app.get("/models", async (request, reply) => {
+    if (!isAuthorized(request.headers.authorization)) {
+      reply.code(401);
+      return fail("UNAUTHORIZED", "invalid or missing bearer token");
+    }
     const items = listModels();
     return { items, total: items.length };
   });
 
   app.get<{ Querystring: { projectId?: string } }>("/sessions", async (request, reply) => {
+    if (!isAuthorized(request.headers.authorization)) {
+      reply.code(401);
+      return fail("UNAUTHORIZED", "invalid or missing bearer token");
+    }
     const { projectId } = request.query;
     if (projectId && !projectExists(projectId)) {
       reply.code(404);
@@ -68,6 +92,10 @@ export function buildApp() {
   });
 
   app.post<{ Body: { projectId: string; title?: string } }>("/sessions", async (request, reply) => {
+    if (!isAuthorized(request.headers.authorization)) {
+      reply.code(401);
+      return fail("UNAUTHORIZED", "invalid or missing bearer token");
+    }
     const { projectId, title } = request.body ?? {};
 
     if (!projectId) {
@@ -86,6 +114,10 @@ export function buildApp() {
   });
 
   app.get<{ Params: { sessionId: string } }>("/sessions/:sessionId/exports", async (request, reply) => {
+    if (!isAuthorized(request.headers.authorization)) {
+      reply.code(401);
+      return fail("UNAUTHORIZED", "invalid or missing bearer token");
+    }
     const { sessionId } = request.params;
     if (!sessionExists(sessionId)) {
       reply.code(404);
@@ -98,6 +130,10 @@ export function buildApp() {
   app.post<{ Params: { sessionId: string }; Body: { format?: "jsonl" | "csv" | "txt" } }>(
     "/sessions/:sessionId/exports",
     async (request, reply) => {
+      if (!isAuthorized(request.headers.authorization)) {
+        reply.code(401);
+        return fail("UNAUTHORIZED", "invalid or missing bearer token");
+      }
       const { sessionId } = request.params;
       const format = request.body?.format ?? "jsonl";
       if (!sessionExists(sessionId)) {
