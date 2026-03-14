@@ -3,13 +3,13 @@ import type { ModelInfo, Project, SessionInfo } from "./types.js";
 export const projects: Project[] = [
   {
     id: "proj_001",
-    name: "Mely AI Core",
+    name: "Melt AI Core",
     description: "Core orchestration and model routing",
     updatedAt: new Date().toISOString(),
   },
   {
     id: "proj_002",
-    name: "Mely AI Playground",
+    name: "Melt AI Playground",
     description: "Prompt and workflow experimentation",
     updatedAt: new Date().toISOString(),
   },

@@ -4,9 +4,9 @@
 - [x] 建立 Mely AI 统一工作目录
 - [x] 明确使命与治理红线
 - [x] 建立角色矩阵与监督机制
-- [ ] 落盘 API/数据契约清单
-- [ ] 落盘 DB DDL 草案
-- [ ] 落盘 OpenAPI YAML
+- [x] 落盘 API/数据契约清单
+- [x] 落盘 DB DDL 草案
+- [x] 落盘 OpenAPI YAML
 
 ## Sprint 1（P0 闭环）
 1. Auth + Project + Model 基础链路

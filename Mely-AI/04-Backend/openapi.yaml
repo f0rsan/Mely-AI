@@ -1,0 +1,215 @@
+openapi: 3.0.3
+info:
+  title: Melt AI Backend API
+  version: 0.1.0
+  description: |
+    Melt AI v0.1 P0 baseline APIs.
+servers:
+  - url: http://127.0.0.1:3000
+    description: local dev
+
+tags:
+  - name: System
+  - name: Auth
+  - name: Project
+  - name: Model
+  - name: Session
+
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current user profile
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  /projects:
+    get:
+      tags: [Project]
+      summary: List projects
+      responses:
+        '200':
+          description: Projects list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectListResponse'
+
+  /models:
+    get:
+      tags: [Model]
+      summary: List models
+      responses:
+        '200':
+          description: Models list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelListResponse'
+
+  /sessions:
+    get:
+      tags: [Session]
+      summary: List sessions
+      responses:
+        '200':
+          description: Sessions list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionListResponse'
+    post:
+      tags: [Session]
+      summary: Create session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, service, timestamp]
+      properties:
+        status:
+          type: string
+          example: ok
+        service:
+          type: string
+          example: melt-ai-backend
+        timestamp:
+          type: string
+          format: date-time
+
+    User:
+      type: object
+      required: [id, name, email, role]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { type: string, enum: [owner, editor, viewer] }
+
+    Project:
+      type: object
+      required: [id, name, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        updatedAt:
+          type: string
+          format: date-time
+
+    Model:
+      type: object
+      required: [id, provider, name, capabilities]
+      properties:
+        id: { type: string }
+        provider: { type: string }
+        name: { type: string }
+        capabilities:
+          type: array
+          items: { type: string }
+
+    Session:
+      type: object
+      required: [id, projectId, title, status, createdAt]
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        title: { type: string }
+        status:
+          type: string
+          enum: [active, archived]
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateSessionRequest:
+      type: object
+      required: [projectId]
+      properties:
+        projectId: { type: string }
+        title: { type: string }
+
+    ErrorObject:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, INTERNAL_ERROR]
+        message: { type: string }
+        details:
+          type: object
+          additionalProperties: true
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          oneOf:
+            - $ref: '#/components/schemas/ErrorObject'
+            - type: string
+
+    ProjectListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Project' }
+        total: { type: integer, minimum: 0 }
+
+    ModelListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Model' }
+        total: { type: integer, minimum: 0 }
+
+    SessionListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Session' }
+        total: { type: integer, minimum: 0 }
