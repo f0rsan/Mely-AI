@@ -1,6 +1,5 @@
 import Fastify from "fastify";
-import { models, projects, sessions } from "./data.js";
-import type { SessionInfo } from "./types.js";
+import { createSession, listModels, listProjects, listSessions, projectExists } from "./db.js";
 
 export function buildApp() {
   const app = Fastify({ logger: true });
@@ -19,15 +18,18 @@ export function buildApp() {
   });
 
   app.get("/projects", async () => {
-    return { items: projects, total: projects.length };
+    const items = listProjects();
+    return { items, total: items.length };
   });
 
   app.get("/models", async () => {
-    return { items: models, total: models.length };
+    const items = listModels();
+    return { items, total: items.length };
   });
 
   app.get("/sessions", async () => {
-    return { items: sessions, total: sessions.length };
+    const items = listSessions();
+    return { items, total: items.length };
   });
 
   app.post<{ Body: { projectId: string; title?: string } }>("/sessions", async (request, reply) => {
@@ -35,18 +37,15 @@ export function buildApp() {
 
     if (!projectId) {
       reply.code(400);
-      return { error: "projectId is required" };
+      return { error: { code: "BAD_REQUEST", message: "projectId is required", details: {} } };
     }
 
-    const newSession: SessionInfo = {
-      id: `sess_${String(sessions.length + 1).padStart(3, "0")}`,
-      projectId,
-      title: title?.trim() || "Untitled Session",
-      status: "active",
-      createdAt: new Date().toISOString(),
-    };
+    if (!projectExists(projectId)) {
+      reply.code(404);
+      return { error: { code: "NOT_FOUND", message: `project ${projectId} not found`, details: {} } };
+    }
 
-    sessions.unshift(newSession);
+    const newSession = createSession({ projectId, title });
     reply.code(201);
     return newSession;
   });
