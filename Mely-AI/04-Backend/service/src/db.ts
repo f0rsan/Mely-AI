@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
-import type { ModelInfo, Project, SessionInfo } from "./types.js";
+import type { ModelInfo, Project, SessionExportInfo, SessionInfo } from "./types.js";
 
 const DATA_DIR = path.resolve(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "mely-ai.sqlite");
@@ -33,6 +33,16 @@ CREATE TABLE IF NOT EXISTS chat_session (
   title TEXT NOT NULL,
   status TEXT NOT NULL CHECK(status IN ('active','archived')),
   created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS session_export (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  format TEXT NOT NULL CHECK(format IN ('jsonl','csv','txt')),
+  file_uri TEXT NOT NULL,
+  sample_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(session_id) REFERENCES chat_session(id)
 );
 `);
 
@@ -119,6 +129,11 @@ export function projectExists(projectId: string): boolean {
   return Boolean(row?.ok);
 }
 
+export function sessionExists(sessionId: string): boolean {
+  const row = db.prepare("SELECT 1 as ok FROM chat_session WHERE id = ? LIMIT 1").get(sessionId) as { ok: number } | undefined;
+  return Boolean(row?.ok);
+}
+
 export function createSession(input: { projectId: string; title?: string }): SessionInfo {
   const createdAt = new Date().toISOString();
   const row = db
@@ -139,4 +154,50 @@ export function createSession(input: { projectId: string; title?: string }): Ses
   ).run(session.id, session.projectId, session.title, session.status, session.createdAt);
 
   return session;
+}
+
+export function listSessionExports(sessionId: string): SessionExportInfo[] {
+  const rows = db
+    .prepare(
+      "SELECT id, session_id, format, file_uri, sample_count, created_at FROM session_export WHERE session_id = ? ORDER BY created_at DESC"
+    )
+    .all(sessionId) as Array<{
+    id: string;
+    session_id: string;
+    format: "jsonl" | "csv" | "txt";
+    file_uri: string;
+    sample_count: number;
+    created_at: string;
+  }>;
+
+  return rows.map((row) => ({
+    id: row.id,
+    sessionId: row.session_id,
+    format: row.format,
+    fileUri: row.file_uri,
+    sampleCount: row.sample_count,
+    createdAt: row.created_at,
+  }));
+}
+
+export function createSessionExport(input: { sessionId: string; format: "jsonl" | "csv" | "txt" }): SessionExportInfo {
+  const createdAt = new Date().toISOString();
+  const row = db.prepare("SELECT COUNT(*) as c FROM session_export").get() as { c: number | bigint };
+  const next = Number(row.c) + 1;
+  const id = `exp_${String(next).padStart(3, "0")}`;
+  const fileUri = `/exports/${input.sessionId}/${id}.${input.format}`;
+  const sampleCount = 10;
+
+  db.prepare(
+    "INSERT INTO session_export (id, session_id, format, file_uri, sample_count, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run(id, input.sessionId, input.format, fileUri, sampleCount, createdAt);
+
+  return {
+    id,
+    sessionId: input.sessionId,
+    format: input.format,
+    fileUri,
+    sampleCount,
+    createdAt,
+  };
 }

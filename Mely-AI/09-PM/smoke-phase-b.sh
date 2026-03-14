@@ -19,7 +19,15 @@ curl -fsS -X POST "$BASE/sessions" \
   -H 'content-type: application/json' \
   -d '{"projectId":"proj_001","title":"Phase B smoke"}' | jq .
 
-echo "[5/5] list sessions by project"
+echo "[5/7] list sessions by project"
 curl -fsS "$BASE/sessions?projectId=proj_001" | jq .
+
+echo "[6/7] create session export"
+curl -fsS -X POST "$BASE/sessions/sess_001/exports" \
+  -H 'content-type: application/json' \
+  -d '{"format":"jsonl"}' | jq .
+
+echo "[7/7] list session exports"
+curl -fsS "$BASE/sessions/sess_001/exports" | jq .
 
 echo "SMOKE_OK"

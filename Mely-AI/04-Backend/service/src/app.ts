@@ -1,5 +1,14 @@
 import Fastify from "fastify";
-import { createSession, listModels, listProjects, listSessions, projectExists } from "./db.js";
+import {
+  createSession,
+  createSessionExport,
+  listModels,
+  listProjects,
+  listSessionExports,
+  listSessions,
+  projectExists,
+  sessionExists,
+} from "./db.js";
 
 function fail(code: string, message: string, details: Record<string, unknown> = {}) {
   return { error: { code, message, details } };
@@ -75,6 +84,35 @@ export function buildApp() {
     reply.code(201);
     return newSession;
   });
+
+  app.get<{ Params: { sessionId: string } }>("/sessions/:sessionId/exports", async (request, reply) => {
+    const { sessionId } = request.params;
+    if (!sessionExists(sessionId)) {
+      reply.code(404);
+      return fail("NOT_FOUND", `session ${sessionId} not found`);
+    }
+    const items = listSessionExports(sessionId);
+    return { items, total: items.length };
+  });
+
+  app.post<{ Params: { sessionId: string }; Body: { format?: "jsonl" | "csv" | "txt" } }>(
+    "/sessions/:sessionId/exports",
+    async (request, reply) => {
+      const { sessionId } = request.params;
+      const format = request.body?.format ?? "jsonl";
+      if (!sessionExists(sessionId)) {
+        reply.code(404);
+        return fail("NOT_FOUND", `session ${sessionId} not found`);
+      }
+      if (!["jsonl", "csv", "txt"].includes(format)) {
+        reply.code(400);
+        return fail("BAD_REQUEST", "format must be one of: jsonl, csv, txt");
+      }
+      const item = createSessionExport({ sessionId, format });
+      reply.code(201);
+      return item;
+    }
+  );
 
   return app;
 }

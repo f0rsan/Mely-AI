@@ -19,3 +19,12 @@ export type SessionInfo = {
   status: "active" | "archived";
   createdAt: string;
 };
+
+export type SessionExportInfo = {
+  id: string;
+  sessionId: string;
+  format: "jsonl" | "csv" | "txt";
+  fileUri: string;
+  sampleCount: number;
+  createdAt: string;
+};
