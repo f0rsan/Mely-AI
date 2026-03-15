@@ -2,10 +2,14 @@ import Fastify from "fastify";
 import {
   createSession,
   createSessionExport,
+  createTuneTask,
+  getTuneTask,
   listModels,
   listProjects,
   listSessionExports,
   listSessions,
+  listTuneTasks,
+  modelExists,
   projectExists,
   sessionExists,
 } from "./db.js";
@@ -149,6 +153,56 @@ export function buildApp() {
       return item;
     }
   );
+
+  app.get<{ Querystring: { projectId?: string } }>("/tune/tasks", async (request, reply) => {
+    if (!isAuthorized(request.headers.authorization)) {
+      reply.code(401);
+      return fail("UNAUTHORIZED", "invalid or missing bearer token");
+    }
+    const { projectId } = request.query;
+    if (projectId && !projectExists(projectId)) {
+      reply.code(404);
+      return fail("NOT_FOUND", `project ${projectId} not found`);
+    }
+    const items = listTuneTasks(projectId);
+    return { items, total: items.length };
+  });
+
+  app.post<{ Body: { projectId?: string; modelId?: string; name?: string } }>("/tune/tasks", async (request, reply) => {
+    if (!isAuthorized(request.headers.authorization)) {
+      reply.code(401);
+      return fail("UNAUTHORIZED", "invalid or missing bearer token");
+    }
+    const { projectId, modelId, name } = request.body ?? {};
+    if (!projectId || !modelId) {
+      reply.code(400);
+      return fail("BAD_REQUEST", "projectId and modelId are required");
+    }
+    if (!projectExists(projectId)) {
+      reply.code(404);
+      return fail("NOT_FOUND", `project ${projectId} not found`);
+    }
+    if (!modelExists(modelId)) {
+      reply.code(404);
+      return fail("NOT_FOUND", `model ${modelId} not found`);
+    }
+    const item = createTuneTask({ projectId, modelId, name });
+    reply.code(201);
+    return item;
+  });
+
+  app.get<{ Params: { taskId: string } }>("/tune/tasks/:taskId", async (request, reply) => {
+    if (!isAuthorized(request.headers.authorization)) {
+      reply.code(401);
+      return fail("UNAUTHORIZED", "invalid or missing bearer token");
+    }
+    const item = getTuneTask(request.params.taskId);
+    if (!item) {
+      reply.code(404);
+      return fail("NOT_FOUND", `task ${request.params.taskId} not found`);
+    }
+    return item;
+  });
 
   return app;
 }

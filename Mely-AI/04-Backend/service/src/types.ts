@@ -28,3 +28,14 @@ export type SessionExportInfo = {
   sampleCount: number;
   createdAt: string;
 };
+
+export type TuneTaskInfo = {
+  id: string;
+  projectId: string;
+  modelId: string;
+  name: string;
+  status: "queued" | "running" | "succeeded" | "failed";
+  logs: string[];
+  createdAt: string;
+  updatedAt: string;
+};

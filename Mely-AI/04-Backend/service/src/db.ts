@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
-import type { ModelInfo, Project, SessionExportInfo, SessionInfo } from "./types.js";
+import type { ModelInfo, Project, SessionExportInfo, SessionInfo, TuneTaskInfo } from "./types.js";
 
 const DATA_DIR = path.resolve(process.cwd(), "data");
 const EXPORT_DIR = path.join(DATA_DIR, "exports");
@@ -45,6 +45,19 @@ CREATE TABLE IF NOT EXISTS session_export (
   sample_count INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   FOREIGN KEY(session_id) REFERENCES chat_session(id)
+);
+
+CREATE TABLE IF NOT EXISTS tune_task (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('queued','running','succeeded','failed')),
+  logs TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(project_id) REFERENCES project(id),
+  FOREIGN KEY(model_id) REFERENCES model(id)
 );
 `);
 
@@ -133,6 +146,11 @@ export function projectExists(projectId: string): boolean {
 
 export function sessionExists(sessionId: string): boolean {
   const row = db.prepare("SELECT 1 as ok FROM chat_session WHERE id = ? LIMIT 1").get(sessionId) as { ok: number } | undefined;
+  return Boolean(row?.ok);
+}
+
+export function modelExists(modelId: string): boolean {
+  const row = db.prepare("SELECT 1 as ok FROM model WHERE id = ? LIMIT 1").get(modelId) as { ok: number } | undefined;
   return Boolean(row?.ok);
 }
 
@@ -250,4 +268,96 @@ export function createSessionExport(input: { sessionId: string; format: "jsonl" 
     sampleCount,
     createdAt,
   };
+}
+
+export function listTuneTasks(projectId?: string): TuneTaskInfo[] {
+  const rows = (projectId
+    ? db
+        .prepare(
+          "SELECT id, project_id, model_id, name, status, logs, created_at, updated_at FROM tune_task WHERE project_id = ? ORDER BY created_at DESC"
+        )
+        .all(projectId)
+    : db
+        .prepare("SELECT id, project_id, model_id, name, status, logs, created_at, updated_at FROM tune_task ORDER BY created_at DESC")
+        .all()) as Array<{
+    id: string;
+    project_id: string;
+    model_id: string;
+    name: string;
+    status: "queued" | "running" | "succeeded" | "failed";
+    logs: string;
+    created_at: string;
+    updated_at: string;
+  }>;
+
+  return rows.map((row) => ({
+    id: row.id,
+    projectId: row.project_id,
+    modelId: row.model_id,
+    name: row.name,
+    status: row.status,
+    logs: JSON.parse(row.logs || "[]") as string[],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+}
+
+export function getTuneTask(taskId: string): TuneTaskInfo | undefined {
+  const row = db
+    .prepare("SELECT id, project_id, model_id, name, status, logs, created_at, updated_at FROM tune_task WHERE id = ? LIMIT 1")
+    .get(taskId) as
+    | {
+        id: string;
+        project_id: string;
+        model_id: string;
+        name: string;
+        status: "queued" | "running" | "succeeded" | "failed";
+        logs: string;
+        created_at: string;
+        updated_at: string;
+      }
+    | undefined;
+
+  if (!row) return undefined;
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    modelId: row.model_id,
+    name: row.name,
+    status: row.status,
+    logs: JSON.parse(row.logs || "[]") as string[],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function createTuneTask(input: { projectId: string; modelId: string; name?: string }): TuneTaskInfo {
+  const createdAt = new Date().toISOString();
+  const row = db.prepare("SELECT COUNT(*) as c FROM tune_task").get() as { c: number | bigint };
+  const next = Number(row.c) + 1;
+  const task: TuneTaskInfo = {
+    id: `tune_${String(next).padStart(3, "0")}`,
+    projectId: input.projectId,
+    modelId: input.modelId,
+    name: input.name?.trim() || `Tune Task ${next}`,
+    status: "queued",
+    logs: ["task queued"],
+    createdAt,
+    updatedAt: createdAt,
+  };
+
+  db.prepare(
+    "INSERT INTO tune_task (id, project_id, model_id, name, status, logs, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    task.id,
+    task.projectId,
+    task.modelId,
+    task.name,
+    task.status,
+    JSON.stringify(task.logs),
+    task.createdAt,
+    task.updatedAt
+  );
+
+  return task;
 }

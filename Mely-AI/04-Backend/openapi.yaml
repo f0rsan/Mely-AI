@@ -17,6 +17,7 @@ tags:
   - name: Project
   - name: Model
   - name: Session
+  - name: Tune
 
 paths:
   /health:
@@ -240,6 +241,94 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /tune/tasks:
+    get:
+      tags: [Tune]
+      summary: List tune tasks
+      parameters:
+        - in: query
+          name: projectId
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tune tasks list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuneTaskListResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [Tune]
+      summary: Create tune task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTuneTaskRequest'
+      responses:
+        '201':
+          description: Tune task created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuneTask'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: project/model not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tune/tasks/{taskId}:
+    get:
+      tags: [Tune]
+      summary: Get tune task detail
+      parameters:
+        - in: path
+          name: taskId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tune task detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuneTask'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: task not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -351,6 +440,35 @@ components:
         projectId: { type: string }
         title: { type: string }
 
+    TuneTask:
+      type: object
+      required: [id, projectId, modelId, name, status, logs, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        modelId: { type: string }
+        name: { type: string }
+        status:
+          type: string
+          enum: [queued, running, succeeded, failed]
+        logs:
+          type: array
+          items: { type: string }
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateTuneTaskRequest:
+      type: object
+      required: [projectId, modelId]
+      properties:
+        projectId: { type: string }
+        modelId: { type: string }
+        name: { type: string }
+
     ErrorObject:
       type: object
       required: [code, message]
@@ -406,4 +524,13 @@ components:
         items:
           type: array
           items: { $ref: '#/components/schemas/SessionExport' }
+        total: { type: integer, minimum: 0 }
+
+    TuneTaskListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TuneTask' }
         total: { type: integer, minimum: 0 }
