@@ -16,6 +16,8 @@ export default function App() {
   const [input, setInput] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
   const [status, setStatus] = useState('ready');
+  const [exportFormat, setExportFormat] = useState('jsonl');
+  const [exportsBySession, setExportsBySession] = useState({});
 
   useEffect(() => {
     if (!token) return;
@@ -27,7 +29,13 @@ export default function App() {
     loadModelsAndSessions(projectId);
   }, [projectId, token]);
 
+  useEffect(() => {
+    if (!sessionId || !token) return;
+    loadExports(sessionId);
+  }, [sessionId, token]);
+
   const currentSession = useMemo(() => sessions.find((s) => s.id === sessionId), [sessions, sessionId]);
+  const currentExports = exportsBySession[sessionId] || [];
 
   async function boot() {
     setStatus('loading projects...');
@@ -45,6 +53,7 @@ export default function App() {
     setModelId(m[0]?.id || '');
     setSessions(s);
     setSessionId(s[0]?.id || '');
+    setExportsBySession({});
     setStatus('ready');
   }
 
@@ -73,6 +82,27 @@ export default function App() {
     setSessionId(created.id);
   }
 
+  async function loadExports(targetSessionId) {
+    try {
+      const items = await sessionsApi.listExports(targetSessionId);
+      setExportsBySession((prev) => ({ ...prev, [targetSessionId]: items }));
+    } catch (err) {
+      setStatus(err.message || 'load exports failed');
+    }
+  }
+
+  async function handleCreateExport() {
+    if (!sessionId) return;
+    try {
+      setStatus(`creating ${exportFormat} export...`);
+      await sessionsApi.createExport({ sessionId, format: exportFormat });
+      await loadExports(sessionId);
+      setStatus('export created');
+    } catch (err) {
+      setStatus(err.message || 'create export failed');
+    }
+  }
+
   async function handleSend() {
     if (!sessionId || !input.trim()) return;
     const text = input.trim();
@@ -93,6 +123,7 @@ export default function App() {
     setProjects([]);
     setModels([]);
     setSessions([]);
+    setExportsBySession({});
     setProjectId('');
     setModelId('');
     setSessionId('');
@@ -152,6 +183,22 @@ export default function App() {
 
         <section className="panel chat">
           <h3>{currentSession?.title || 'No session selected'}</h3>
+          <div className="export-bar">
+            <select value={exportFormat} onChange={(e) => setExportFormat(e.target.value)} disabled={!sessionId}>
+              <option value="jsonl">jsonl</option>
+              <option value="csv">csv</option>
+              <option value="txt">txt</option>
+            </select>
+            <button onClick={handleCreateExport} disabled={!sessionId}>Create Export</button>
+          </div>
+          <ul className="exports">
+            {currentExports.map((item) => (
+              <li key={item.id}>
+                <code>{item.format}</code> · <a href={item.fileUri} target="_blank" rel="noreferrer">artifact</a>
+              </li>
+            ))}
+            {!currentExports.length && <li>No exports yet.</li>}
+          </ul>
           <div className="messages">
             {(currentSession?.messages || []).map((m) => (
               <p key={m.id} className={m.role}><b>{m.role}:</b> {m.content}</p>

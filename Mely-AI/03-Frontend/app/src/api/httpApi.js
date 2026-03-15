@@ -70,6 +70,16 @@ export const sessionsApi = {
       body: JSON.stringify({ projectId, title }),
     });
   },
+  async listExports(sessionId) {
+    const data = await request(`/sessions/${encodeURIComponent(sessionId)}/exports`);
+    return data.items || [];
+  },
+  async createExport({ sessionId, format = 'jsonl' }) {
+    return request(`/sessions/${encodeURIComponent(sessionId)}/exports`, {
+      method: 'POST',
+      body: JSON.stringify({ format }),
+    });
+  },
   async sendMessage() {
     throw new Error('Message API not implemented yet in backend');
   },
