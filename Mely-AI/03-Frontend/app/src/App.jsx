@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { authApi, projectsApi, modelsApi, sessionsApi } from './api/httpApi';
+import { authApi, projectsApi, modelsApi, sessionsApi, tuneApi } from './api/httpApi';
 
 export default function App() {
   const [token, setToken] = useState(authApi.getToken());
@@ -19,6 +19,11 @@ export default function App() {
   const [exportFormat, setExportFormat] = useState('jsonl');
   const [exportsBySession, setExportsBySession] = useState({});
 
+  const [tuneTasks, setTuneTasks] = useState([]);
+  const [tuneTaskId, setTuneTaskId] = useState('');
+  const [tuneTaskName, setTuneTaskName] = useState('');
+  const [tuneLogsByTask, setTuneLogsByTask] = useState({});
+
   useEffect(() => {
     if (!token) return;
     boot();
@@ -34,8 +39,14 @@ export default function App() {
     loadExports(sessionId);
   }, [sessionId, token]);
 
+  useEffect(() => {
+    if (!tuneTaskId || !token) return;
+    loadTuneLogs(tuneTaskId);
+  }, [tuneTaskId, token]);
+
   const currentSession = useMemo(() => sessions.find((s) => s.id === sessionId), [sessions, sessionId]);
   const currentExports = exportsBySession[sessionId] || [];
+  const currentTuneLogs = tuneLogsByTask[tuneTaskId] || [];
 
   async function boot() {
     setStatus('loading projects...');
@@ -48,12 +59,15 @@ export default function App() {
 
   async function loadModelsAndSessions(pid) {
     setStatus('loading models/sessions...');
-    const [m, s] = await Promise.all([modelsApi.listByProject(pid), sessionsApi.list(pid)]);
+    const [m, s, t] = await Promise.all([modelsApi.listByProject(pid), sessionsApi.list(pid), tuneApi.list(pid)]);
     setModels(m);
     setModelId(m[0]?.id || '');
     setSessions(s);
     setSessionId(s[0]?.id || '');
+    setTuneTasks(t);
+    setTuneTaskId(t[0]?.id || '');
     setExportsBySession({});
+    setTuneLogsByTask({});
     setStatus('ready');
   }
 
@@ -103,6 +117,30 @@ export default function App() {
     }
   }
 
+  async function handleCreateTuneTask() {
+    if (!projectId || !modelId) return;
+    try {
+      setStatus('creating tune task...');
+      const item = await tuneApi.create({ projectId, modelId, name: tuneTaskName || undefined });
+      setTuneTaskName('');
+      const refreshed = await tuneApi.list(projectId);
+      setTuneTasks(refreshed);
+      setTuneTaskId(item.id);
+      setStatus('tune task created');
+    } catch (err) {
+      setStatus(err.message || 'create tune task failed');
+    }
+  }
+
+  async function loadTuneLogs(taskId) {
+    try {
+      const items = await tuneApi.logs(taskId);
+      setTuneLogsByTask((prev) => ({ ...prev, [taskId]: items }));
+    } catch (err) {
+      setStatus(err.message || 'load tune logs failed');
+    }
+  }
+
   async function handleSend() {
     if (!sessionId || !input.trim()) return;
     const text = input.trim();
@@ -123,10 +161,13 @@ export default function App() {
     setProjects([]);
     setModels([]);
     setSessions([]);
+    setTuneTasks([]);
     setExportsBySession({});
+    setTuneLogsByTask({});
     setProjectId('');
     setModelId('');
     setSessionId('');
+    setTuneTaskId('');
   }
 
   if (!token) {
@@ -199,6 +240,27 @@ export default function App() {
             ))}
             {!currentExports.length && <li>No exports yet.</li>}
           </ul>
+
+          <section className="tune-panel">
+            <h4>Tune Tasks</h4>
+            <div className="row">
+              <input placeholder="task name (optional)" value={tuneTaskName} onChange={(e) => setTuneTaskName(e.target.value)} />
+              <button onClick={handleCreateTuneTask} disabled={!projectId || !modelId}>Create Tune</button>
+            </div>
+            <select value={tuneTaskId} onChange={(e) => setTuneTaskId(e.target.value)}>
+              <option value="">Select tune task</option>
+              {tuneTasks.map((t) => (
+                <option key={t.id} value={t.id}>{t.id} · {t.status} · {t.name}</option>
+              ))}
+            </select>
+            <ul className="tune-logs">
+              {currentTuneLogs.map((log) => (
+                <li key={`${log.index}-${log.at}`}><code>#{log.index}</code> {log.message}</li>
+              ))}
+              {tuneTaskId && currentTuneLogs.length === 0 && <li>No logs yet.</li>}
+            </ul>
+          </section>
+
           <div className="messages">
             {(currentSession?.messages || []).map((m) => (
               <p key={m.id} className={m.role}><b>{m.role}:</b> {m.content}</p>

@@ -84,3 +84,25 @@ export const sessionsApi = {
     throw new Error('Message API not implemented yet in backend');
   },
 };
+
+
+export const tuneApi = {
+  async list(projectId) {
+    const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+    const data = await request(`/tune/tasks${qs}`);
+    return data.items || [];
+  },
+  async create({ projectId, modelId, name }) {
+    return request('/tune/tasks', {
+      method: 'POST',
+      body: JSON.stringify({ projectId, modelId, name }),
+    });
+  },
+  async get(taskId) {
+    return request(`/tune/tasks/${encodeURIComponent(taskId)}`);
+  },
+  async logs(taskId) {
+    const data = await request(`/tune/tasks/${encodeURIComponent(taskId)}/logs`);
+    return data.items || [];
+  },
+};

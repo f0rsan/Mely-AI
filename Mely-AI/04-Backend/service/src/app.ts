@@ -4,6 +4,7 @@ import {
   createSessionExport,
   createTuneTask,
   getTuneTask,
+  getTuneTaskLogs,
   listModels,
   listProjects,
   listSessionExports,
@@ -202,6 +203,19 @@ export function buildApp() {
       return fail("NOT_FOUND", `task ${request.params.taskId} not found`);
     }
     return item;
+  });
+
+  app.get<{ Params: { taskId: string } }>("/tune/tasks/:taskId/logs", async (request, reply) => {
+    if (!isAuthorized(request.headers.authorization)) {
+      reply.code(401);
+      return fail("UNAUTHORIZED", "invalid or missing bearer token");
+    }
+    const items = getTuneTaskLogs(request.params.taskId);
+    if (!items) {
+      reply.code(404);
+      return fail("NOT_FOUND", `task ${request.params.taskId} not found`);
+    }
+    return { items, total: items.length };
   });
 
   return app;

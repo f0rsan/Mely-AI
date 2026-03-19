@@ -19,6 +19,10 @@ ul { list-style: none; padding: 0; display: grid; gap: 6px; }
 .export-bar { display: flex; gap: 8px; margin-bottom: 8px; }
 .exports { margin: 0 0 10px; max-height: 100px; overflow: auto; font-size: 12px; }
 .exports li { color: #374151; }
+.tune-panel { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+.tune-panel h4 { margin: 0 0 8px; }
+.tune-logs { margin: 8px 0 0; max-height: 100px; overflow: auto; font-size: 12px; }
+.tune-logs li { color: #374151; }
 
 .messages { flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; overflow: auto; margin-bottom: 8px; }
 .messages p { padding: 6px 8px; border-radius: 8px; }

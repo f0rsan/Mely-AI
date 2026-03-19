@@ -361,3 +361,14 @@ export function createTuneTask(input: { projectId: string; modelId: string; name
 
   return task;
 }
+
+export function getTuneTaskLogs(taskId: string): Array<{ index: number; message: string; at: string }> | undefined {
+  const task = getTuneTask(taskId);
+  if (!task) return undefined;
+
+  return task.logs.map((message, idx) => ({
+    index: idx + 1,
+    message,
+    at: task.updatedAt,
+  }));
+}
