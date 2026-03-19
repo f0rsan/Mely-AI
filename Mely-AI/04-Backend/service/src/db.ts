@@ -139,6 +139,24 @@ export function listSessions(projectId?: string): SessionInfo[] {
   }));
 }
 
+
+export function getSessionById(sessionId: string): SessionInfo | undefined {
+  const row = db
+    .prepare("SELECT id, project_id, title, status, created_at FROM chat_session WHERE id = ? LIMIT 1")
+    .get(sessionId) as
+    | { id: string; project_id: string; title: string; status: "active" | "archived"; created_at: string }
+    | undefined;
+
+  if (!row) return undefined;
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    title: row.title,
+    status: row.status,
+    createdAt: row.created_at,
+  };
+}
+
 export function projectExists(projectId: string): boolean {
   const row = db.prepare("SELECT 1 as ok FROM project WHERE id = ? LIMIT 1").get(projectId) as { ok: number } | undefined;
   return Boolean(row?.ok);

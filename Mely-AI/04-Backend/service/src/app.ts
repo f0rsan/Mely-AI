@@ -3,6 +3,7 @@ import {
   createSession,
   createSessionExport,
   createTuneTask,
+  getSessionById,
   getTuneTask,
   getTuneTaskLogs,
   listModels,
@@ -15,16 +16,50 @@ import {
   sessionExists,
 } from "./db.js";
 
-const DEMO_TOKEN = "token_demo_mely";
+type DemoUser = {
+  id: string;
+  name: string;
+  email: string;
+  password: string;
+  role: "owner" | "member" | "viewer";
+  token: string;
+  projectIds: string[];
+};
+
+const DEMO_USERS: DemoUser[] = [
+  {
+    id: "user_owner_001",
+    name: "Mely Owner",
+    email: "demo@mely.ai",
+    password: "123456",
+    role: "owner",
+    token: "token_demo_mely",
+    projectIds: ["proj_001", "proj_002"],
+  },
+  {
+    id: "user_viewer_001",
+    name: "Mely Viewer",
+    email: "viewer@mely.ai",
+    password: "123456",
+    role: "viewer",
+    token: "token_viewer_mely",
+    projectIds: ["proj_002"],
+  },
+];
 
 function fail(code: string, message: string, details: Record<string, unknown> = {}) {
   return { error: { code, message, details } };
 }
 
-function isAuthorized(authHeader?: string) {
-  if (!authHeader) return false;
+function getAuthedUser(authHeader?: string): DemoUser | undefined {
+  if (!authHeader) return undefined;
   const [scheme, token] = authHeader.split(" ");
-  return scheme?.toLowerCase() === "bearer" && token === DEMO_TOKEN;
+  if (scheme?.toLowerCase() !== "bearer" || !token) return undefined;
+  return DEMO_USERS.find((u) => u.token === token);
+}
+
+function hasProjectAccess(user: DemoUser, projectId: string) {
+  return user.projectIds.includes(projectId);
 }
 
 export function buildApp() {
@@ -40,41 +75,53 @@ export function buildApp() {
       reply.code(400);
       return fail("BAD_REQUEST", "email and password are required");
     }
+
+    const user = DEMO_USERS.find((u) => u.email === email && u.password === password);
+    if (!user) {
+      reply.code(401);
+      return fail("UNAUTHORIZED", "invalid email or password");
+    }
+
     return {
-      token: "token_demo_mely",
+      token: user.token,
       user: {
-        id: "user_mock_001",
-        name: "Mely Demo User",
-        email,
-        role: "owner",
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        projectIds: user.projectIds,
       },
     };
   });
 
   app.get("/auth/me", async (request, reply) => {
-    if (!isAuthorized(request.headers.authorization)) {
+    const user = getAuthedUser(request.headers.authorization);
+    if (!user) {
       reply.code(401);
       return fail("UNAUTHORIZED", "invalid or missing bearer token");
     }
     return {
-      id: "user_mock_001",
-      name: "Mely Demo User",
-      email: "demo@mely.ai",
-      role: "owner",
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      projectIds: user.projectIds,
     };
   });
 
   app.get("/projects", async (request, reply) => {
-    if (!isAuthorized(request.headers.authorization)) {
+    const user = getAuthedUser(request.headers.authorization);
+    if (!user) {
       reply.code(401);
       return fail("UNAUTHORIZED", "invalid or missing bearer token");
     }
-    const items = listProjects();
+    const items = listProjects().filter((p) => hasProjectAccess(user, p.id));
     return { items, total: items.length };
   });
 
   app.get("/models", async (request, reply) => {
-    if (!isAuthorized(request.headers.authorization)) {
+    const user = getAuthedUser(request.headers.authorization);
+    if (!user) {
       reply.code(401);
       return fail("UNAUTHORIZED", "invalid or missing bearer token");
     }
@@ -83,7 +130,8 @@ export function buildApp() {
   });
 
   app.get<{ Querystring: { projectId?: string } }>("/sessions", async (request, reply) => {
-    if (!isAuthorized(request.headers.authorization)) {
+    const user = getAuthedUser(request.headers.authorization);
+    if (!user) {
       reply.code(401);
       return fail("UNAUTHORIZED", "invalid or missing bearer token");
     }
@@ -92,12 +140,18 @@ export function buildApp() {
       reply.code(404);
       return fail("NOT_FOUND", `project ${projectId} not found`);
     }
-    const items = listSessions(projectId);
+    if (projectId && !hasProjectAccess(user, projectId)) {
+      reply.code(403);
+      return fail("FORBIDDEN", `no access to project ${projectId}`);
+    }
+
+    const items = (projectId ? listSessions(projectId) : listSessions()).filter((s) => hasProjectAccess(user, s.projectId));
     return { items, total: items.length };
   });
 
   app.post<{ Body: { projectId: string; title?: string } }>("/sessions", async (request, reply) => {
-    if (!isAuthorized(request.headers.authorization)) {
+    const user = getAuthedUser(request.headers.authorization);
+    if (!user) {
       reply.code(401);
       return fail("UNAUTHORIZED", "invalid or missing bearer token");
     }
@@ -113,20 +167,31 @@ export function buildApp() {
       return fail("NOT_FOUND", `project ${projectId} not found`);
     }
 
+    if (!hasProjectAccess(user, projectId)) {
+      reply.code(403);
+      return fail("FORBIDDEN", `no access to project ${projectId}`);
+    }
+
     const newSession = createSession({ projectId, title });
     reply.code(201);
     return newSession;
   });
 
   app.get<{ Params: { sessionId: string } }>("/sessions/:sessionId/exports", async (request, reply) => {
-    if (!isAuthorized(request.headers.authorization)) {
+    const user = getAuthedUser(request.headers.authorization);
+    if (!user) {
       reply.code(401);
       return fail("UNAUTHORIZED", "invalid or missing bearer token");
     }
     const { sessionId } = request.params;
-    if (!sessionExists(sessionId)) {
+    const session = getSessionById(sessionId);
+    if (!session || !sessionExists(sessionId)) {
       reply.code(404);
       return fail("NOT_FOUND", `session ${sessionId} not found`);
+    }
+    if (!hasProjectAccess(user, session.projectId)) {
+      reply.code(403);
+      return fail("FORBIDDEN", `no access to session ${sessionId}`);
     }
     const items = listSessionExports(sessionId);
     return { items, total: items.length };
@@ -135,15 +200,21 @@ export function buildApp() {
   app.post<{ Params: { sessionId: string }; Body: { format?: "jsonl" | "csv" | "txt" } }>(
     "/sessions/:sessionId/exports",
     async (request, reply) => {
-      if (!isAuthorized(request.headers.authorization)) {
+      const user = getAuthedUser(request.headers.authorization);
+      if (!user) {
         reply.code(401);
         return fail("UNAUTHORIZED", "invalid or missing bearer token");
       }
       const { sessionId } = request.params;
       const format = request.body?.format ?? "jsonl";
-      if (!sessionExists(sessionId)) {
+      const session = getSessionById(sessionId);
+      if (!session || !sessionExists(sessionId)) {
         reply.code(404);
         return fail("NOT_FOUND", `session ${sessionId} not found`);
+      }
+      if (!hasProjectAccess(user, session.projectId)) {
+        reply.code(403);
+        return fail("FORBIDDEN", `no access to session ${sessionId}`);
       }
       if (!["jsonl", "csv", "txt"].includes(format)) {
         reply.code(400);
@@ -156,7 +227,8 @@ export function buildApp() {
   );
 
   app.get<{ Querystring: { projectId?: string } }>("/tune/tasks", async (request, reply) => {
-    if (!isAuthorized(request.headers.authorization)) {
+    const user = getAuthedUser(request.headers.authorization);
+    if (!user) {
       reply.code(401);
       return fail("UNAUTHORIZED", "invalid or missing bearer token");
     }
@@ -165,12 +237,17 @@ export function buildApp() {
       reply.code(404);
       return fail("NOT_FOUND", `project ${projectId} not found`);
     }
-    const items = listTuneTasks(projectId);
+    if (projectId && !hasProjectAccess(user, projectId)) {
+      reply.code(403);
+      return fail("FORBIDDEN", `no access to project ${projectId}`);
+    }
+    const items = listTuneTasks(projectId).filter((t) => hasProjectAccess(user, t.projectId));
     return { items, total: items.length };
   });
 
   app.post<{ Body: { projectId?: string; modelId?: string; name?: string } }>("/tune/tasks", async (request, reply) => {
-    if (!isAuthorized(request.headers.authorization)) {
+    const user = getAuthedUser(request.headers.authorization);
+    if (!user) {
       reply.code(401);
       return fail("UNAUTHORIZED", "invalid or missing bearer token");
     }
@@ -183,6 +260,10 @@ export function buildApp() {
       reply.code(404);
       return fail("NOT_FOUND", `project ${projectId} not found`);
     }
+    if (!hasProjectAccess(user, projectId)) {
+      reply.code(403);
+      return fail("FORBIDDEN", `no access to project ${projectId}`);
+    }
     if (!modelExists(modelId)) {
       reply.code(404);
       return fail("NOT_FOUND", `model ${modelId} not found`);
@@ -193,7 +274,8 @@ export function buildApp() {
   });
 
   app.get<{ Params: { taskId: string } }>("/tune/tasks/:taskId", async (request, reply) => {
-    if (!isAuthorized(request.headers.authorization)) {
+    const user = getAuthedUser(request.headers.authorization);
+    if (!user) {
       reply.code(401);
       return fail("UNAUTHORIZED", "invalid or missing bearer token");
     }
@@ -202,19 +284,29 @@ export function buildApp() {
       reply.code(404);
       return fail("NOT_FOUND", `task ${request.params.taskId} not found`);
     }
+    if (!hasProjectAccess(user, item.projectId)) {
+      reply.code(403);
+      return fail("FORBIDDEN", `no access to task ${request.params.taskId}`);
+    }
     return item;
   });
 
   app.get<{ Params: { taskId: string } }>("/tune/tasks/:taskId/logs", async (request, reply) => {
-    if (!isAuthorized(request.headers.authorization)) {
+    const user = getAuthedUser(request.headers.authorization);
+    if (!user) {
       reply.code(401);
       return fail("UNAUTHORIZED", "invalid or missing bearer token");
     }
-    const items = getTuneTaskLogs(request.params.taskId);
-    if (!items) {
+    const task = getTuneTask(request.params.taskId);
+    if (!task) {
       reply.code(404);
       return fail("NOT_FOUND", `task ${request.params.taskId} not found`);
     }
+    if (!hasProjectAccess(user, task.projectId)) {
+      reply.code(403);
+      return fail("FORBIDDEN", `no access to task ${request.params.taskId}`);
+    }
+    const items = getTuneTaskLogs(request.params.taskId) ?? [];
     return { items, total: items.length };
   });
 
