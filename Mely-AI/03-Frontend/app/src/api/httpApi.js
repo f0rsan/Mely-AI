@@ -1,6 +1,8 @@
 const BASE_URL =
   import.meta.env.VITE_API_BASE_URL ||
-  `${window.location.protocol}//${window.location.hostname}:3000`;
+  (window.location.port === '5173'
+    ? `${window.location.protocol}//${window.location.hostname}:3000`
+    : window.location.origin);
 const TOKEN_KEY = 'mely-ai-token';
 
 async function request(path, options = {}) {
@@ -32,6 +34,9 @@ export const authApi = {
     });
     localStorage.setItem(TOKEN_KEY, data.token);
     return data;
+  },
+  async me() {
+    return request('/auth/me');
   },
   async logout() {
     localStorage.removeItem(TOKEN_KEY);
@@ -86,7 +91,6 @@ export const sessionsApi = {
     throw new Error('Message API not implemented yet in backend');
   },
 };
-
 
 export const tuneApi = {
   async list(projectId) {

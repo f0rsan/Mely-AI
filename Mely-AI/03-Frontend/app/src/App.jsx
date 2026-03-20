@@ -62,11 +62,17 @@ export default function App() {
   async function boot() {
     try {
       setStatus('loading projects...');
-      const p = await projectsApi.list();
+      const [me, p] = await Promise.all([authApi.me(), projectsApi.list()]);
+      setUser(me);
       setProjects(p);
       setProjectId(p[0]?.id || '');
       setStatus('ready');
     } catch (e) {
+      if ((e.message || '').toLowerCase().includes('unauthorized')) {
+        await authApi.logout();
+        setToken(null);
+        setUser(null);
+      }
       setStatus(e.message || 'boot failed');
     }
   }
