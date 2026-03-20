@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import cors from "@fastify/cors";
 import {
   createSession,
   createSessionExport,
@@ -64,6 +65,12 @@ function hasProjectAccess(user: DemoUser, projectId: string) {
 
 export function buildApp() {
   const app = Fastify({ logger: true });
+
+  void app.register(cors, {
+    origin: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["content-type", "authorization"],
+  });
 
   app.get("/health", async () => {
     return { status: "ok", service: "mely-ai-backend", timestamp: new Date().toISOString() };
