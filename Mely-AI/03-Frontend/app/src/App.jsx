@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { authApi, projectsApi, modelsApi, sessionsApi, tuneApi } from './api/httpApi';
 
 const NAV_ITEMS = [
-  ['home', 'Product Showcase'],
-  ['models', 'Model Layer'],
-  ['chat', 'Studio Session'],
-  ['tune', 'Tune Engine'],
-  ['market', 'Asset Market'],
+  ['home', 'Home'],
+  ['models', 'Models'],
+  ['chat', 'Chat'],
+  ['tune', 'Tune'],
+  ['generate', 'Generate'],
+  ['market', 'Market'],
   ['library', 'Library'],
-  ['settings', 'Trust & Billing'],
+  ['settings', 'Settings'],
 ];
 
 export default function App() {
@@ -32,6 +33,12 @@ export default function App() {
   const [tuneTaskName, setTuneTaskName] = useState('');
   const [tuneLogsByTask, setTuneLogsByTask] = useState({});
 
+  const currentProject = useMemo(() => projects.find((p) => p.id === projectId), [projects, projectId]);
+  const currentModel = useMemo(() => models.find((m) => m.id === modelId), [models, modelId]);
+  const currentSession = useMemo(() => sessions.find((s) => s.id === sessionId), [sessions, sessionId]);
+  const currentExports = exportsBySession[sessionId] || [];
+  const currentTuneLogs = tuneLogsByTask[tuneTaskId] || [];
+
   useEffect(() => {
     if (!token) return;
     boot();
@@ -52,17 +59,12 @@ export default function App() {
     loadTuneLogs(tuneTaskId);
   }, [tuneTaskId, token]);
 
-  const currentSession = useMemo(() => sessions.find((s) => s.id === sessionId), [sessions, sessionId]);
-  const currentExports = exportsBySession[sessionId] || [];
-  const currentTuneLogs = tuneLogsByTask[tuneTaskId] || [];
-
   async function boot() {
     try {
       setStatus('loading projects...');
       const p = await projectsApi.list();
       setProjects(p);
-      const first = p[0]?.id || '';
-      setProjectId(first);
+      setProjectId(p[0]?.id || '');
       setStatus('ready');
     } catch (e) {
       setStatus(e.message || 'boot failed');
@@ -74,11 +76,11 @@ export default function App() {
       setStatus('loading models/sessions...');
       const [m, s, t] = await Promise.all([modelsApi.listByProject(pid), sessionsApi.list(pid), tuneApi.list(pid)]);
       setModels(m);
-      setModelId(m[0]?.id || '');
+      setModelId((prev) => (m.some((x) => x.id === prev) ? prev : m[0]?.id || ''));
       setSessions(s);
-      setSessionId(s[0]?.id || '');
+      setSessionId((prev) => (s.some((x) => x.id === prev) ? prev : s[0]?.id || ''));
       setTuneTasks(t);
-      setTuneTaskId(t[0]?.id || '');
+      setTuneTaskId((prev) => (t.some((x) => x.id === prev) ? prev : t[0]?.id || ''));
       setStatus('ready');
     } catch (e) {
       setStatus(e.message || 'load failed');
@@ -94,42 +96,64 @@ export default function App() {
       setUser(res.user);
       setStatus('ready');
     } catch (e2) {
-      setStatus(e2.message);
+      setStatus(e2.message || 'login failed');
     }
   }
 
   async function handleCreateSession() {
     if (!projectId) return;
-    const created = await sessionsApi.create({ projectId, title: `Session ${sessions.length + 1}` });
-    const next = [created, ...sessions];
-    setSessions(next);
-    setSessionId(created.id);
+    try {
+      const created = await sessionsApi.create({ projectId, title: `Session ${sessions.length + 1}` });
+      const next = [created, ...sessions];
+      setSessions(next);
+      setSessionId(created.id);
+      setStatus('session created');
+    } catch (e) {
+      setStatus(e.message || 'create session failed');
+    }
   }
 
   async function loadExports(targetSessionId) {
-    const items = await sessionsApi.listExports(targetSessionId);
-    setExportsBySession((prev) => ({ ...prev, [targetSessionId]: items }));
+    try {
+      const items = await sessionsApi.listExports(targetSessionId);
+      setExportsBySession((prev) => ({ ...prev, [targetSessionId]: items }));
+    } catch (e) {
+      setStatus(e.message || 'load exports failed');
+    }
   }
 
   async function handleCreateExport() {
     if (!sessionId) return;
-    await sessionsApi.createExport({ sessionId, format: exportFormat });
-    await loadExports(sessionId);
-    setStatus('export created');
+    try {
+      await sessionsApi.createExport({ sessionId, format: exportFormat });
+      await loadExports(sessionId);
+      setStatus('export created');
+    } catch (e) {
+      setStatus(e.message || 'export failed');
+    }
   }
 
   async function handleCreateTuneTask() {
     if (!projectId || !modelId) return;
-    const item = await tuneApi.create({ projectId, modelId, name: tuneTaskName || undefined });
-    setTuneTaskName('');
-    const refreshed = await tuneApi.list(projectId);
-    setTuneTasks(refreshed);
-    setTuneTaskId(item.id);
+    try {
+      const item = await tuneApi.create({ projectId, modelId, name: tuneTaskName || undefined });
+      setTuneTaskName('');
+      const refreshed = await tuneApi.list(projectId);
+      setTuneTasks(refreshed);
+      setTuneTaskId(item.id);
+      setStatus('tune task created');
+    } catch (e) {
+      setStatus(e.message || 'create tune task failed');
+    }
   }
 
   async function loadTuneLogs(taskId) {
-    const items = await tuneApi.logs(taskId);
-    setTuneLogsByTask((prev) => ({ ...prev, [taskId]: items }));
+    try {
+      const items = await tuneApi.logs(taskId);
+      setTuneLogsByTask((prev) => ({ ...prev, [taskId]: items }));
+    } catch (e) {
+      setStatus(e.message || 'load tune logs failed');
+    }
   }
 
   async function handleLogout() {
@@ -138,12 +162,153 @@ export default function App() {
     setUser(null);
   }
 
+  function shell(title, subtitle, children) {
+    return (
+      <section className="page">
+        <header className="page-head">
+          <h3>{title}</h3>
+          <p>{subtitle}</p>
+        </header>
+        <div className="page-body">{children}</div>
+      </section>
+    );
+  }
+
+  function renderPage() {
+    if (page === 'home') {
+      return shell('Workspace Overview', 'Current project footprint and training workload', <>
+        <div className="grid two">
+          <article className="tile accent">
+            <span>Project</span>
+            <strong>{currentProject?.name || 'No project'}</strong>
+            <small>{currentProject?.id || '—'}</small>
+          </article>
+          <article className="tile">
+            <span>Model</span>
+            <strong>{currentModel?.label || 'No model selected'}</strong>
+            <small>{currentModel?.id || '—'}</small>
+          </article>
+        </div>
+        <div className="grid three">
+          <article className="tile"><span>Sessions</span><strong>{sessions.length}</strong></article>
+          <article className="tile"><span>Exports</span><strong>{Object.values(exportsBySession).flat().length}</strong></article>
+          <article className="tile"><span>Tune Tasks</span><strong>{tuneTasks.length}</strong></article>
+        </div>
+      </>);
+    }
+
+    if (page === 'models') {
+      return shell('Model Layer', 'Connect project with available foundation models', <>
+        <label className="control">Project
+          <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+            {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </label>
+        <label className="control">Model
+          <select value={modelId} onChange={(e) => setModelId(e.target.value)}>
+            {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+        </label>
+        <ul className="list">{models.map((m) => <li key={m.id} className={m.id === modelId ? 'chip active' : 'chip'}>{m.label}</li>)}</ul>
+      </>);
+    }
+
+    if (page === 'chat') {
+      return shell('Session Studio', 'Session creation and export pipeline', <>
+        <div className="row">
+          <button onClick={handleCreateSession}>New Session</button>
+          <select value={exportFormat} onChange={(e) => setExportFormat(e.target.value)}>
+            <option value="jsonl">jsonl</option>
+            <option value="csv">csv</option>
+            <option value="txt">txt</option>
+          </select>
+          <button onClick={handleCreateExport} disabled={!sessionId}>Create Export</button>
+        </div>
+        <div className="grid two">
+          <article>
+            <h4>Sessions</h4>
+            <ul className="list">
+              {sessions.map((s) => (
+                <li key={s.id}>
+                  <button className={s.id === sessionId ? 'chip active' : 'chip'} onClick={() => setSessionId(s.id)}>{s.title}</button>
+                </li>
+              ))}
+            </ul>
+          </article>
+          <article>
+            <h4>Exports · {currentSession?.title || 'No session'}</h4>
+            <ul className="list">
+              {currentExports.map((item) => <li key={item.id}><a href={item.fileUri} target="_blank" rel="noreferrer">{item.format} artifact</a></li>)}
+              {!currentExports.length && <li className="muted">No exports yet</li>}
+            </ul>
+          </article>
+        </div>
+      </>);
+    }
+
+    if (page === 'tune') {
+      return shell('Tune Engine', 'Trigger and inspect fine-tune tasks', <>
+        <div className="row">
+          <input placeholder="Task name (optional)" value={tuneTaskName} onChange={(e) => setTuneTaskName(e.target.value)} />
+          <button onClick={handleCreateTuneTask} disabled={!projectId || !modelId}>Create Task</button>
+        </div>
+        <label className="control">Tune Task
+          <select value={tuneTaskId} onChange={(e) => setTuneTaskId(e.target.value)}>
+            <option value="">Select task</option>
+            {tuneTasks.map((t) => <option key={t.id} value={t.id}>{t.id} · {t.status}</option>)}
+          </select>
+        </label>
+        <ul className="list">
+          {currentTuneLogs.map((log) => <li key={`${log.index}-${log.at}`}>#{log.index} {log.message}</li>)}
+          {tuneTaskId && currentTuneLogs.length === 0 && <li className="muted">No logs yet</li>}
+        </ul>
+      </>);
+    }
+
+    if (page === 'generate') {
+      return shell('Generate (Placeholder)', 'UI scaffold ready; backend API integration pending', <>
+        <article className="tile placeholder">
+          <strong>Coming soon: creative generation workspace</strong>
+          <p>Planned integration: prompt input, style packs, batch render queue, and history stream.</p>
+          <small>No backend endpoint connected in current milestone.</small>
+        </article>
+      </>);
+    }
+
+    if (page === 'market') {
+      return shell('Market (Placeholder)', 'Style-consistent placeholder without backend dependency', <>
+        <article className="tile placeholder">
+          <strong>Asset marketplace will land in a later phase.</strong>
+          <p>Reserved for template packs, LoRA bundles, and community presets.</p>
+          <small>No server API bound for market in this build.</small>
+        </article>
+      </>);
+    }
+
+    if (page === 'library') {
+      return shell('Library', 'Local records from sessions, exports, and tune pipeline', <>
+        <div className="grid three">
+          <article className="tile"><span>Recent Session</span><strong>{currentSession?.title || '—'}</strong></article>
+          <article className="tile"><span>Latest Export</span><strong>{currentExports[0]?.format || '—'}</strong></article>
+          <article className="tile"><span>Active Tune Task</span><strong>{tuneTasks.find((t) => t.id === tuneTaskId)?.status || '—'}</strong></article>
+        </div>
+      </>);
+    }
+
+    return shell('Settings', 'Workspace controls and account profile', <>
+      <div className="grid two">
+        <article className="tile"><span>User</span><strong>{user?.name || 'Demo User'}</strong><small>{user?.email || email}</small></article>
+        <article className="tile"><span>Token Status</span><strong>{token ? 'Authenticated' : 'Logged out'}</strong></article>
+      </div>
+    </>);
+  }
+
   if (!token) {
     return (
       <main className="login-wrap">
         <form className="login-card" onSubmit={handleLogin}>
-          <h1>Desktop AI Studio</h1>
-          <p>Mely AI · Local-first creator client</p>
+          <h1>Mely AI Frontend</h1>
+          <p>Sign in to continue with the project workspace.</p>
           <label>Email<input value={email} onChange={(e) => setEmail(e.target.value)} /></label>
           <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
           <button type="submit">Login</button>
@@ -156,8 +321,8 @@ export default function App() {
   return (
     <main className="studio">
       <aside className="sidebar">
-        <div className="brand">DESKTOP AI STUDIO</div>
-        <div className="stack">Model: {models.find((m) => m.id === modelId)?.label || 'N/A'}</div>
+        <div className="brand">MELY AI</div>
+        <div className="stack">Project: {currentProject?.name || '—'}</div>
         <nav>
           {NAV_ITEMS.map(([k, label]) => (
             <button key={k} className={page === k ? 'nav active' : 'nav'} onClick={() => setPage(k)}>{label}</button>
@@ -168,49 +333,13 @@ export default function App() {
       <section className="main">
         <header className="topbar">
           <div>
-            <div className="kicker">PRODUCT SURFACE</div>
+            <div className="kicker">MELY AI · PRODUCT</div>
             <h2>{NAV_ITEMS.find(([k]) => k === page)?.[1]}</h2>
           </div>
-          <div className="userbox">{user?.name || 'Demo User'} <button onClick={handleLogout}>Logout</button></div>
+          <div className="userbox">{user?.name || 'Demo User'}<button onClick={handleLogout}>Logout</button></div>
         </header>
 
-        <section className="surface">
-          <div className="left panel-blue">
-            <h3>Project & Session</h3>
-            <label>Project<select value={projectId} onChange={(e) => setProjectId(e.target.value)}>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-            <label>Model<select value={modelId} onChange={(e) => setModelId(e.target.value)}>{models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}</select></label>
-            <button onClick={handleCreateSession}>New Session</button>
-            <ul className="list">{sessions.map((s) => <li key={s.id}><button className={s.id === sessionId ? 'chip active' : 'chip'} onClick={() => setSessionId(s.id)}>{s.title}</button></li>)}</ul>
-          </div>
-
-          <div className="center panel-dark">
-            <h3>{currentSession?.title || 'Session'}</h3>
-            <div className="row">
-              <select value={exportFormat} onChange={(e) => setExportFormat(e.target.value)}>
-                <option value="jsonl">jsonl</option><option value="csv">csv</option><option value="txt">txt</option>
-              </select>
-              <button onClick={handleCreateExport}>Create Export</button>
-            </div>
-            <ul className="list">
-              {currentExports.map((item) => <li key={item.id}><a href={item.fileUri} target="_blank" rel="noreferrer">{item.format} artifact</a></li>)}
-              {!currentExports.length && <li className="muted">No exports yet</li>}
-            </ul>
-          </div>
-
-          <div className="right panel-dark">
-            <h3>Tune Engine</h3>
-            <div className="row"><input placeholder="task name" value={tuneTaskName} onChange={(e) => setTuneTaskName(e.target.value)} /><button onClick={handleCreateTuneTask}>Create</button></div>
-            <select value={tuneTaskId} onChange={(e) => setTuneTaskId(e.target.value)}>
-              <option value="">Select task</option>
-              {tuneTasks.map((t) => <option key={t.id} value={t.id}>{t.id} · {t.status}</option>)}
-            </select>
-            <ul className="list">
-              {currentTuneLogs.map((log) => <li key={`${log.index}-${log.at}`}>#{log.index} {log.message}</li>)}
-              {tuneTaskId && currentTuneLogs.length === 0 && <li className="muted">No logs yet</li>}
-            </ul>
-          </div>
-        </section>
-
+        <section className="surface">{renderPage()}</section>
         <footer className="status">Status: {status}</footer>
       </section>
     </main>
