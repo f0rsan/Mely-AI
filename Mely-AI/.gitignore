@@ -1,0 +1,12 @@
+# Local runtime artifacts
+logs/*.log
+
+# Node installs and build outputs
+03-Frontend/app/node_modules/
+03-Frontend/app/dist/
+04-Backend/service/node_modules/
+04-Backend/service/dist/
+
+# SQLite runtime WAL/SHM
+04-Backend/service/data/*.sqlite-shm
+04-Backend/service/data/*.sqlite-wal
