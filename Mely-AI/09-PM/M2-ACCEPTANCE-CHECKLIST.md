@@ -30,3 +30,10 @@
 - 已完成：17
 - 待完成：0
 - **M2 完成度：100%**
+
+## 验收证据（2026-03-21）
+- 后端类型检查：`cd 04-Backend/service && npm run typecheck` ✅
+- 后端构建：`cd 04-Backend/service && npm run build` ✅
+- 前端构建：`cd 03-Frontend/app && npm run build` ✅
+- Phase-B 冒烟：`cd 09-PM && bash smoke-phase-b.sh http://127.0.0.1:3100` ✅（`SMOKE_OK`）
+- 备注：若直接打到本机已驻留的 `:3000` 旧进程，`[6/13] messages` 可能 404；需以当前分支后端进程重新启动后验收。
