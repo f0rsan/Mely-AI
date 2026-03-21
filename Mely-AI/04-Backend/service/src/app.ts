@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import {
   createSession,
   createSessionExport,
+  createSessionMessage,
   createTuneTask,
   getSessionById,
   getTuneTask,
@@ -10,6 +11,7 @@ import {
   listModels,
   listProjects,
   listSessionExports,
+  listSessionMessages,
   listSessions,
   listTuneTasks,
   modelExists,
@@ -183,6 +185,76 @@ export function buildApp() {
     reply.code(201);
     return newSession;
   });
+
+  app.get<{ Params: { sessionId: string }; Querystring: { page?: string; pageSize?: string } }>(
+    "/sessions/:sessionId/messages",
+    async (request, reply) => {
+      const user = getAuthedUser(request.headers.authorization);
+      if (!user) {
+        reply.code(401);
+        return fail("UNAUTHORIZED", "invalid or missing bearer token");
+      }
+      const { sessionId } = request.params;
+      const session = getSessionById(sessionId);
+      if (!session || !sessionExists(sessionId)) {
+        reply.code(404);
+        return fail("NOT_FOUND", `session ${sessionId} not found`);
+      }
+      if (!hasProjectAccess(user, session.projectId)) {
+        reply.code(403);
+        return fail("FORBIDDEN", `no access to session ${sessionId}`);
+      }
+
+      const page = request.query.page ? Number(request.query.page) : 1;
+      const pageSize = request.query.pageSize ? Number(request.query.pageSize) : 20;
+      if (!Number.isFinite(page) || !Number.isFinite(pageSize) || page < 1 || pageSize < 1) {
+        reply.code(400);
+        return fail("BAD_REQUEST", "page and pageSize must be positive numbers");
+      }
+
+      return listSessionMessages({ sessionId, page, pageSize });
+    }
+  );
+
+  app.post<{ Params: { sessionId: string }; Body: { role?: "user" | "assistant" | "system"; content?: string } }>(
+    "/sessions/:sessionId/messages",
+    async (request, reply) => {
+      const user = getAuthedUser(request.headers.authorization);
+      if (!user) {
+        reply.code(401);
+        return fail("UNAUTHORIZED", "invalid or missing bearer token");
+      }
+      const { sessionId } = request.params;
+      const session = getSessionById(sessionId);
+      if (!session || !sessionExists(sessionId)) {
+        reply.code(404);
+        return fail("NOT_FOUND", `session ${sessionId} not found`);
+      }
+      if (!hasProjectAccess(user, session.projectId)) {
+        reply.code(403);
+        return fail("FORBIDDEN", `no access to session ${sessionId}`);
+      }
+
+      const role = request.body?.role ?? "user";
+      const content = request.body?.content?.trim() ?? "";
+      if (!content) {
+        reply.code(400);
+        return fail("BAD_REQUEST", "content is required");
+      }
+      if (![
+        "user",
+        "assistant",
+        "system",
+      ].includes(role)) {
+        reply.code(400);
+        return fail("BAD_REQUEST", "role must be one of: user, assistant, system");
+      }
+
+      const item = createSessionMessage({ sessionId, role, content });
+      reply.code(201);
+      return item;
+    }
+  );
 
   app.get<{ Params: { sessionId: string } }>("/sessions/:sessionId/exports", async (request, reply) => {
     const user = getAuthedUser(request.headers.authorization);

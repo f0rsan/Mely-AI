@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
-import type { ModelInfo, Project, SessionExportInfo, SessionInfo, TuneTaskInfo } from "./types.js";
+import type { ModelInfo, Project, SessionExportInfo, SessionInfo, SessionMessageInfo, TuneTaskInfo } from "./types.js";
 
 const DATA_DIR = path.resolve(process.cwd(), "data");
 const EXPORT_DIR = path.join(DATA_DIR, "exports");
@@ -35,6 +35,15 @@ CREATE TABLE IF NOT EXISTS chat_session (
   title TEXT NOT NULL,
   status TEXT NOT NULL CHECK(status IN ('active','archived')),
   created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS session_message (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  role TEXT NOT NULL CHECK(role IN ('user','assistant','system')),
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(session_id) REFERENCES chat_session(id)
 );
 
 CREATE TABLE IF NOT EXISTS session_export (
@@ -88,6 +97,17 @@ function seedIfEmpty() {
     db.prepare(
       "INSERT INTO chat_session (id, project_id, title, status, created_at) VALUES (?, ?, ?, ?, ?)"
     ).run("sess_001", "proj_001", "Initial architecture discussion", "active", now);
+  }
+
+  const messageCount = Number((db.prepare("SELECT COUNT(*) as c FROM session_message").get() as { c?: number } | undefined)?.c ?? 0);
+  if (messageCount === 0) {
+    db.prepare("INSERT INTO session_message (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      "msg_001",
+      "sess_001",
+      "assistant",
+      "Welcome to Mely AI. Start by creating a project-specific session objective.",
+      now
+    );
   }
 }
 
@@ -194,6 +214,69 @@ export function createSession(input: { projectId: string; title?: string }): Ses
   return session;
 }
 
+export function listSessionMessages(input: { sessionId: string; page?: number; pageSize?: number }): {
+  items: SessionMessageInfo[];
+  total: number;
+  page: number;
+  pageSize: number;
+} {
+  const page = Math.max(1, Math.floor(input.page ?? 1));
+  const pageSize = Math.min(100, Math.max(1, Math.floor(input.pageSize ?? 20)));
+  const offset = (page - 1) * pageSize;
+
+  const total = Number(
+    (db.prepare("SELECT COUNT(*) as c FROM session_message WHERE session_id = ?").get(input.sessionId) as { c?: number } | undefined)?.c ?? 0
+  );
+
+  const rows = db
+    .prepare(
+      "SELECT id, session_id, role, content, created_at FROM session_message WHERE session_id = ? ORDER BY created_at ASC LIMIT ? OFFSET ?"
+    )
+    .all(input.sessionId, pageSize, offset) as Array<{
+    id: string;
+    session_id: string;
+    role: "user" | "assistant" | "system";
+    content: string;
+    created_at: string;
+  }>;
+
+  return {
+    items: rows.map((row) => ({
+      id: row.id,
+      sessionId: row.session_id,
+      role: row.role,
+      content: row.content,
+      createdAt: row.created_at,
+    })),
+    total,
+    page,
+    pageSize,
+  };
+}
+
+export function createSessionMessage(input: { sessionId: string; role: "user" | "assistant" | "system"; content: string }): SessionMessageInfo {
+  const createdAt = new Date().toISOString();
+  const row = db.prepare("SELECT COUNT(*) as c FROM session_message").get() as { c: number | bigint };
+  const next = Number(row.c) + 1;
+  const item: SessionMessageInfo = {
+    id: `msg_${String(next).padStart(3, "0")}`,
+    sessionId: input.sessionId,
+    role: input.role,
+    content: input.content,
+    createdAt,
+  };
+
+  db.prepare("INSERT INTO session_message (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)").run(
+    item.id,
+    item.sessionId,
+    item.role,
+    item.content,
+    item.createdAt
+  );
+
+  return item;
+}
+
 export function listSessionExports(sessionId: string): SessionExportInfo[] {
   const rows = db
     .prepare(
@@ -288,6 +371,46 @@ export function createSessionExport(input: { sessionId: string; format: "jsonl" 
   };
 }
 
+function evolveTuneTask(row: {
+  id: string;
+  project_id: string;
+  model_id: string;
+  name: string;
+  status: "queued" | "running" | "succeeded" | "failed";
+  logs: string;
+  created_at: string;
+  updated_at: string;
+}) {
+  const now = new Date();
+  const created = new Date(row.created_at).getTime();
+  const ageMs = now.getTime() - created;
+
+  let nextStatus = row.status;
+  if (ageMs > 15_000) nextStatus = "succeeded";
+  else if (ageMs > 4_000) nextStatus = "running";
+
+  let logs = JSON.parse(row.logs || "[]") as string[];
+  if (nextStatus !== row.status) {
+    if (nextStatus === "running") logs = [...logs, "task running"];
+    if (nextStatus === "succeeded") logs = [...logs, "task succeeded"];
+    const nextUpdatedAt = now.toISOString();
+    db.prepare("UPDATE tune_task SET status = ?, logs = ?, updated_at = ? WHERE id = ?").run(
+      nextStatus,
+      JSON.stringify(logs),
+      nextUpdatedAt,
+      row.id
+    );
+    return {
+      ...row,
+      status: nextStatus,
+      logs: JSON.stringify(logs),
+      updated_at: nextUpdatedAt,
+    };
+  }
+
+  return row;
+}
+
 export function listTuneTasks(projectId?: string): TuneTaskInfo[] {
   const rows = (projectId
     ? db
@@ -308,16 +431,19 @@ export function listTuneTasks(projectId?: string): TuneTaskInfo[] {
     updated_at: string;
   }>;
 
-  return rows.map((row) => ({
-    id: row.id,
-    projectId: row.project_id,
-    modelId: row.model_id,
-    name: row.name,
-    status: row.status,
-    logs: JSON.parse(row.logs || "[]") as string[],
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  }));
+  return rows.map((raw) => {
+    const row = evolveTuneTask(raw);
+    return {
+      id: row.id,
+      projectId: row.project_id,
+      modelId: row.model_id,
+      name: row.name,
+      status: row.status,
+      logs: JSON.parse(row.logs || "[]") as string[],
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  });
 }
 
 export function getTuneTask(taskId: string): TuneTaskInfo | undefined {
@@ -337,15 +463,16 @@ export function getTuneTask(taskId: string): TuneTaskInfo | undefined {
     | undefined;
 
   if (!row) return undefined;
+  const next = evolveTuneTask(row);
   return {
-    id: row.id,
-    projectId: row.project_id,
-    modelId: row.model_id,
-    name: row.name,
-    status: row.status,
-    logs: JSON.parse(row.logs || "[]") as string[],
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    id: next.id,
+    projectId: next.project_id,
+    modelId: next.model_id,
+    name: next.name,
+    status: next.status,
+    logs: JSON.parse(next.logs || "[]") as string[],
+    createdAt: next.created_at,
+    updatedAt: next.updated_at,
   };
 }
 

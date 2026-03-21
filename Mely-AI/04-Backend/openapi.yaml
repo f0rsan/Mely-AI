@@ -171,6 +171,97 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /sessions/{sessionId}/messages:
+    get:
+      tags: [Session]
+      summary: List messages in a session (paginated)
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - in: query
+          name: pageSize
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Session messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionMessageListResponse'
+        '400':
+          description: Invalid pagination
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [Session]
+      summary: Create a message in a session
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionMessageRequest'
+      responses:
+        '201':
+          description: Message created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionMessage'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /sessions/{sessionId}/exports:
     get:
       tags: [Session]
@@ -329,6 +420,36 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /tune/tasks/{taskId}/logs:
+    get:
+      tags: [Tune]
+      summary: Get tune task logs
+      parameters:
+        - in: path
+          name: taskId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tune task log entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuneTaskLogListResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: task not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -424,6 +545,32 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    SessionMessage:
+      type: object
+      required: [id, sessionId, role, content, createdAt]
+      properties:
+        id: { type: string }
+        sessionId: { type: string }
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content: { type: string }
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateSessionMessageRequest:
+      type: object
+      required: [content]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant, system]
+          default: user
+        content:
+          type: string
+          minLength: 1
 
     CreateSessionExportRequest:
       type: object
@@ -526,6 +673,17 @@ components:
           items: { $ref: '#/components/schemas/SessionExport' }
         total: { type: integer, minimum: 0 }
 
+    SessionMessageListResponse:
+      type: object
+      required: [items, total, page, pageSize]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/SessionMessage' }
+        total: { type: integer, minimum: 0 }
+        page: { type: integer, minimum: 1 }
+        pageSize: { type: integer, minimum: 1 }
+
     TuneTaskListResponse:
       type: object
       required: [items, total]
@@ -533,4 +691,23 @@ components:
         items:
           type: array
           items: { $ref: '#/components/schemas/TuneTask' }
+        total: { type: integer, minimum: 0 }
+
+    TuneTaskLog:
+      type: object
+      required: [index, message, at]
+      properties:
+        index: { type: integer, minimum: 1 }
+        message: { type: string }
+        at:
+          type: string
+          format: date-time
+
+    TuneTaskLogListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TuneTaskLog' }
         total: { type: integer, minimum: 0 }

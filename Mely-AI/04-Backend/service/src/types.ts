@@ -29,6 +29,14 @@ export type SessionExportInfo = {
   createdAt: string;
 };
 
+export type SessionMessageInfo = {
+  id: string;
+  sessionId: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  createdAt: string;
+};
+
 export type TuneTaskInfo = {
   id: string;
   projectId: string;
