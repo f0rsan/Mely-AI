@@ -28,6 +28,10 @@ export default function App() {
   const [sessionId, setSessionId] = useState('');
   const [exportFormat, setExportFormat] = useState('jsonl');
   const [exportsBySession, setExportsBySession] = useState({});
+  const [messagesBySession, setMessagesBySession] = useState({});
+  const [chatInput, setChatInput] = useState('');
+  const [chatSending, setChatSending] = useState(false);
+  const [chatError, setChatError] = useState('');
   const [tuneTasks, setTuneTasks] = useState([]);
   const [tuneTaskId, setTuneTaskId] = useState('');
   const [tuneTaskName, setTuneTaskName] = useState('');
@@ -37,6 +41,8 @@ export default function App() {
   const currentModel = useMemo(() => models.find((m) => m.id === modelId), [models, modelId]);
   const currentSession = useMemo(() => sessions.find((s) => s.id === sessionId), [sessions, sessionId]);
   const currentExports = exportsBySession[sessionId] || [];
+  const currentMessages = messagesBySession[sessionId] || [];
+  const currentTuneTask = tuneTasks.find((t) => t.id === tuneTaskId);
   const currentTuneLogs = tuneLogsByTask[tuneTaskId] || [];
 
   useEffect(() => {
@@ -52,11 +58,22 @@ export default function App() {
   useEffect(() => {
     if (!sessionId || !token) return;
     loadExports(sessionId);
+    loadMessages(sessionId);
+    setChatError('');
   }, [sessionId, token]);
 
   useEffect(() => {
     if (!tuneTaskId || !token) return;
     loadTuneLogs(tuneTaskId);
+    const timer = setInterval(async () => {
+      try {
+        const item = await tuneApi.get(tuneTaskId);
+        setTuneTasks((prev) => prev.map((t) => (t.id === item.id ? item : t)));
+      } catch {
+        // noop in poll loop
+      }
+    }, 3000);
+    return () => clearInterval(timer);
   }, [tuneTaskId, token]);
 
   async function boot() {
@@ -125,6 +142,32 @@ export default function App() {
       setExportsBySession((prev) => ({ ...prev, [targetSessionId]: items }));
     } catch (e) {
       setStatus(e.message || 'load exports failed');
+    }
+  }
+
+  async function loadMessages(targetSessionId) {
+    try {
+      const data = await sessionsApi.listMessages(targetSessionId, { page: 1, pageSize: 50 });
+      setMessagesBySession((prev) => ({ ...prev, [targetSessionId]: data.items || [] }));
+    } catch (e) {
+      setStatus(e.message || 'load messages failed');
+    }
+  }
+
+  async function handleSendMessage() {
+    if (!sessionId || !chatInput.trim() || chatSending) return;
+    try {
+      setChatSending(true);
+      setChatError('');
+      await sessionsApi.sendMessage({ sessionId, role: 'user', content: chatInput.trim() });
+      setChatInput('');
+      await loadMessages(sessionId);
+      setStatus('message sent');
+    } catch (e) {
+      setChatError(e.message || 'send failed');
+      setStatus(e.message || 'send failed');
+    } finally {
+      setChatSending(false);
     }
   }
 
@@ -220,7 +263,7 @@ export default function App() {
     }
 
     if (page === 'chat') {
-      return shell('Session Studio', 'Session creation and export pipeline', <>
+      return shell('Session Studio', 'Session creation / messages / export pipeline', <>
         <div className="row">
           <button onClick={handleCreateSession}>New Session</button>
           <select value={exportFormat} onChange={(e) => setExportFormat(e.target.value)}>
@@ -242,13 +285,32 @@ export default function App() {
             </ul>
           </article>
           <article>
-            <h4>Exports · {currentSession?.title || 'No session'}</h4>
+            <h4>Messages · {currentSession?.title || 'No session'}</h4>
             <ul className="list">
-              {currentExports.map((item) => <li key={item.id}><a href={item.fileUri} target="_blank" rel="noreferrer">{item.format} artifact</a></li>)}
-              {!currentExports.length && <li className="muted">No exports yet</li>}
+              {currentMessages.map((item) => <li key={item.id}><strong>{item.role}:</strong> {item.content}</li>)}
+              {!currentMessages.length && <li className="muted">No messages yet</li>}
             </ul>
+            <div className="row">
+              <input
+                placeholder="Type a message..."
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                disabled={!sessionId || chatSending}
+              />
+              <button onClick={handleSendMessage} disabled={!sessionId || chatSending || !chatInput.trim()}>
+                {chatSending ? 'Sending...' : 'Send'}
+              </button>
+            </div>
+            {chatError && <p className="muted">Send failed: {chatError}</p>}
           </article>
         </div>
+        <article>
+          <h4>Exports · {currentSession?.title || 'No session'}</h4>
+          <ul className="list">
+            {currentExports.map((item) => <li key={item.id}><a href={item.fileUri} target="_blank" rel="noreferrer">{item.format} artifact</a></li>)}
+            {!currentExports.length && <li className="muted">No exports yet</li>}
+          </ul>
+        </article>
       </>);
     }
 
@@ -264,6 +326,18 @@ export default function App() {
             {tuneTasks.map((t) => <option key={t.id} value={t.id}>{t.id} · {t.status}</option>)}
           </select>
         </label>
+        <div className="grid two">
+          <article className="tile">
+            <span>Current Status</span>
+            <strong>{currentTuneTask?.status || '—'}</strong>
+            <small>{currentTuneTask?.id || 'Select task to inspect status'}</small>
+          </article>
+          <article className="tile">
+            <span>Model</span>
+            <strong>{currentTuneTask?.modelId || '—'}</strong>
+            <small>{currentTuneTask?.updatedAt || '—'}</small>
+          </article>
+        </div>
         <ul className="list">
           {currentTuneLogs.map((log) => <li key={`${log.index}-${log.at}`}>#{log.index} {log.message}</li>)}
           {tuneTaskId && currentTuneLogs.length === 0 && <li className="muted">No logs yet</li>}

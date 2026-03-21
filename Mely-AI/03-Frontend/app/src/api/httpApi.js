@@ -69,7 +69,7 @@ export const sessionsApi = {
   async list(projectId) {
     const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
     const data = await request(`/sessions${qs}`);
-    return (data.items || []).map((s) => ({ ...s, messages: [] }));
+    return data.items || [];
   },
   async create({ projectId, title }) {
     return request('/sessions', {
@@ -87,8 +87,17 @@ export const sessionsApi = {
       body: JSON.stringify({ format }),
     });
   },
-  async sendMessage() {
-    throw new Error('Message API not implemented yet in backend');
+  async listMessages(sessionId, { page = 1, pageSize = 20 } = {}) {
+    const data = await request(
+      `/sessions/${encodeURIComponent(sessionId)}/messages?page=${encodeURIComponent(page)}&pageSize=${encodeURIComponent(pageSize)}`,
+    );
+    return data;
+  },
+  async sendMessage({ sessionId, role = 'user', content }) {
+    return request(`/sessions/${encodeURIComponent(sessionId)}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ role, content }),
+    });
   },
 };
 
