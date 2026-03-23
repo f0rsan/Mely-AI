@@ -47,11 +47,21 @@ SERVER_PID=$!
 sleep 1
 if ! kill -0 "$SERVER_PID" 2>/dev/null; then
   echo "[ERROR] backend failed to start. check logs/m3-gate-backend.log"
+  if [[ -f "$ROOT_DIR/logs/m3-gate-backend.log" ]]; then
+    echo "[ERROR] backend log tail:"
+    tail -n 80 "$ROOT_DIR/logs/m3-gate-backend.log" || true
+  fi
   exit 1
 fi
 
 echo "[M3-GATE] waiting for health"
-wait_for_health
+if ! wait_for_health; then
+  if [[ -f "$ROOT_DIR/logs/m3-gate-backend.log" ]]; then
+    echo "[ERROR] backend log tail:"
+    tail -n 80 "$ROOT_DIR/logs/m3-gate-backend.log" || true
+  fi
+  exit 1
+fi
 
 echo "[M3-GATE] running smoke regression"
 bash "$ROOT_DIR/09-PM/smoke-phase-b.sh" "$BASE_URL"
