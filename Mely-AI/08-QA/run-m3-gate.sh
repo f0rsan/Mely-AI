@@ -7,6 +7,7 @@ PORT="${PORT:-3301}"
 BASE_URL="${BASE_URL:-http://127.0.0.1:${PORT}}"
 
 SERVER_PID=""
+mkdir -p "$ROOT_DIR/logs"
 
 cleanup() {
   if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
