@@ -16,15 +16,18 @@
 ## C. 发布门禁
 - [x] 前端 build 可通过（CI）
 - [x] 后端 build 可通过（gate 脚本）
-- [ ] CI 首轮稳定性观察（连续 3 次）
-  - 阻塞说明：当前仓库未绑定 GitHub 远端，暂无法触发并沉淀 run 链接
+- [x] CI 首轮稳定性观察（连续 3 次）
+  - 证据：
+    - https://github.com/f0rsan/Mely-AI/actions/runs/23419798046
+    - https://github.com/f0rsan/Mely-AI/actions/runs/23419800614
+    - https://github.com/f0rsan/Mely-AI/actions/runs/23419801413
 
 ## D. 文档与可追溯性
 - [x] M3 启动方案落盘：`09-PM/M3-KICKOFF-PLAN-v2.md`
 - [x] 验收清单更新（本文件）
-- [x] QA 报告补充首轮稳定性证据（本地 3 连日志链接，CI 链接待远端补齐）
+- [x] QA 报告补充首轮稳定性证据（本地日志 + CI run 链接）
 
 ## 当前通过率
-- 已完成：11
-- 待完成：1
-- **M3 当前完成度：92%**
+- 已完成：12
+- 待完成：0
+- **M3 当前完成度：100%**
