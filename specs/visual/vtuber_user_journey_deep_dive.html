@@ -1,0 +1,334 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font-sans,sans-serif);background:transparent;color:var(--color-text-primary);font-size:13px}
+.wrap{padding:8px 0 24px}
+
+.persona{display:flex;gap:12px;align-items:flex-start;margin-bottom:20px;padding:14px;border-radius:12px;border:0.5px solid var(--color-border-tertiary);background:var(--color-background-secondary)}
+.avatar{width:44px;height:44px;border-radius:50%;background:#EEEDFE;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500;color:#3C3489;flex-shrink:0}
+.persona-info p{margin:0;line-height:1.5}
+.persona-name{font-size:14px;font-weight:500}
+.persona-desc{font-size:12px;color:var(--color-text-secondary);margin-top:2px}
+
+.phase-nav{display:flex;gap:0;margin-bottom:16px;border-radius:10px;overflow:hidden;border:0.5px solid var(--color-border-tertiary)}
+.pnav{flex:1;padding:8px 4px;text-align:center;font-size:11px;cursor:pointer;background:var(--color-background-secondary);color:var(--color-text-secondary);border:none;transition:background .15s;line-height:1.3;border-right:0.5px solid var(--color-border-tertiary)}
+.pnav:last-child{border-right:none}
+.pnav.active{background:#534AB7;color:#EEEDFE}
+.pnav:hover:not(.active){background:var(--color-background-tertiary)}
+.phase-label{font-weight:500;display:block}
+.phase-sub{font-size:10px;opacity:.7}
+
+.journey-panel{display:none}
+.journey-panel.active{display:block}
+
+.steps-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.step-card{padding:12px;border-radius:10px;border:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary);cursor:pointer;transition:border-color .15s}
+.step-card:hover{border-color:var(--color-border-secondary)}
+.step-num{font-size:10px;font-weight:500;opacity:.5;margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em}
+.step-title{font-size:13px;font-weight:500;margin-bottom:4px}
+.step-desc{font-size:12px;color:var(--color-text-secondary);line-height:1.5}
+
+.pain-row{display:flex;gap:8px;align-items:flex-start;padding:10px 12px;border-radius:8px;margin-bottom:6px}
+.pain-row.high{background:#FAECE7;border:0.5px solid #F0997B}
+.pain-row.mid{background:#FAEEDA;border:0.5px solid #EF9F27}
+.pain-row.low{background:#E1F5EE;border:0.5px solid #5DCAA5}
+@media(prefers-color-scheme:dark){
+  .pain-row.high{background:#4A1B0C;border-color:#993C1D}
+  .pain-row.mid{background:#412402;border-color:#854F0B}
+  .pain-row.low{background:#04342C;border-color:#0F6E56}
+}
+.pain-level{font-size:10px;font-weight:500;white-space:nowrap;min-width:36px}
+.pain-high{color:#993C1D}
+.pain-mid{color:#854F0B}
+.pain-low{color:#0F6E56}
+@media(prefers-color-scheme:dark){
+  .pain-high{color:#F0997B}
+  .pain-mid{color:#EF9F27}
+  .pain-low{color:#5DCAA5}
+}
+.pain-text{font-size:12px;line-height:1.5}
+
+.opp-box{padding:12px;border-radius:10px;border:0.5px solid var(--color-border-info);background:var(--color-background-info);margin-top:12px}
+.opp-label{font-size:10px;font-weight:500;color:var(--color-text-info);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+.opp-items{display:flex;flex-direction:column;gap:5px}
+.opp-item{font-size:12px;color:var(--color-text-primary);line-height:1.5;padding-left:12px;position:relative}
+.opp-item::before{content:'';position:absolute;left:0;top:7px;width:5px;height:5px;border-radius:50%;background:var(--color-text-info)}
+
+.section-label{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-secondary);margin:14px 0 8px}
+
+.emotion-bar{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.emotion-stage{font-size:11px;color:var(--color-text-secondary);width:80px;flex-shrink:0}
+.emotion-track{flex:1;height:6px;border-radius:3px;background:var(--color-background-tertiary);position:relative;overflow:visible}
+.emotion-fill{height:6px;border-radius:3px;transition:width .3s}
+.emotion-val{font-size:10px;color:var(--color-text-secondary);width:24px;text-align:right}
+
+.tool-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.chip{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:500;background:var(--color-background-tertiary);border:0.5px solid var(--color-border-secondary);color:var(--color-text-secondary)}
+.chip.problem{background:#FAECE7;color:#993C1D;border-color:#F0997B}
+@media(prefers-color-scheme:dark){
+  .chip.problem{background:#4A1B0C;color:#F0997B;border-color:#993C1D}
+}
+</style>
+
+<div class="wrap">
+
+<div class="persona">
+  <div class="avatar">小A</div>
+  <div class="persona-info">
+    <p class="persona-name">独立 Vtuber 创作者「小A」</p>
+    <p class="persona-desc">25岁，有全职工作，业余做 Vtuber。已有 1200 粉丝，目标月收入覆盖创作成本。有基础审美，无编程/3D建模能力。GPU: RTX 3070。</p>
+  </div>
+</div>
+
+<div class="phase-nav" id="pnav">
+  <button class="pnav active" onclick="showPhase(0)"><span class="phase-label">创建角色</span><span class="phase-sub">从零到形象</span></button>
+  <button class="pnav" onclick="showPhase(1)"><span class="phase-label">内容生产</span><span class="phase-sub">日常素材制作</span></button>
+  <button class="pnav" onclick="showPhase(2)"><span class="phase-label">角色进化</span><span class="phase-sub">换装/新表情</span></button>
+  <button class="pnav" onclick="showPhase(3)"><span class="phase-label">IP变现</span><span class="phase-sub">周边/授权</span></button>
+  <button class="pnav" onclick="showPhase(4)"><span class="phase-label">资产保护</span><span class="phase-sub">版权/防盗</span></button>
+</div>
+
+<div id="phase-0" class="journey-panel active">
+  <div class="section-label">用户行为步骤</div>
+  <div class="steps-grid">
+    <div class="step-card">
+      <div class="step-num">步骤 01</div>
+      <div class="step-title">角色概念设计</div>
+      <div class="step-desc">手绘草稿或用 Midjourney 出参考图，确定角色的发色、服装、性格</div>
+    </div>
+    <div class="step-card">
+      <div class="step-num">步骤 02</div>
+      <div class="step-title">委托 / 自制立绘</div>
+      <div class="step-desc">在 Fiverr、VGen 找画师委托，或用 SD 生成立绘。费用 $200–$1500</div>
+    </div>
+    <div class="step-card">
+      <div class="step-num">步骤 03</div>
+      <div class="step-title">Live2D 绑骨 / Rigging</div>
+      <div class="step-desc">另找 Rigger 制作动态模型，或自己用 Live2D Cubism 学习 Rigging</div>
+    </div>
+    <div class="step-card">
+      <div class="step-num">步骤 04</div>
+      <div class="step-title">导入直播软件</div>
+      <div class="step-desc">将模型导入 VTube Studio，连接摄像头面捕，配合 OBS 开播</div>
+    </div>
+  </div>
+  <div class="section-label">情绪曲线</div>
+  <div class="emotion-bar"><span class="emotion-stage">概念期</span><div class="emotion-track"><div class="emotion-fill" style="width:85%;background:#1D9E75"></div></div><span class="emotion-val">高</span></div>
+  <div class="emotion-bar"><span class="emotion-stage">找画师</span><div class="emotion-track"><div class="emotion-fill" style="width:55%;background:#BA7517"></div></div><span class="emotion-val">中</span></div>
+  <div class="emotion-bar"><span class="emotion-stage">等稿件</span><div class="emotion-track"><div class="emotion-fill" style="width:28%;background:#E24B4A"></div></div><span class="emotion-val">焦</span></div>
+  <div class="emotion-bar"><span class="emotion-stage">Rigging</span><div class="emotion-track"><div class="emotion-fill" style="width:18%;background:#E24B4A"></div></div><span class="emotion-val">崩</span></div>
+  <div class="emotion-bar"><span class="emotion-stage">首播</span><div class="emotion-track"><div class="emotion-fill" style="width:90%;background:#1D9E75"></div></div><span class="emotion-val">峰</span></div>
+  <div class="section-label">痛点</div>
+  <div class="pain-row high"><span class="pain-level pain-high">极高</span><span class="pain-text">立绘和 Rigging 是两次独立委托，两个风格/价格/交付周期，极难保持视觉统一性</span></div>
+  <div class="pain-row high"><span class="pain-level pain-high">极高</span><span class="pain-text">委托周期 2–8 周，期间无法开播，初始投入 $500–$3000，回本压力大</span></div>
+  <div class="pain-row mid"><span class="pain-level pain-mid">中等</span><span class="pain-text">用 SD 生成立绘后，角色在不同光影/角度下一致性差，"同一角色"感弱</span></div>
+  <div class="pain-row mid"><span class="pain-level pain-mid">中等</span><span class="pain-text">没有一个地方统一管理"角色设定文件"——发色、瞳色、服装细节靠记忆</span></div>
+  <div class="opp-box">
+    <div class="opp-label">Mely 的机会点</div>
+    <div class="opp-items">
+      <div class="opp-item">一键从参考图训练「角色 LoRA」，锁定外貌一致性，替代昂贵的手工立绘</div>
+      <div class="opp-item">角色卡片：统一存储设定（外貌参数 + LoRA + 触发词 + 参考图谱）</div>
+      <div class="opp-item">从角色 LoRA 直接生成多角度参考图，辅助委托画师时精确传达需求</div>
+    </div>
+  </div>
+  <div class="section-label">现用工具链</div>
+  <div class="tool-chips">
+    <span class="chip">Midjourney / SD</span><span class="chip">Fiverr / VGen</span><span class="chip">Live2D Cubism</span><span class="chip">VTube Studio</span><span class="chip problem">无角色档案工具</span><span class="chip problem">无一致性管理</span>
+  </div>
+</div>
+
+<div id="phase-1" class="journey-panel">
+  <div class="section-label">用户行为步骤</div>
+  <div class="steps-grid">
+    <div class="step-card">
+      <div class="step-num">步骤 01</div>
+      <div class="step-title">制作封面缩略图</div>
+      <div class="step-desc">每次直播/视频需要独立的封面图，要求角色风格统一、有特定表情和场景</div>
+    </div>
+    <div class="step-card">
+      <div class="step-num">步骤 02</div>
+      <div class="step-title">制作表情包/贴纸</div>
+      <div class="step-desc">订阅者频道专属表情，通常需要 6–12 个，表情要与角色立绘完全一致</div>
+    </div>
+    <div class="step-card">
+      <div class="step-num">步骤 03</div>
+      <div class="step-title">社交媒体素材</div>
+      <div class="step-desc">Twitter/小红书每周需要 3–5 张角色互动图，来维持粉丝粘性和频道曝光</div>
+    </div>
+    <div class="step-card">
+      <div class="step-num">步骤 04</div>
+      <div class="step-title">活动特定素材</div>
+      <div class="step-desc">节日换装、粉丝生日贺图、联名活动——每次都需要角色的特定姿势和服装</div>
+    </div>
+  </div>
+  <div class="section-label">情绪曲线</div>
+  <div class="emotion-bar"><span class="emotion-stage">计划选题</span><div class="emotion-track"><div class="emotion-fill" style="width:70%;background:#1D9E75"></div></div><span class="emotion-val">好</span></div>
+  <div class="emotion-bar"><span class="emotion-stage">生成封面</span><div class="emotion-track"><div class="emotion-fill" style="width:25%;background:#E24B4A"></div></div><span class="emotion-val">痛</span></div>
+  <div class="emotion-bar"><span class="emotion-stage">反复调参</span><div class="emotion-track"><div class="emotion-fill" style="width:20%;background:#E24B4A"></div></div><span class="emotion-val">崩</span></div>
+  <div class="emotion-bar"><span class="emotion-stage">最终成图</span><div class="emotion-track"><div class="emotion-fill" style="width:60%;background:#BA7517"></div></div><span class="emotion-val">凑</span></div>
+  <div class="section-label">痛点</div>
+  <div class="pain-row high"><span class="pain-level pain-high">极高</span><span class="pain-text">「角色一致性」是最大痛点：每次生成封面，角色的发色/瞳色/服装都容易漂移，粉丝一眼能看出不是同一个人</span></div>
+  <div class="pain-row high"><span class="pain-level pain-high">极高</span><span class="pain-text">生产效率极低：一张合格封面需要反复生成 20–50 张，每次直播准备需要 2–4 小时仅在素材上</span></div>
+  <div class="pain-row mid"><span class="pain-level pain-mid">中等</span><span class="pain-text">Prompt 管理混乱：靠记忆或 txt 文件存储「有效 Prompt」，切换内容主题时每次重新调</span></div>
+  <div class="pain-row mid"><span class="pain-level pain-mid">中等</span><span class="pain-text">表情包要求「和立绘一致」但无法从现有工具中直接调用立绘的精确特征</span></div>
+  <div class="opp-box">
+    <div class="opp-label">Mely 的机会点</div>
+    <div class="opp-items">
+      <div class="opp-item">「角色场景模板」：绑定 LoRA + 场景 Prompt，一键生成指定场景下的角色图，保持一致性</div>
+      <div class="opp-item">批量生成模式：设定好角色参数后，输入 10 个主题关键词，自动批量输出封面候选</div>
+      <div class="opp-item">素材历史库：所有生成图按角色 + 用途归档，找「上次那张效果好的封面」不再靠翻文件夹</div>
+    </div>
+  </div>
+  <div class="section-label">现用工具链</div>
+  <div class="tool-chips">
+    <span class="chip">ComfyUI / A1111</span><span class="chip">Photoshop</span><span class="chip">Canva</span><span class="chip problem">无角色锁定机制</span><span class="chip problem">无批量素材流水线</span><span class="chip problem">txt 文件管 Prompt</span>
+  </div>
+</div>
+
+<div id="phase-2" class="journey-panel">
+  <div class="section-label">用户行为步骤</div>
+  <div class="steps-grid">
+    <div class="step-card">
+      <div class="step-num">步骤 01</div>
+      <div class="step-title">策划新造型</div>
+      <div class="step-desc">节日版、游戏联名、粉丝投票新发色——每次角色进化都是一次重大内容事件</div>
+    </div>
+    <div class="step-card">
+      <div class="step-num">步骤 02</div>
+      <div class="step-title">委托新立绘/更新 Live2D</div>
+      <div class="step-desc">找原画师重新画新服装，再找 Rigger 更新 Live2D 模型，费用再叠加一轮</div>
+    </div>
+    <div class="step-card">
+      <div class="step-num">步骤 03</div>
+      <div class="step-title">宣传预热</div>
+      <div class="step-desc">发预告图、倒计时，用 AI 生成「换装前后」对比图来炒话题</div>
+    </div>
+    <div class="step-card">
+      <div class="step-num">步骤 04</div>
+      <div class="step-title">新造型首亮</div>
+      <div class="step-desc">直播首次使用新 Live2D 模型，同步更新头像、封面、社媒所有素材</div>
+    </div>
+  </div>
+  <div class="section-label">情绪曲线</div>
+  <div class="emotion-bar"><span class="emotion-stage">策划新装</span><div class="emotion-track"><div class="emotion-fill" style="width:88%;background:#1D9E75"></div></div><span class="emotion-val">兴奋</span></div>
+  <div class="emotion-bar"><span class="emotion-stage">再次委托</span><div class="emotion-track"><div class="emotion-fill" style="width:35%;background:#E24B4A"></div></div><span class="emotion-val">贵</span></div>
+  <div class="emotion-bar"><span class="emotion-stage">等待制作</span><div class="emotion-track"><div class="emotion-fill" style="width:22%;background:#E24B4A"></div></div><span class="emotion-val">漫长</span></div>
+  <div class="emotion-bar"><span class="emotion-stage">新装亮相</span><div class="emotion-track"><div class="emotion-fill" style="width:95%;background:#1D9E75"></div></div><span class="emotion-val">高峰</span></div>
+  <div class="section-label">痛点</div>
+  <div class="pain-row high"><span class="pain-level pain-high">极高</span><span class="pain-text">每次换装 = 重新走委托流程，费用 $300–$800，周期 3–6 周，Vtuber 的「迭代速度」被迫极慢</span></div>
+  <div class="pain-row high"><span class="pain-level pain-high">极高</span><span class="pain-text">新服装必须与原角色面部高度一致，但「同一张脸」在两次委托中几乎不可能完全统一</span></div>
+  <div class="pain-row mid"><span class="pain-level pain-mid">中等</span><span class="pain-text">预热宣传图需要「新旧造型对比」，但旧的生成参数已丢失，无法复原旧造型来做对比</span></div>
+  <div class="opp-box">
+    <div class="opp-label">Mely 的机会点</div>
+    <div class="opp-items">
+      <div class="opp-item">「造型分支」：基于同一角色 LoRA，新建服装/发色变体，保持面部基因不变，3 分钟出预览图</div>
+      <div class="opp-item">角色版本历史：存储每一版造型的生成参数，随时能复原任意历史造型做对比内容</div>
+      <div class="opp-item">换装预告包：一键生成「旧装 vs 新装」对比图组，直接用于社媒预热</div>
+    </div>
+  </div>
+  <div class="section-label">现用工具链</div>
+  <div class="tool-chips">
+    <span class="chip">VGen 委托平台</span><span class="chip">Fiverr</span><span class="chip problem">无造型版本管理</span><span class="chip problem">无低成本快速迭代方案</span>
+  </div>
+</div>
+
+<div id="phase-3" class="journey-panel">
+  <div class="section-label">用户行为步骤</div>
+  <div class="steps-grid">
+    <div class="step-card">
+      <div class="step-num">步骤 01</div>
+      <div class="step-title">设计周边商品</div>
+      <div class="step-desc">亚克力立牌、抱枕、贴纸包——需要角色在多种尺寸/背景下保持清晰可辨</div>
+    </div>
+    <div class="step-card">
+      <div class="step-num">步骤 02</div>
+      <div class="step-title">准备商用素材</div>
+      <div class="step-desc">周边工厂需要高分辨率无背景的角色立绘，格式、规格各不相同</div>
+    </div>
+    <div class="step-card">
+      <div class="step-num">步骤 03</div>
+      <div class="step-title">对接同人二创</div>
+      <div class="step-desc">粉丝/其他创作者想画同人，需要提供「角色设定书」供参考</div>
+    </div>
+    <div class="step-card">
+      <div class="step-num">步骤 04</div>
+      <div class="step-title">接受品牌合作</div>
+      <div class="step-desc">品牌方需要角色出现在联名物料中，要求提供可自由商用的角色素材包</div>
+    </div>
+  </div>
+  <div class="section-label">痛点</div>
+  <div class="pain-row high"><span class="pain-level pain-high">极高</span><span class="pain-text">没有标准化的「角色设定书」输出能力——给粉丝/合作方的参考材料全靠手动整理截图</span></div>
+  <div class="pain-row high"><span class="pain-level pain-high">极高</span><span class="pain-text">AI 生成图的商用版权不明确：用 SD 生成的角色图，在授权周边时存在法律灰区</span></div>
+  <div class="pain-row mid"><span class="pain-level pain-mid">中等</span><span class="pain-text">周边物料需要角色的多视角图（正面/侧面/背面），AI 生成在角度一致性上仍有明显差距</span></div>
+  <div class="opp-box">
+    <div class="opp-label">Mely 的机会点</div>
+    <div class="opp-items">
+      <div class="opp-item">一键导出「角色设定书」PDF：外貌参数 + 参考图谱 + 使用授权说明，直接分发给合作方</div>
+      <div class="opp-item">周边素材包生成：批量生成正面/3/4 侧/背面标准视角图，满足工厂印刷规格</div>
+      <div class="opp-item">商用 LoRA 证明：生成过程的元数据存档，可作为"自有训练数据"的凭证辅助版权说明</div>
+    </div>
+  </div>
+  <div class="section-label">现用工具链</div>
+  <div class="tool-chips">
+    <span class="chip">Booth 周边商城</span><span class="chip">印刷平台</span><span class="chip problem">无设定书生成工具</span><span class="chip problem">无多视角一致性方案</span><span class="chip problem">商用版权灰区</span>
+  </div>
+</div>
+
+<div id="phase-4" class="journey-panel">
+  <div class="section-label">用户行为步骤</div>
+  <div class="steps-grid">
+    <div class="step-card">
+      <div class="step-num">步骤 01</div>
+      <div class="step-title">发现角色被盗用</div>
+      <div class="step-desc">有人用类似角色形象开播或售卖周边，视觉高度相似但无法证明侵权</div>
+    </div>
+    <div class="step-card">
+      <div class="step-num">步骤 02</div>
+      <div class="step-title">角色 LoRA 泄露</div>
+      <div class="step-desc">自己训练的角色 LoRA 出现在 Civitai 等平台，被陌生人免费下载使用</div>
+    </div>
+    <div class="step-card">
+      <div class="step-num">步骤 03</div>
+      <div class="step-title">试图维权</div>
+      <div class="step-desc">向平台投诉，但无法提供「创作时间戳」等证明自己是原始创作者</div>
+    </div>
+    <div class="step-card">
+      <div class="step-num">步骤 04</div>
+      <div class="step-title">放弃或接受损失</div>
+      <div class="step-desc">多数创作者因维权成本过高而放弃，只能在社媒公开声明来维护声誉</div>
+    </div>
+  </div>
+  <div class="section-label">情绪曲线</div>
+  <div class="emotion-bar"><span class="emotion-stage">发现盗用</span><div class="emotion-track"><div class="emotion-fill" style="width:5%;background:#E24B4A"></div></div><span class="emotion-val">崩溃</span></div>
+  <div class="emotion-bar"><span class="emotion-stage">尝试维权</span><div class="emotion-track"><div class="emotion-fill" style="width:15%;background:#E24B4A"></div></div><span class="emotion-val">无力</span></div>
+  <div class="emotion-bar"><span class="emotion-stage">放弃维权</span><div class="emotion-track"><div class="emotion-fill" style="width:10%;background:#E24B4A"></div></div><span class="emotion-val">绝望</span></div>
+  <div class="section-label">痛点</div>
+  <div class="pain-row high"><span class="pain-level pain-high">极高</span><span class="pain-text">私人 LoRA 无任何保护机制：一旦模型文件流出，任何人都可以生成与你角色高度相似的内容</span></div>
+  <div class="pain-row high"><span class="pain-level pain-high">极高</span><span class="pain-text">缺乏创作时间戳：AI 生成图无法证明「我先于对方创造了这个角色」，维权无从下手</span></div>
+  <div class="pain-row mid"><span class="pain-level pain-mid">中等</span><span class="pain-text">角色视觉设定散落在多个工具中（SD、Photoshop、委托文件夹），无法形成完整的「创作档案」</span></div>
+  <div class="opp-box">
+    <div class="opp-label">Mely 的机会点</div>
+    <div class="opp-items">
+      <div class="opp-item">本地 LoRA 加密存储：模型文件加密，绑定设备，防止意外上传或文件泄露</div>
+      <div class="opp-item">创作时间戳：每次训练/生成自动记录哈希值 + 时间，生成可导出的「创作证明文件」</div>
+      <div class="opp-item">角色 DNA 档案：将外貌参数、训练数据快照、历史生成图归档为不可篡改的本地记录</div>
+    </div>
+  </div>
+  <div class="section-label">现用工具链</div>
+  <div class="tool-chips">
+    <span class="chip problem">无任何 LoRA 保护机制</span><span class="chip problem">无创作时间戳工具</span><span class="chip problem">完全依赖社媒发布时间证明</span>
+  </div>
+</div>
+
+</div>
+
+<script>
+function showPhase(idx) {
+  document.querySelectorAll('.journey-panel').forEach((p,i)=>{
+    p.classList.toggle('active', i===idx);
+  });
+  document.querySelectorAll('.pnav').forEach((b,i)=>{
+    b.classList.toggle('active', i===idx);
+  });
+}
+</script>
