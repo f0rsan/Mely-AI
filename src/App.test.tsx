@@ -91,3 +91,24 @@ test("shows a dedicated Chinese state when local bootstrap fails", async () => {
   expect(screen.getByText("/tmp/.mely-test/db/mely.db")).toBeInTheDocument();
   expect(screen.getByText("请检查数据目录权限后重试")).toBeInTheDocument();
 });
+
+test("shows a generic Chinese error when the backend returns a non-bootstrap failure", async () => {
+  fetchMock.mockResolvedValueOnce({
+    ok: false,
+    json: async () =>
+      buildHealthResponse({
+        status: "error",
+        database: {
+          path: "/tmp/.mely-test/db/mely.db",
+          initialized: false,
+          appliedMigrations: [],
+          error: "service_unavailable",
+        },
+        error: "service_unavailable",
+      }),
+  });
+
+  render(<App />);
+
+  await screen.findByText("后端状态异常，请重试");
+});

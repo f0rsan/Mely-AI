@@ -14,6 +14,12 @@ export type HealthResponse = {
   error?: string | null;
 };
 
+const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
+
+function resolveHealthUrl(): string {
+  return `${DEFAULT_API_BASE_URL}/api/health`;
+}
+
 function isHealthResponse(value: unknown): value is HealthResponse {
   if (typeof value !== "object" || value === null) {
     return false;
@@ -31,7 +37,7 @@ function isHealthResponse(value: unknown): value is HealthResponse {
 export async function fetchHealth(signal?: AbortSignal): Promise<HealthResponse> {
   let response: Response;
   try {
-    response = await fetch("/api/health", { signal });
+    response = await fetch(resolveHealthUrl(), { signal });
   } catch {
     throw new Error("BACKEND_UNAVAILABLE");
   }
