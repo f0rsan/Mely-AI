@@ -1,0 +1,2 @@
+"""Mely AI backend package."""
+

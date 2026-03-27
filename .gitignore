@@ -10,6 +10,9 @@ backend/.pytest_cache/
 backend/.mypy_cache/
 backend/.coverage
 backend/.venv/
+backend/__pycache__/
+backend/**/*.pyc
+backend/*.egg-info/
 
 .DS_Store
 .idea/
