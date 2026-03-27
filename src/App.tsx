@@ -1,171 +1,288 @@
-import { useCallback, useEffect, useState } from "react";
-import { fetchHealth, type HealthResponse } from "./api/health";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+import { fetchCharacterList, type CharacterListItem } from "./api/characters";
+import {
+  createMockTask,
+  createTaskStream,
+  type TaskConnectionState,
+  type TaskSnapshot,
+} from "./api/tasks";
+import { TaskProgressList } from "./components/TaskProgressList";
 
 type ViewState =
   | { kind: "loading" }
-  | { kind: "ready"; data: HealthResponse }
-  | { kind: "backendUnavailable" }
-  | { kind: "bootstrapFailed"; data: HealthResponse }
-  | { kind: "serviceError" };
+  | { kind: "error" }
+  | { kind: "ready"; items: CharacterListItem[] };
 
-function StatusGrid({
-  statusLabel,
-  statusTone,
-  data,
-  detailLabel,
-  detailValue,
-  migrationFallback,
+function formatCreatedAt(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "创建时间未知";
+  }
+
+  return parsed.toLocaleDateString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+}
+
+function upsertTask(tasks: TaskSnapshot[], nextTask: TaskSnapshot): TaskSnapshot[] {
+  const exists = tasks.some((task) => task.id === nextTask.id);
+  const merged = exists
+    ? tasks.map((task) => (task.id === nextTask.id ? nextTask : task))
+    : [nextTask, ...tasks];
+
+  return [...merged].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+function resolveConnectionLabel(state: TaskConnectionState): string {
+  if (state === "connected") {
+    return "实时推送已连接";
+  }
+  if (state === "connecting") {
+    return "实时推送连接中";
+  }
+  return "实时推送未连接";
+}
+
+function CharacterGrid({
+  items,
+  onOpenDetail,
+  onCreate,
 }: {
-  statusLabel: string;
-  statusTone: "success" | "error";
-  data: HealthResponse;
-  detailLabel: string;
-  detailValue: string;
-  migrationFallback: string;
+  items: CharacterListItem[];
+  onOpenDetail: (character: CharacterListItem) => void;
+  onCreate: () => void;
 }) {
-  const migrations =
-    data.database.appliedMigrations?.length && data.database.appliedMigrations.length > 0
-      ? data.database.appliedMigrations.join("、")
-      : migrationFallback;
-
   return (
-    <div className="status-grid" role="status" aria-live="polite">
-      <div className="status-tile">
-        <p className="label">状态</p>
-        <p className={`value ${statusTone}`}>{statusLabel}</p>
-      </div>
-      <div className="status-tile">
-        <p className="label">数据目录</p>
-        <p className="value">{data.dataRoot ?? "未创建"}</p>
-      </div>
-      <div className="status-tile">
-        <p className="label">数据库</p>
-        <p className="value">{data.database.path ?? "未创建"}</p>
-      </div>
-      <div className="status-tile">
-        <p className="label">{detailLabel}</p>
-        <p className="value">{detailValue}</p>
-      </div>
-      <div className="status-tile">
-        <p className="label">迁移</p>
-        <p className="value">{migrations}</p>
-      </div>
+    <div className="character-grid">
+      {items.map((character) => (
+        <button
+          key={character.id}
+          className="character-card"
+          type="button"
+          onClick={() => onOpenDetail(character)}
+          aria-label={`打开角色 ${character.name}`}
+        >
+          <p className="character-name">{character.name}</p>
+          <p className="character-meta">ID: {character.id}</p>
+          <p className="character-meta">创建于 {formatCreatedAt(character.createdAt)}</p>
+          <p className="character-link">进入角色详情空壳</p>
+        </button>
+      ))}
+      <button
+        className="create-entry-card"
+        type="button"
+        aria-label="创建新角色入口"
+        onClick={onCreate}
+      >
+        <span className="create-plus" aria-hidden="true">
+          +
+        </span>
+        <span className="create-title">创建新角色</span>
+        <span className="create-subtitle">上传参考图或文字描述</span>
+      </button>
     </div>
   );
 }
 
-function AppStatus({
-  state,
-  onRetry,
+function EmptyState({ onCreate }: { onCreate: () => void }) {
+  return (
+    <section className="empty-state" aria-live="polite">
+      <div className="empty-icon" aria-hidden="true">
+        ✨
+      </div>
+      <h2>还没有角色</h2>
+      <p>创建你的第一个角色，后续就能在同一角色档案下持续创作。</p>
+      <button className="primary-button" type="button" onClick={onCreate}>
+        创建你的第一个角色
+      </button>
+    </section>
+  );
+}
+
+function TaskPanel({
+  canRunMockTask,
+  creatingMode,
+  taskActionError,
+  taskConnection,
+  tasks,
+  onStartMockTask,
 }: {
-  state: ViewState;
-  onRetry: () => void;
+  canRunMockTask: boolean;
+  creatingMode: "success" | "failure" | null;
+  taskActionError: string | null;
+  taskConnection: TaskConnectionState;
+  tasks: TaskSnapshot[];
+  onStartMockTask: (mode: "success" | "failure") => void;
 }) {
-  if (state.kind === "loading") {
-    return (
-      <div className="status-block" role="status" aria-live="polite">
-        <span className="status-chip">正在连接后端...</span>
-        <span className="status-hint">首次启动会检查本地数据目录和数据库。</span>
-      </div>
-    );
-  }
-
-  if (state.kind === "backendUnavailable") {
-    return (
-      <div className="status-block" role="status" aria-live="polite">
-        <span className="status-message">后端未启动，请重试</span>
-        <button className="retry-button" type="button" onClick={onRetry}>
-          重试连接
-        </button>
-      </div>
-    );
-  }
-
-  if (state.kind === "serviceError") {
-    return (
-      <div className="status-block" role="status" aria-live="polite">
-        <span className="status-message">后端状态异常，请重试</span>
-        <button className="retry-button" type="button" onClick={onRetry}>
-          重试连接
-        </button>
-      </div>
-    );
-  }
-
-  if (state.kind === "bootstrapFailed") {
-    return (
-      <>
-        <StatusGrid
-          statusLabel="本地初始化失败"
-          statusTone="error"
-          data={state.data}
-          detailLabel="建议"
-          detailValue="请检查数据目录权限后重试"
-          migrationFallback="未执行"
-        />
-        <div className="action-row">
-          <button className="retry-button" type="button" onClick={onRetry}>
-            重试连接
-          </button>
-        </div>
-      </>
-    );
-  }
+  const connectionLabel = useMemo(() => resolveConnectionLabel(taskConnection), [taskConnection]);
 
   return (
-    <StatusGrid
-      statusLabel="后端连接正常"
-      statusTone="success"
-      data={state.data}
-      detailLabel="服务"
-      detailValue="API 已就绪"
-      migrationFallback="已初始化"
-    />
+    <section className="task-panel" aria-labelledby="task-title">
+      <div className="task-panel-top">
+        <h2 id="task-title">任务队列验证</h2>
+        <span className={`task-connection task-connection-${taskConnection}`}>{connectionLabel}</span>
+      </div>
+      <p className="task-lead">用于验证任务状态流转、进度推送和失败处理，后续下载器可直接复用。</p>
+      <div className="task-actions">
+        <button
+          className="primary-button"
+          type="button"
+          disabled={!canRunMockTask || creatingMode !== null}
+          onClick={() => onStartMockTask("success")}
+        >
+          启动成功模拟任务
+        </button>
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={!canRunMockTask || creatingMode !== null}
+          onClick={() => onStartMockTask("failure")}
+        >
+          启动失败模拟任务
+        </button>
+      </div>
+      {taskActionError ? <p className="task-action-error">{taskActionError}</p> : null}
+      <TaskProgressList tasks={tasks} />
+    </section>
   );
 }
 
 export default function App() {
-  const [state, setState] = useState<ViewState>({ kind: "loading" });
+  const [viewState, setViewState] = useState<ViewState>({ kind: "loading" });
+  const [selectedCharacter, setSelectedCharacter] = useState<CharacterListItem | null>(null);
+  const [createHint, setCreateHint] = useState("");
+  const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
+  const [taskConnection, setTaskConnection] = useState<TaskConnectionState>("disconnected");
+  const [taskActionError, setTaskActionError] = useState<string | null>(null);
+  const [creatingMode, setCreatingMode] = useState<"success" | "failure" | null>(null);
 
-  const load = useCallback(async () => {
-    setState({ kind: "loading" });
+  const canRunMockTask = viewState.kind === "ready";
+
+  const loadCharacters = useCallback(async () => {
+    setViewState({ kind: "loading" });
 
     try {
-      const data = await fetchHealth();
-      if (data.status === "ok") {
-        setState({ kind: "ready", data });
-        return;
-      }
+      const data = await fetchCharacterList();
+      setViewState({ kind: "ready", items: data.items });
+    } catch {
+      setViewState({ kind: "error" });
+    }
+  }, []);
 
-      if (data.error === "bootstrap_failed" || data.database.error === "bootstrap_failed") {
-        setState({ kind: "bootstrapFailed", data });
-        return;
-      }
+  const handleCreateEntry = useCallback(() => {
+    setCreateHint("创建角色流程将在后续模块接入。");
+  }, []);
 
-      setState({ kind: "serviceError" });
-    } catch (error) {
-      if (error instanceof Error && error.message === "BACKEND_UNAVAILABLE") {
-        setState({ kind: "backendUnavailable" });
-        return;
-      }
+  const startMockTask = useCallback(async (mode: "success" | "failure") => {
+    setTaskActionError(null);
+    setCreatingMode(mode);
 
-      setState({ kind: "serviceError" });
+    try {
+      const created = await createMockTask(mode);
+      setTasks((current) => upsertTask(current, created));
+    } catch {
+      setTaskActionError("模拟任务启动失败，请重试。");
+    } finally {
+      setCreatingMode(null);
     }
   }, []);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadCharacters();
+  }, [loadCharacters]);
+
+  useEffect(() => {
+    if (!canRunMockTask) {
+      setTaskConnection("disconnected");
+      return;
+    }
+
+    const disconnect = createTaskStream(
+      (event) => {
+        setTasks((current) => upsertTask(current, event.task));
+      },
+      setTaskConnection,
+    );
+
+    return () => {
+      disconnect();
+    };
+  }, [canRunMockTask]);
+
+  if (selectedCharacter) {
+    return (
+      <main className="app-shell">
+        <section className="library-card detail-shell" aria-labelledby="detail-title">
+          <button className="back-button" type="button" onClick={() => setSelectedCharacter(null)}>
+            返回角色库
+          </button>
+          <h1 id="detail-title">角色详情（空壳）</h1>
+          <p className="lead">
+            {selectedCharacter.name}
+            <span className="detail-note">（ID: {selectedCharacter.id}）</span>
+          </p>
+          <p className="detail-placeholder">这里先保留详情页入口，完整内容将在后续模块补齐。</p>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="app-shell">
-      <section className="status-card" aria-labelledby="app-title">
-        <p className="eyebrow">Mely AI</p>
-        <h1 id="app-title">角色工作台</h1>
-        <p className="lead">
-          本地优先的角色创作桌面应用。启动后先连接后端，再进入角色库。
-        </p>
-        <AppStatus state={state} onRetry={load} />
+      <section className="library-card" aria-labelledby="app-title">
+        <header className="library-header">
+          <div>
+            <p className="eyebrow">Mely AI</p>
+            <h1 id="app-title">角色库</h1>
+            <p className="lead">以角色为中心管理创作资产，保持跨场景一致性。</p>
+          </div>
+          <button className="primary-button" type="button" onClick={handleCreateEntry}>
+            创建角色
+          </button>
+        </header>
+
+        {createHint ? <p className="create-hint">{createHint}</p> : null}
+
+        {viewState.kind === "loading" ? (
+          <div className="status-block" role="status" aria-live="polite">
+            <span className="status-chip">正在加载角色库...</span>
+          </div>
+        ) : null}
+
+        {viewState.kind === "error" ? (
+          <div className="status-block" role="status" aria-live="polite">
+            <span className="status-message">角色列表加载失败，请重试</span>
+            <button className="secondary-button" type="button" onClick={loadCharacters}>
+              重试加载
+            </button>
+          </div>
+        ) : null}
+
+        {viewState.kind === "ready" && viewState.items.length === 0 ? (
+          <EmptyState onCreate={handleCreateEntry} />
+        ) : null}
+
+        {viewState.kind === "ready" && viewState.items.length > 0 ? (
+          <CharacterGrid
+            items={viewState.items}
+            onOpenDetail={setSelectedCharacter}
+            onCreate={handleCreateEntry}
+          />
+        ) : null}
+
+        {viewState.kind === "ready" ? (
+          <TaskPanel
+            canRunMockTask={canRunMockTask}
+            creatingMode={creatingMode}
+            taskActionError={taskActionError}
+            taskConnection={taskConnection}
+            tasks={tasks}
+            onStartMockTask={startMockTask}
+          />
+        ) : null}
       </section>
     </main>
   );

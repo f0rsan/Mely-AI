@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 
@@ -21,3 +22,26 @@ def ensure_data_directories(data_root: Path) -> dict[str, Path]:
         path.mkdir(parents=True, exist_ok=True)
 
     return directories
+
+
+def ensure_character_directories(data_root: Path, character_id: str) -> dict[str, Path]:
+    character_root = data_root / "characters" / character_id
+    directories = {
+        "root": character_root,
+        "lora": character_root / "lora",
+        "training_data": character_root / "training_data",
+        "voice": character_root / "voice",
+        "costumes": character_root / "costumes",
+        "generations": character_root / "generations",
+    }
+
+    for path in directories.values():
+        path.mkdir(parents=True, exist_ok=True)
+
+    return directories
+
+
+def remove_character_directory(data_root: Path, character_id: str) -> None:
+    character_root = data_root / "characters" / character_id
+    if character_root.exists():
+        shutil.rmtree(character_root)
