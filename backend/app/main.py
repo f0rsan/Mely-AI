@@ -1,11 +1,20 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.health import router as health_router
+from app.services.bootstrap import bootstrap_application
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.bootstrap = bootstrap_application()
+    yield
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Mely AI Backend")
+    app = FastAPI(title="Mely AI Backend", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://127.0.0.1:1420", "http://localhost:1420"],
@@ -18,4 +27,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-
