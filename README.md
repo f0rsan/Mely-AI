@@ -61,3 +61,90 @@
 | M3 声音绑定 | W11–12 | F5-TTS 集成，声纹绑定 |
 | M4 造型&导出 | W13–15 | 造型版本树，设定书 PDF |
 | M5 打包发布 | W16–18 | 安装引导，Windows 打包 |
+
+## 当前代码状态
+
+- 已完成 `M0-A` 最小骨架：Tauri 桌面壳、React 状态页、FastAPI 后端、SQLite 初始化、`/api/health`
+- 当前首页只负责验证“桌面壳 + 后端 + 数据库”是否连通，不包含角色库、任务队列和训练能力
+- 首次启动会自动创建本地数据目录并初始化数据库
+
+## 本地开发启动
+
+### 1. 环境准备
+
+- Node.js 20+
+- Python 3.12+
+- Rust stable（Tauri 开发需要 `cargo` / `rustc`）
+
+### 2. 安装依赖
+
+```bash
+npm install
+python -m pip install -e "backend[dev]"
+```
+
+### 3. 启动桌面开发环境
+
+```bash
+npm run tauri:dev
+```
+
+这个命令会一起拉起：
+
+- React 开发服务器：`http://127.0.0.1:1420`
+- FastAPI 后端：`http://127.0.0.1:8000`
+- Tauri 桌面窗口
+
+### 4. 首次启动结果
+
+首次启动后，本地会自动创建：
+
+```text
+~/.mely/
+├── db/mely.db
+├── characters/
+├── models/
+└── temp/
+```
+
+首页会显示：
+
+- 后端连接状态
+- 本地数据目录
+- SQLite 数据库路径
+- 数据库初始化状态
+
+## 开发验证
+
+前端测试：
+
+```bash
+npm run test:run
+```
+
+后端测试：
+
+```bash
+python -m pytest backend/tests -q
+```
+
+前端构建检查：
+
+```bash
+npm run build
+```
+
+## 常见环境问题
+
+如果 `cargo` 不在 PATH 中，先确认 Rust 已安装并把下面两个目录加入 PATH：
+
+```bash
+/opt/homebrew/opt/rustup/bin
+$HOME/.cargo/bin
+```
+
+如果本机代理会拦截 Rust 依赖下载，启动前先临时取消代理环境变量：
+
+```bash
+env -u ALL_PROXY -u HTTPS_PROXY -u HTTP_PROXY npm run tauri:dev
+```
