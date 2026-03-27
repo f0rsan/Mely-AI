@@ -1,0 +1,12 @@
+{
+  "models": [
+    {
+      "id": "flux-schnell",
+      "name": "FLUX Schnell 基础模型",
+      "url": "https://example.com/models/flux-schnell.safetensors",
+      "size": 0,
+      "sha256": "",
+      "relativePath": "checkpoints/flux-schnell.safetensors"
+    }
+  ]
+}

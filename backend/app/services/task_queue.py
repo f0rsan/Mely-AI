@@ -62,26 +62,49 @@ class TaskQueue:
         await self._worker
         self._worker = None
 
-    async def submit(self, name: str, runner: TaskRunner) -> TaskSnapshot:
+    async def submit(
+        self,
+        name: str,
+        runner: TaskRunner,
+        *,
+        task_id: str | None = None,
+        initial_progress: int = 0,
+        initial_message: str | None = "任务已进入队列",
+    ) -> TaskSnapshot:
         if self._worker is None:
             raise RuntimeError("task_queue_not_started")
 
-        task_id = uuid4().hex
-        snapshot = TaskSnapshot(
-            id=task_id,
-            name=name,
-            status="pending",
-            progress=0,
-            message="任务已进入队列",
-            error=None,
-        )
+        resolved_task_id = task_id or uuid4().hex
+        normalized_progress = min(max(initial_progress, 0), 100)
 
         async with self._state_lock:
-            self._tasks[task_id] = snapshot
-            self._runners[task_id] = runner
+            existing = self._tasks.get(resolved_task_id)
+            if existing is not None and existing.status in {"pending", "running"}:
+                raise RuntimeError("task_already_running")
+
+            if existing is None:
+                snapshot = TaskSnapshot(
+                    id=resolved_task_id,
+                    name=name,
+                    status="pending",
+                    progress=normalized_progress,
+                    message=initial_message,
+                    error=None,
+                )
+                self._tasks[resolved_task_id] = snapshot
+            else:
+                existing.name = name
+                existing.status = "pending"
+                existing.progress = normalized_progress
+                existing.message = initial_message
+                existing.error = None
+                existing.updated_at = utc_now_iso()
+                snapshot = existing
+
+            self._runners[resolved_task_id] = runner
 
         await self._publish(snapshot)
-        await self._queue.put(task_id)
+        await self._queue.put(resolved_task_id)
         return snapshot
 
     def get(self, task_id: str) -> TaskSnapshot | None:

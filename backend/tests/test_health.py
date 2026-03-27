@@ -20,7 +20,10 @@ def test_health_endpoint_returns_bootstrap_details(temp_data_root) -> None:
     assert body["dataRoot"] == str(temp_data_root)
     assert body["database"]["initialized"] is True
     assert body["database"]["path"] == str(temp_data_root / "db" / "mely.db")
-    assert body["database"]["appliedMigrations"] == ["0001_initial_schema.sql"]
+    assert body["database"]["appliedMigrations"] == [
+        "0001_initial_schema.sql",
+        "0002_download_tasks.sql",
+    ]
     assert body["database"]["error"] is None
 
 

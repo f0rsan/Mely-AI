@@ -16,6 +16,7 @@ EXPECTED_TABLES = {
     "costume_previews",
     "generations",
     "generation_tags",
+    "download_tasks",
 }
 
 

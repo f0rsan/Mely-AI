@@ -9,6 +9,7 @@ class Settings(BaseSettings):
 
     app_env: str = Field(default="development")
     data_dir: Path | None = Field(default=None)
+    model_registry_path: Path | None = Field(default=None)
 
 
 def get_settings() -> Settings:
