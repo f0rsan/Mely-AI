@@ -40,7 +40,8 @@ def read_health(request: Request):
     }
 
     if bootstrap.status != "ok":
-        body["error"] = bootstrap.error or "bootstrap_failed"
+        body["error"] = "bootstrap_failed"
+        body["database"]["error"] = "bootstrap_failed"
         return JSONResponse(status_code=503, content=body)
 
     return body
