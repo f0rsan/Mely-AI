@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev:web": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "dev:backend": "cd backend && python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload",
+    "dev:stack": "concurrently -k -s first -n web,api \"npm run dev:web\" \"npm run dev:backend\"",
     "build": "tsc && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 1420 --strictPort",
     "test": "vitest",

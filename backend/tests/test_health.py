@@ -40,16 +40,16 @@ def test_health_returns_503_without_bootstrap_state() -> None:
 
 def test_health_sanitizes_bootstrap_error_text() -> None:
     app = create_app()
-    app.state.bootstrap = SimpleNamespace(
-        status="error",
-        data_root=Path("/tmp/mely-test"),
-        db_path=Path("/tmp/mely-test/db/mely.db"),
-        initialized=False,
-        applied_migrations=[],
-        error="sqlite open failed: permission denied",
-    )
 
     with TestClient(app) as client:
+        client.app.state.bootstrap = SimpleNamespace(
+            status="error",
+            data_root=Path("/tmp/mely-test"),
+            db_path=Path("/tmp/mely-test/db/mely.db"),
+            initialized=False,
+            applied_migrations=[],
+            error="sqlite open failed: permission denied",
+        )
         response = client.get("/api/health")
 
     assert response.status_code == 503
