@@ -121,6 +121,31 @@ test("opens the detail shell when clicking a character card and allows returning
           fingerprint: "fp-001",
         },
       ]),
+  }).mockResolvedValueOnce({
+    ok: true,
+    json: async () => ({
+      characterId: "char-1",
+      characterName: "星野ミカ",
+      canGenerate: true,
+      blockingReason: null,
+      selectedCostumeId: "costume-1",
+      costumes: [{ id: "costume-1", name: "基础造型", costumePrompt: "", isDefault: true }],
+      promptSources: {
+        dnaPrompt: "pink hair, violet eyes, anime girl",
+        triggerWord: "hoshino_mika",
+        costumePrompt: "",
+      },
+      parameterDefaults: {
+        width: 1024,
+        height: 1024,
+        steps: 28,
+        sampler: "DPM++ 2M Karras",
+        cfgScale: 3.5,
+        seed: null,
+        loraWeight: 0.85,
+      },
+      tagOptions: ["封面图", "表情包", "周边", "预告图"],
+    }),
   });
 
   render(<App />);

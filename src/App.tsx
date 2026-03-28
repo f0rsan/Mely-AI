@@ -7,6 +7,7 @@ import {
   type TaskConnectionState,
   type TaskSnapshot,
 } from "./api/tasks";
+import { GenerationContractPanel } from "./components/GenerationContractPanel";
 import { TaskProgressList } from "./components/TaskProgressList";
 
 type ViewState =
@@ -224,7 +225,13 @@ export default function App() {
             {selectedCharacter.name}
             <span className="detail-note">（ID: {selectedCharacter.id}）</span>
           </p>
-          <p className="detail-placeholder">这里先保留详情页入口，完整内容将在后续模块补齐。</p>
+          <p className="detail-placeholder">
+            这里先接入生成主链路契约，真实出图和归档将在后续 M2 叶子任务继续补齐。
+          </p>
+          <GenerationContractPanel
+            characterId={selectedCharacter.id}
+            characterName={selectedCharacter.name}
+          />
         </section>
       </main>
     );
