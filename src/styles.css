@@ -441,7 +441,7 @@ body {
 }
 
 .detail-shell {
-  max-width: 760px;
+  max-width: 1040px;
 }
 
 .detail-note {
@@ -457,6 +457,584 @@ body {
   color: rgba(243, 239, 232, 0.72);
 }
 
+.detail-tab-row {
+  margin-top: 16px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.detail-tab-button {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(243, 239, 232, 0.82);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.detail-tab-active {
+  border-color: rgba(238, 190, 151, 0.5);
+  background: rgba(238, 190, 151, 0.16);
+  color: #f3efe8;
+}
+
+.dna-section {
+  margin-top: 18px;
+}
+
+.dna-source-tip {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: rgba(243, 177, 126, 0.92);
+}
+
+.dna-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dna-grid {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.dna-field {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: rgba(243, 239, 232, 0.86);
+}
+
+.dna-field select {
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.24);
+  color: rgba(243, 239, 232, 0.9);
+  padding: 8px 10px;
+  font-family: inherit;
+}
+
+.dna-prompt-block {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  color: rgba(243, 239, 232, 0.86);
+}
+
+.dna-prompt-block textarea {
+  width: 100%;
+  resize: vertical;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.26);
+  color: rgba(243, 239, 232, 0.9);
+  padding: 10px 12px;
+  line-height: 1.5;
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+  font-size: 12px;
+}
+
+.dna-message {
+  margin: 14px 0 0;
+  font-size: 14px;
+  color: rgba(143, 227, 179, 0.92);
+}
+
+.training-panel {
+  margin-top: 20px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.training-panel-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.training-panel-top h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.training-panel-subtitle {
+  margin: 6px 0 0;
+  color: rgba(243, 239, 232, 0.68);
+  font-size: 14px;
+}
+
+.training-source-switch {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.training-source-switch button {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(243, 239, 232, 0.85);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.training-source-switch .source-active {
+  border-color: rgba(238, 190, 151, 0.55);
+  background: rgba(238, 190, 151, 0.16);
+  color: #f3efe8;
+}
+
+.training-controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.training-select-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: rgba(243, 239, 232, 0.76);
+}
+
+.training-select-label select {
+  background: rgba(0, 0, 0, 0.25);
+  color: rgba(243, 239, 232, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-family: inherit;
+}
+
+.training-frame-meta {
+  font-size: 12px;
+  color: rgba(243, 239, 232, 0.62);
+}
+
+.training-progress-card {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.2);
+  padding: 12px;
+}
+
+.training-progress-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: rgba(243, 239, 232, 0.78);
+}
+
+.training-progress-top p {
+  margin: 0;
+}
+
+.training-current-stage {
+  margin: 10px 0 0;
+  font-size: 14px;
+  color: rgba(243, 239, 232, 0.92);
+}
+
+.training-progress-track {
+  margin-top: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+
+.training-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #efb987, #8dd2ff);
+  transition: width 240ms ease;
+}
+
+.training-progress-meta {
+  margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  color: rgba(243, 239, 232, 0.76);
+}
+
+.training-latest-message {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: rgba(243, 239, 232, 0.86);
+}
+
+.training-section {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.16);
+  padding: 12px;
+}
+
+.training-section-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.training-section-top h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.training-section-top span {
+  font-size: 12px;
+  color: rgba(243, 239, 232, 0.6);
+}
+
+.sample-grid,
+.validation-grid {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.sample-grid li,
+.validation-grid li {
+  display: grid;
+  gap: 8px;
+}
+
+.sample-grid li p,
+.validation-grid li p {
+  margin: 0;
+  font-size: 13px;
+  color: rgba(243, 239, 232, 0.78);
+}
+
+.training-image {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.training-image-mock {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  background: radial-gradient(circle at 24% 18%, rgba(239, 185, 135, 0.35), rgba(17, 14, 14, 0.9));
+  color: rgba(243, 239, 232, 0.92);
+  text-align: center;
+  padding: 10px;
+}
+
+.training-image-mock small {
+  color: rgba(243, 239, 232, 0.55);
+  font-size: 11px;
+}
+
+.validation-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.validation-actions button {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(243, 239, 232, 0.84);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.validation-actions .rating-active-up {
+  border-color: rgba(143, 227, 179, 0.5);
+  color: #8fe3b3;
+  background: rgba(143, 227, 179, 0.12);
+}
+
+.validation-actions .rating-active-down {
+  border-color: rgba(255, 160, 160, 0.5);
+  color: #ffb29b;
+  background: rgba(255, 160, 160, 0.12);
+}
+
+.training-error-banner {
+  margin: 0;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 160, 160, 0.36);
+  background: rgba(255, 160, 160, 0.12);
+  color: #ffb29b;
+  font-size: 14px;
+  padding: 10px 12px;
+}
+
+.training-inline-hint {
+  margin: 0;
+  font-size: 13px;
+  color: rgba(243, 239, 232, 0.72);
+}
+
+.training-advice-card {
+  margin-top: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(239, 185, 135, 0.36);
+  background: rgba(239, 185, 135, 0.08);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.training-advice-title {
+  margin: 0;
+  font-size: 14px;
+  color: rgba(243, 239, 232, 0.92);
+  font-weight: 700;
+}
+
+.training-advice-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.training-retrain-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dataset-shell {
+  max-width: 980px;
+}
+
+.dataset-upload-panel {
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.dataset-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.dataset-upload-meta {
+  margin: 10px 0 0;
+  color: rgba(243, 239, 232, 0.72);
+  font-size: 14px;
+}
+
+.dataset-message {
+  margin: 14px 0 0;
+  font-size: 14px;
+  color: rgba(143, 227, 179, 0.92);
+}
+
+.dataset-preview-section {
+  margin-top: 20px;
+}
+
+.dataset-preview-section h2,
+.dataset-report h2 {
+  margin: 0 0 12px;
+  font-size: 19px;
+}
+
+.dataset-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.dataset-preview-card {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.dataset-preview-card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+}
+
+.dataset-preview-meta {
+  padding: 8px 10px 10px;
+}
+
+.dataset-preview-meta p {
+  margin: 0;
+  color: rgba(243, 239, 232, 0.88);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.dataset-preview-meta span {
+  margin-top: 4px;
+  display: inline-block;
+  color: rgba(243, 239, 232, 0.62);
+  font-size: 11px;
+}
+
+.dataset-report {
+  margin-top: 24px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 16px;
+}
+
+.dataset-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.dataset-summary-card {
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(0, 0, 0, 0.18);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.dataset-summary-card span {
+  font-size: 12px;
+  color: rgba(243, 239, 232, 0.62);
+}
+
+.dataset-summary-card strong {
+  font-size: 18px;
+  color: rgba(243, 239, 232, 0.95);
+}
+
+.dataset-section-block {
+  margin-top: 16px;
+}
+
+.dataset-section-block h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.dataset-angle-list,
+.dataset-problem-list,
+.dataset-tip-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.dataset-angle-list li,
+.dataset-problem-list li {
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(0, 0, 0, 0.16);
+  padding: 8px 10px;
+}
+
+.dataset-angle-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+
+.dataset-angle-list strong {
+  color: rgba(243, 239, 232, 0.92);
+}
+
+.dataset-problem-list p {
+  margin: 0;
+  font-size: 13px;
+  color: rgba(243, 239, 232, 0.92);
+}
+
+.dataset-problem-list span {
+  margin-top: 4px;
+  display: inline-block;
+  font-size: 12px;
+  color: rgba(255, 178, 155, 0.92);
+}
+
+.dataset-tip-list li {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(243, 177, 126, 0.28);
+  background: rgba(243, 177, 126, 0.08);
+  font-size: 13px;
+  color: rgba(243, 239, 232, 0.9);
+}
+
+.dataset-mode-line {
+  margin: 0;
+  font-size: 14px;
+  color: rgba(243, 239, 232, 0.86);
+}
+
+.dataset-mode-reason {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: rgba(243, 239, 232, 0.7);
+}
+
+.dataset-empty-note {
+  margin: 12px 0 0;
+  color: rgba(243, 239, 232, 0.72);
+  font-size: 14px;
+}
+
+.dataset-json {
+  margin: 0;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.22);
+  color: rgba(243, 239, 232, 0.9);
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 10px;
+  overflow-x: auto;
+}
+
 @media (max-width: 780px) {
   .app-shell {
     padding: 16px;
@@ -468,8 +1046,25 @@ body {
   }
 
   .library-header,
-  .task-panel-top {
+  .task-panel-top,
+  .training-panel-top {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .dataset-upload-panel {
+    align-items: stretch;
+  }
+
+  .detail-tab-row,
+  .dna-actions {
+    flex-direction: column;
+  }
+
+  .training-progress-top,
+  .training-progress-meta,
+  .training-section-top {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

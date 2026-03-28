@@ -1,0 +1,186 @@
+{
+  "meta": {
+    "mock": true,
+    "generatedAt": "2026-03-27",
+    "purpose": "Unblock M1E/M1F integration before real RTX 3070 validation",
+    "warning": "Synthetic data only. Do not use as real hardware evidence or final product decision proof."
+  },
+  "pocComparisonMock": {
+    "device": {
+      "gpu": "RTX 3070",
+      "vramGB": 8,
+      "cuda": "12.1"
+    },
+    "runs": [
+      {
+        "model": "flux-dev-q4",
+        "mode": "standard",
+        "trainCanRun": true,
+        "peakVramGB": 7.8,
+        "trainMinutes": 39,
+        "sampleSecondsPerImage": 11.8,
+        "qualityScore": 0.88,
+        "note": "mock happy-path"
+      },
+      {
+        "model": "flux-schnell",
+        "mode": "standard",
+        "trainCanRun": true,
+        "peakVramGB": 7.3,
+        "trainMinutes": 31,
+        "sampleSecondsPerImage": 4.2,
+        "qualityScore": 0.84,
+        "note": "mock happy-path"
+      }
+    ],
+    "recommendedDefaultModel": "flux-schnell",
+    "recommendedDefaultMode": "standard"
+  },
+  "trainingStartContractMock": {
+    "happyPath3070": {
+      "request": {
+        "characterId": "char_mock_001",
+        "mode": "standard",
+        "baseModel": "flux-schnell"
+      },
+      "response": {
+        "id": "train_mock_3070_001",
+        "characterId": "char_mock_001",
+        "requestedModel": "flux-schnell",
+        "effectiveModel": "sdxl",
+        "requestedMode": "standard",
+        "effectiveMode": "standard",
+        "businessStatus": "completed",
+        "queueStatus": "completed",
+        "progress": 100,
+        "precheck": {
+          "vramGB": 8.0,
+          "source": "env"
+        },
+        "downgradeReasons": [
+          {
+            "code": "flux_vram_guard",
+            "message": "显存不足以稳定运行 FLUX 训练，已自动切换到 SDXL。"
+          }
+        ],
+        "samplePreviews": [
+          {
+            "progress": 20,
+            "image": "mock://sample/20.png"
+          },
+          {
+            "progress": 40,
+            "image": "mock://sample/40.png"
+          },
+          {
+            "progress": 60,
+            "image": "mock://sample/60.png"
+          },
+          {
+            "progress": 80,
+            "image": "mock://sample/80.png"
+          },
+          {
+            "progress": 100,
+            "image": "mock://sample/100.png"
+          }
+        ],
+        "validationImages": [
+          {
+            "view": "front",
+            "image": "mock://validation/front.png"
+          },
+          {
+            "view": "three_quarter",
+            "image": "mock://validation/three_quarter.png"
+          },
+          {
+            "view": "back",
+            "image": "mock://validation/back.png"
+          },
+          {
+            "view": "close_up",
+            "image": "mock://validation/close_up.png"
+          }
+        ],
+        "userVisibleError": null
+      }
+    },
+    "happyPath24GBFluxSchnell": {
+      "request": {
+        "characterId": "char_mock_002",
+        "mode": "standard",
+        "baseModel": "flux-schnell"
+      },
+      "response": {
+        "id": "train_mock_24gb_001",
+        "characterId": "char_mock_002",
+        "requestedModel": "flux-schnell",
+        "effectiveModel": "flux-schnell",
+        "requestedMode": "standard",
+        "effectiveMode": "standard",
+        "businessStatus": "completed",
+        "queueStatus": "completed",
+        "progress": 100,
+        "precheck": {
+          "vramGB": 24.0,
+          "source": "env"
+        },
+        "downgradeReasons": [],
+        "samplePreviews": [
+          {
+            "progress": 20,
+            "image": "mock://sample_flux/20.png"
+          },
+          {
+            "progress": 40,
+            "image": "mock://sample_flux/40.png"
+          },
+          {
+            "progress": 60,
+            "image": "mock://sample_flux/60.png"
+          },
+          {
+            "progress": 80,
+            "image": "mock://sample_flux/80.png"
+          },
+          {
+            "progress": 100,
+            "image": "mock://sample_flux/100.png"
+          }
+        ],
+        "validationImages": [
+          {
+            "view": "front",
+            "image": "mock://validation_flux/front.png"
+          },
+          {
+            "view": "three_quarter",
+            "image": "mock://validation_flux/three_quarter.png"
+          },
+          {
+            "view": "back",
+            "image": "mock://validation_flux/back.png"
+          },
+          {
+            "view": "close_up",
+            "image": "mock://validation_flux/close_up.png"
+          }
+        ],
+        "userVisibleError": null
+      }
+    },
+    "fluxDevLicenseRejected": {
+      "request": {
+        "characterId": "char_mock_003",
+        "mode": "standard",
+        "baseModel": "flux-dev",
+        "licenseConfirmed": false
+      },
+      "response": {
+        "statusCode": 400,
+        "detail": "flux-dev 存在非商用许可风险，继续前请先确认许可。"
+      }
+    }
+  }
+}

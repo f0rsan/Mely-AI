@@ -8,6 +8,8 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from app.db.connection import connect_database
 from app.schemas.characters import (
     CharacterCreateRequest,
+    CharacterDNASuggestionResponse,
+    CharacterDNAUpdateRequest,
     CharacterDetailResponse,
     CharacterListResponse,
     CharacterUpdateRequest,
@@ -20,8 +22,10 @@ from app.services.characters import (
     delete_character,
     get_character_detail,
     list_characters,
+    upsert_character_dna,
     update_character,
 )
+from app.services.dna_suggestions import build_dna_suggestions
 
 router = APIRouter()
 
@@ -107,6 +111,42 @@ def update_character_endpoint(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except CharacterServiceError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.put("/characters/{character_id}/dna", response_model=CharacterDetailResponse)
+def upsert_character_dna_endpoint(
+    character_id: str,
+    payload: CharacterDNAUpdateRequest,
+    request: Request,
+):
+    runtime = _resolve_runtime(request)
+
+    try:
+        with _open_connection(runtime.db_path) as connection:
+            return upsert_character_dna(connection, character_id, payload)
+    except CharacterNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CharacterServiceError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get(
+    "/characters/{character_id}/dna/suggestions",
+    response_model=CharacterDNASuggestionResponse,
+)
+def get_character_dna_suggestions_endpoint(character_id: str, request: Request):
+    runtime = _resolve_runtime(request)
+
+    try:
+        with _open_connection(runtime.db_path) as connection:
+            get_character_detail(connection, character_id)
+            return build_dna_suggestions(
+                connection,
+                data_root=runtime.data_root,
+                character_id=character_id,
+            )
+    except CharacterNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.delete("/characters/{character_id}", status_code=status.HTTP_204_NO_CONTENT)
