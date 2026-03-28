@@ -482,6 +482,145 @@ body {
   color: #f3efe8;
 }
 
+.text-to-character-section {
+  margin-top: 18px;
+}
+
+.text-to-character-section h2 {
+  margin: 0;
+  font-size: 21px;
+}
+
+.text-to-character-disclaimer {
+  margin: 12px 0 0;
+  border-radius: 12px;
+  border: 1px solid rgba(243, 177, 126, 0.28);
+  background: rgba(243, 177, 126, 0.12);
+  color: rgba(243, 239, 232, 0.92);
+  font-size: 13px;
+  padding: 10px 12px;
+}
+
+.text-to-character-input-block {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  color: rgba(243, 239, 232, 0.86);
+}
+
+.text-to-character-input-block textarea {
+  width: 100%;
+  resize: vertical;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.26);
+  color: rgba(243, 239, 232, 0.9);
+  padding: 10px 12px;
+  line-height: 1.6;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.text-to-character-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.text-to-character-contract-note {
+  font-size: 12px;
+  color: rgba(243, 239, 232, 0.64);
+}
+
+.text-to-character-message {
+  margin: 14px 0 0;
+  font-size: 14px;
+  color: rgba(143, 227, 179, 0.92);
+}
+
+.text-to-character-message-error {
+  color: #ffb29b;
+}
+
+.text-to-character-grid-section {
+  margin-top: 18px;
+}
+
+.text-to-character-grid-section h3 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+
+.text-to-character-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.text-to-character-card {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+  display: grid;
+  gap: 8px;
+  padding-bottom: 10px;
+}
+
+.text-to-character-card-selected {
+  border-color: rgba(143, 227, 179, 0.55);
+  box-shadow: 0 0 0 2px rgba(143, 227, 179, 0.16);
+}
+
+.text-to-character-card img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+}
+
+.text-to-character-card-meta {
+  padding: 0 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.text-to-character-card-meta p {
+  margin: 0;
+  font-size: 13px;
+  color: rgba(243, 239, 232, 0.9);
+}
+
+.text-to-character-card-meta span {
+  font-size: 11px;
+  color: rgba(243, 239, 232, 0.62);
+}
+
+.text-to-character-card .secondary-button {
+  margin: 0 10px;
+}
+
+.text-to-character-footer {
+  margin-top: 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.18);
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.text-to-character-footer p {
+  margin: 0;
+  color: rgba(243, 239, 232, 0.78);
+  font-size: 13px;
+}
+
 .dna-section {
   margin-top: 18px;
 }
@@ -1059,6 +1198,12 @@ body {
   .detail-tab-row,
   .dna-actions {
     flex-direction: column;
+  }
+
+  .text-to-character-actions,
+  .text-to-character-footer {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .training-progress-top,
