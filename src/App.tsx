@@ -28,6 +28,11 @@ import {
 } from "./api/tasks";
 import { TaskProgressList } from "./components/TaskProgressList";
 import { TrainingProgressPanel } from "./components/TrainingProgressPanel";
+import {
+  createDatasetFilesFromMockCandidates,
+  generateTextToCharacterCandidatesMock,
+  type TextToCharacterCandidate,
+} from "./mocks/textToCharacter";
 
 type ViewState =
   | { kind: "loading" }
@@ -40,9 +45,11 @@ type DatasetPreviewItem = {
   previewUrl: string;
 };
 
-type DetailTab = "dataset" | "dna" | "training";
+type DetailTab = "dataset" | "textToCharacter" | "dna" | "training";
 
 type DnaFormState = Record<DnaFieldKey, string>;
+
+type TextToCharacterStatus = "idle" | "loading" | "success" | "empty" | "error";
 
 const DNA_FIELD_KEYS: DnaFieldKey[] = ["hairColor", "eyeColor", "skinTone", "bodyType", "style"];
 
@@ -215,6 +222,13 @@ function extractDnaErrorMessage(error: unknown): string {
   return "DNA 加载失败，请稍后重试。";
 }
 
+function extractTextToCharacterErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+  return "候选图生成失败，这是 Mock 通道错误，请稍后重试。";
+}
+
 function CharacterGrid({
   items,
   onOpenDetail,
@@ -334,9 +348,19 @@ type DatasetWorkspaceProps = {
   dnaMessage: string | null;
   dnaForm: DnaFormState;
   dnaPromptPreview: string;
+  textPrompt: string;
+  textStatus: TextToCharacterStatus;
+  textStatusMessage: string | null;
+  textCandidates: TextToCharacterCandidate[];
+  textSelectedCandidateIds: string[];
+  textAddingToDataset: boolean;
   onDnaFieldChange: (field: DnaFieldKey, value: string) => void;
   onApplyDnaSuggestions: () => void;
   onSaveDna: () => void;
+  onTextPromptChange: (value: string) => void;
+  onGenerateTextCandidates: () => void;
+  onToggleTextCandidate: (candidateId: string) => void;
+  onAddTextCandidatesToDataset: () => void;
   onSelectFiles: (files: FileList | null) => void;
   onStartImport: () => void;
   onBack: () => void;
@@ -426,6 +450,142 @@ function DnaWorkspace({
   );
 }
 
+type TextToCharacterWorkspaceProps = {
+  prompt: string;
+  status: TextToCharacterStatus;
+  statusMessage: string | null;
+  candidates: TextToCharacterCandidate[];
+  selectedCandidateIds: string[];
+  addingToDataset: boolean;
+  onPromptChange: (value: string) => void;
+  onGenerate: () => void;
+  onToggleCandidate: (candidateId: string) => void;
+  onAddToDataset: () => void;
+};
+
+function TextToCharacterWorkspace({
+  prompt,
+  status,
+  statusMessage,
+  candidates,
+  selectedCandidateIds,
+  addingToDataset,
+  onPromptChange,
+  onGenerate,
+  onToggleCandidate,
+  onAddToDataset,
+}: TextToCharacterWorkspaceProps) {
+  const selectedCount = selectedCandidateIds.length;
+  const hasCandidates = candidates.length > 0;
+
+  return (
+    <section className="text-to-character-section" aria-label="文字创角工作区">
+      <h2>文字描述创角（Mock 联调）</h2>
+      <p className="detail-placeholder">
+        输入角色外貌描述后，系统会返回 4–8 张候选图用于联调演示。当前不连接真实 G1 运行时，只用于提前打通页面和状态组织。
+      </p>
+      <p className="text-to-character-disclaimer">本轮为 mock 联调，不代表真实 G1 结果。</p>
+
+      <label className="text-to-character-input-block">
+        <span>角色文字描述</span>
+        <textarea
+          aria-label="角色文字描述"
+          value={prompt}
+          rows={4}
+          placeholder="例如：银色长发，红色眼睛，二次元少女，直播封面风格。"
+          onChange={(event) => onPromptChange(event.target.value)}
+          disabled={status === "loading" || addingToDataset}
+        />
+      </label>
+
+      <div className="text-to-character-actions">
+        <button
+          className="primary-button"
+          type="button"
+          onClick={onGenerate}
+          disabled={status === "loading" || addingToDataset}
+        >
+          {status === "loading" ? "生成中..." : "生成候选图（Mock）"}
+        </button>
+        <span className="text-to-character-contract-note">
+          mock 合同：固定 4–8 张候选图，不代表真实生成质量。
+        </span>
+      </div>
+
+      {status === "loading" ? (
+        <div className="status-block">
+          <span className="status-chip">正在生成候选图（Mock）...</span>
+        </div>
+      ) : null}
+
+      {statusMessage ? (
+        <p
+          className={
+            status === "error"
+              ? "text-to-character-message text-to-character-message-error"
+              : "text-to-character-message"
+          }
+        >
+          {statusMessage}
+        </p>
+      ) : null}
+
+      {!hasCandidates && status === "idle" ? (
+        <p className="dataset-empty-note">还没有候选图，先输入描述并点击“生成候选图（Mock）”。</p>
+      ) : null}
+
+      {hasCandidates ? (
+        <>
+          <section className="text-to-character-grid-section" aria-label="候选图结果">
+            <h3>候选图结果</h3>
+            <div className="text-to-character-grid">
+              {candidates.map((candidate, index) => {
+                const selected = selectedCandidateIds.includes(candidate.id);
+                return (
+                  <article
+                    key={candidate.id}
+                    className={`text-to-character-card ${selected ? "text-to-character-card-selected" : ""}`}
+                  >
+                    <img src={candidate.previewDataUrl} alt={`候选图 ${index + 1}`} />
+                    <div className="text-to-character-card-meta">
+                      <p>{candidate.name}</p>
+                      <span>mock 合同版本：{candidate.contractVersion}</span>
+                    </div>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      aria-pressed={selected}
+                      aria-label={`选择候选图 ${index + 1}`}
+                      onClick={() => onToggleCandidate(candidate.id)}
+                      disabled={addingToDataset}
+                    >
+                      {selected ? `取消候选图 ${index + 1}` : `选择候选图 ${index + 1}`}
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+
+          <div className="text-to-character-footer">
+            <p>
+              已选择 <strong>{selectedCount}</strong> 张候选图。确认后会回到“数据集评估”并复用 M1C 导入流程。
+            </p>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={onAddToDataset}
+              disabled={selectedCount === 0 || addingToDataset}
+            >
+              {addingToDataset ? "加入中..." : `加入数据集（${selectedCount} 张）`}
+            </button>
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
 function DatasetWorkspace({
   character,
   activeTab,
@@ -441,9 +601,19 @@ function DatasetWorkspace({
   dnaMessage,
   dnaForm,
   dnaPromptPreview,
+  textPrompt,
+  textStatus,
+  textStatusMessage,
+  textCandidates,
+  textSelectedCandidateIds,
+  textAddingToDataset,
   onDnaFieldChange,
   onApplyDnaSuggestions,
   onSaveDna,
+  onTextPromptChange,
+  onGenerateTextCandidates,
+  onToggleTextCandidate,
+  onAddTextCandidatesToDataset,
   onSelectFiles,
   onStartImport,
   onBack,
@@ -451,6 +621,8 @@ function DatasetWorkspace({
   const title =
     activeTab === "dataset"
       ? "数据集导入与评估"
+      : activeTab === "textToCharacter"
+        ? "文字创角（Mock）"
       : activeTab === "dna"
         ? "角色 DNA 配置"
         : "训练进度与验证";
@@ -472,6 +644,13 @@ function DatasetWorkspace({
           onClick={() => onSwitchTab("dataset")}
         >
           数据集评估
+        </button>
+        <button
+          className={`detail-tab-button ${activeTab === "textToCharacter" ? "detail-tab-active" : ""}`}
+          type="button"
+          onClick={() => onSwitchTab("textToCharacter")}
+        >
+          文字创角（Mock）
         </button>
         <button
           className={`detail-tab-button ${activeTab === "dna" ? "detail-tab-active" : ""}`}
@@ -644,6 +823,19 @@ function DatasetWorkspace({
             <p className="dataset-empty-note">还没有导入训练图片，先选择图片后点击“开始评估”。</p>
           )}
         </>
+      ) : activeTab === "textToCharacter" ? (
+        <TextToCharacterWorkspace
+          prompt={textPrompt}
+          status={textStatus}
+          statusMessage={textStatusMessage}
+          candidates={textCandidates}
+          selectedCandidateIds={textSelectedCandidateIds}
+          addingToDataset={textAddingToDataset}
+          onPromptChange={onTextPromptChange}
+          onGenerate={onGenerateTextCandidates}
+          onToggleCandidate={onToggleTextCandidate}
+          onAddToDataset={onAddTextCandidatesToDataset}
+        />
       ) : (
         <>
           {activeTab === "dna" ? (
@@ -691,6 +883,12 @@ export default function App() {
   const [dnaMessage, setDnaMessage] = useState<string | null>(null);
   const [dnaForm, setDnaForm] = useState<DnaFormState>(createEmptyDnaForm());
   const [dnaLoadedCharacterId, setDnaLoadedCharacterId] = useState<string | null>(null);
+  const [textPrompt, setTextPrompt] = useState("");
+  const [textStatus, setTextStatus] = useState<TextToCharacterStatus>("idle");
+  const [textStatusMessage, setTextStatusMessage] = useState<string | null>(null);
+  const [textCandidates, setTextCandidates] = useState<TextToCharacterCandidate[]>([]);
+  const [textSelectedCandidateIds, setTextSelectedCandidateIds] = useState<string[]>([]);
+  const [textAddingToDataset, setTextAddingToDataset] = useState(false);
 
   const canRunMockTask = viewState.kind === "ready";
   const dnaPromptPreview = useMemo(
@@ -735,6 +933,15 @@ export default function App() {
     });
   }, []);
 
+  const resetTextToCharacterState = useCallback(() => {
+    setTextPrompt("");
+    setTextStatus("idle");
+    setTextStatusMessage(null);
+    setTextCandidates([]);
+    setTextSelectedCandidateIds([]);
+    setTextAddingToDataset(false);
+  }, []);
+
   const handleBackToLibrary = useCallback(() => {
     setSelectedCharacter(null);
     setDetailTab("dataset");
@@ -748,7 +955,8 @@ export default function App() {
     setDnaSaving(false);
     setDnaLoadedCharacterId(null);
     clearDatasetSelection();
-  }, [clearDatasetSelection]);
+    resetTextToCharacterState();
+  }, [clearDatasetSelection, resetTextToCharacterState]);
 
   const handleOpenCharacter = useCallback((character: CharacterListItem) => {
     setSelectedCharacter(character);
@@ -760,7 +968,8 @@ export default function App() {
     setDnaLoading(false);
     setDnaSaving(false);
     setDnaLoadedCharacterId(null);
-  }, []);
+    resetTextToCharacterState();
+  }, [resetTextToCharacterState]);
 
   const handleSelectDatasetFiles = useCallback(
     (files: FileList | null) => {
@@ -865,6 +1074,99 @@ export default function App() {
       setDnaSaving(false);
     }
   }, [dnaForm, selectedCharacter]);
+
+  const handleTextPromptChange = useCallback((value: string) => {
+    setTextPrompt(value);
+    if (textStatus !== "loading") {
+      setTextStatus("idle");
+      setTextStatusMessage(null);
+    }
+  }, [textStatus]);
+
+  const handleGenerateTextCandidates = useCallback(async () => {
+    const prompt = textPrompt.trim();
+    if (prompt.length === 0) {
+      setTextStatus("error");
+      setTextStatusMessage("请输入角色文字描述后再生成。");
+      setTextCandidates([]);
+      setTextSelectedCandidateIds([]);
+      return;
+    }
+
+    setTextStatus("loading");
+    setTextStatusMessage(null);
+    setTextCandidates([]);
+    setTextSelectedCandidateIds([]);
+
+    try {
+      const result = await generateTextToCharacterCandidatesMock(prompt);
+      setTextCandidates(result.candidates);
+      setTextSelectedCandidateIds([]);
+
+      if (result.candidates.length === 0) {
+        setTextStatus("empty");
+        setTextStatusMessage("本次未生成候选图，请补充更具体的外貌描述后重试。");
+        return;
+      }
+
+      setTextStatus("success");
+      setTextStatusMessage(`已生成 ${result.candidates.length} 张候选图（Mock），请选择后加入数据集。`);
+    } catch (error) {
+      setTextStatus("error");
+      setTextCandidates([]);
+      setTextSelectedCandidateIds([]);
+      setTextStatusMessage(extractTextToCharacterErrorMessage(error));
+    }
+  }, [textPrompt]);
+
+  const handleToggleTextCandidate = useCallback((candidateId: string) => {
+    setTextSelectedCandidateIds((current) =>
+      current.includes(candidateId)
+        ? current.filter((id) => id !== candidateId)
+        : [...current, candidateId],
+    );
+    setTextStatusMessage(null);
+  }, []);
+
+  const handleAddTextCandidatesToDataset = useCallback(() => {
+    if (selectedCharacter === null || textSelectedCandidateIds.length === 0) {
+      return;
+    }
+
+    const selectedCandidates = textCandidates.filter((candidate) =>
+      textSelectedCandidateIds.includes(candidate.id),
+    );
+    if (selectedCandidates.length === 0) {
+      return;
+    }
+
+    setTextAddingToDataset(true);
+    clearDatasetSelection();
+
+    const files = createDatasetFilesFromMockCandidates(selectedCandidates);
+    setDatasetFiles(files);
+    setDatasetPreviews(
+      selectedCandidates.map((candidate, index) => ({
+        name: files[index].name,
+        sizeLabel: formatFileSize(files[index].size),
+        previewUrl: candidate.previewDataUrl,
+      })),
+    );
+    setDatasetReport(null);
+    setDatasetMessage(
+      `已将 ${selectedCandidates.length} 张 Mock 候选图加入数据集，请继续点击“开始评估”进入 M1C 流程。`,
+    );
+    setDetailTab("dataset");
+
+    setTextStatus("success");
+    setTextStatusMessage("候选图已加入数据集，可在数据集页继续评估。");
+    setTextAddingToDataset(false);
+  }, [
+    clearDatasetSelection,
+    selectedCharacter,
+    textCandidates,
+    textSelectedCandidateIds,
+  ]);
 
   useEffect(() => {
     void loadCharacters();
@@ -972,9 +1274,19 @@ export default function App() {
           dnaMessage={dnaMessage}
           dnaForm={dnaForm}
           dnaPromptPreview={dnaPromptPreview}
+          textPrompt={textPrompt}
+          textStatus={textStatus}
+          textStatusMessage={textStatusMessage}
+          textCandidates={textCandidates}
+          textSelectedCandidateIds={textSelectedCandidateIds}
+          textAddingToDataset={textAddingToDataset}
           onDnaFieldChange={handleDnaFieldChange}
           onApplyDnaSuggestions={handleApplyDnaSuggestions}
           onSaveDna={handleSaveDna}
+          onTextPromptChange={handleTextPromptChange}
+          onGenerateTextCandidates={handleGenerateTextCandidates}
+          onToggleTextCandidate={handleToggleTextCandidate}
+          onAddTextCandidatesToDataset={handleAddTextCandidatesToDataset}
           onSelectFiles={handleSelectDatasetFiles}
           onStartImport={handleStartDatasetImport}
           onBack={handleBackToLibrary}

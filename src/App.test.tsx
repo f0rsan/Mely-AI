@@ -466,7 +466,7 @@ test("supports DNA editing with suggestion prefill, auto prompt preview and save
         buildCharactersResponse([
           {
             id: "char-1",
-            name: "星野ミ卡",
+            name: "星野ミカ",
             createdAt: "2026-03-26T09:00:00Z",
             fingerprint: "fp-001",
           },
@@ -502,7 +502,7 @@ test("supports DNA editing with suggestion prefill, auto prompt preview and save
     });
 
   render(<App />);
-  await user.click(await screen.findByRole("button", { name: "打开角色 星野ミ卡" }));
+  await user.click(await screen.findByRole("button", { name: "打开角色 星野ミカ" }));
   await screen.findByText("数据集导入与评估");
 
   await user.click(screen.getByRole("button", { name: "角色 DNA" }));
@@ -707,4 +707,120 @@ test("runs the mock-only main path from dataset to DNA to training and back to d
   await screen.findByText("数据集导入与评估");
   expect(screen.getByRole("button", { name: "开始评估" })).toBeInTheDocument();
   expect(screen.getByText("66 分")).toBeInTheDocument();
+});
+
+test("supports text-to-character mock flow and hands selected candidates back to dataset import", async () => {
+  const user = userEvent.setup();
+
+  fetchMock
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        buildCharactersResponse([
+          {
+            id: "char-1",
+            name: "星野ミカ",
+            createdAt: "2026-03-26T09:00:00Z",
+            fingerprint: "fp-001",
+          },
+        ]),
+    })
+    .mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: async () => ({ detail: "训练数据集尚未导入，请先上传图片。" }),
+    });
+
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "打开角色 星野ミカ" }));
+  await screen.findByText("数据集导入与评估");
+
+  await user.click(screen.getByRole("button", { name: "文字创角（Mock）" }));
+  await screen.findByText("文字描述创角（Mock 联调）");
+  await screen.findByText("还没有候选图，先输入描述并点击“生成候选图（Mock）”。");
+  expect(screen.getByText("本轮为 mock 联调，不代表真实 G1 结果。")).toBeInTheDocument();
+
+  await user.type(screen.getByLabelText("角色文字描述"), "银色长发，红色眼睛，二次元少女");
+  await user.click(screen.getByRole("button", { name: "生成候选图（Mock）" }));
+
+  await screen.findByText("正在生成候选图（Mock）...");
+  await screen.findByRole("button", { name: "选择候选图 1" });
+  const candidateButtons = screen.getAllByRole("button", { name: /选择候选图/ });
+  expect(candidateButtons.length).toBeGreaterThanOrEqual(4);
+  expect(candidateButtons.length).toBeLessThanOrEqual(8);
+
+  await user.click(screen.getByRole("button", { name: "选择候选图 1" }));
+  await user.click(screen.getByRole("button", { name: "加入数据集（1 张）" }));
+
+  await screen.findByText("已将 1 张 Mock 候选图加入数据集，请继续点击“开始评估”进入 M1C 流程。");
+  await screen.findByText("数据集导入与评估");
+  expect(screen.getByRole("button", { name: "开始评估" })).toBeInTheDocument();
+  expect(screen.getByText("图片预览")).toBeInTheDocument();
+});
+
+test("shows empty-state message when mock generation returns zero candidates", async () => {
+  const user = userEvent.setup();
+
+  fetchMock
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        buildCharactersResponse([
+          {
+            id: "char-1",
+            name: "星野ミカ",
+            createdAt: "2026-03-26T09:00:00Z",
+            fingerprint: "fp-001",
+          },
+        ]),
+    })
+    .mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: async () => ({ detail: "训练数据集尚未导入，请先上传图片。" }),
+    });
+
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "打开角色 星野ミカ" }));
+  await user.click(screen.getByRole("button", { name: "文字创角（Mock）" }));
+
+  await user.type(screen.getByLabelText("角色文字描述"), "空结果测试");
+  await user.click(screen.getByRole("button", { name: "生成候选图（Mock）" }));
+
+  await screen.findByText("本次未生成候选图，请补充更具体的外貌描述后重试。");
+});
+
+test("shows Chinese error message when mock generation fails", async () => {
+  const user = userEvent.setup();
+
+  fetchMock
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        buildCharactersResponse([
+          {
+            id: "char-1",
+            name: "星野ミカ",
+            createdAt: "2026-03-26T09:00:00Z",
+            fingerprint: "fp-001",
+          },
+        ]),
+    })
+    .mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: async () => ({ detail: "训练数据集尚未导入，请先上传图片。" }),
+    });
+
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "打开角色 星野ミカ" }));
+  await user.click(screen.getByRole("button", { name: "文字创角（Mock）" }));
+
+  await user.type(screen.getByLabelText("角色文字描述"), "失败测试");
+  await user.click(screen.getByRole("button", { name: "生成候选图（Mock）" }));
+
+  await screen.findByText("候选图生成失败，这是 Mock 通道错误，请稍后重试。");
 });
