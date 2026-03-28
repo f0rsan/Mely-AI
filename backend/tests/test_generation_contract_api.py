@@ -51,15 +51,17 @@ def test_generation_workbench_returns_contract_and_bootstraps_base_costume(
         "width": 1024,
         "height": 1024,
         "steps": 28,
-        "sampler": "Euler a",
-        "cfgScale": 7.0,
-        "seed": -1,
+        "sampler": "DPM++ 2M Karras",
+        "cfgScale": 3.5,
+        "seed": None,
         "loraWeight": 0.78,
     }
     assert body["tagOptions"] == ["封面图", "表情包", "周边", "预告图"]
     assert len(body["costumes"]) == 1
     assert body["costumes"][0]["name"] == "基础造型"
     assert body["costumes"][0]["costumePrompt"] == ""
+    assert body["costumes"][0]["isDefault"] is True
+    assert set(body["costumes"][0].keys()) == {"id", "name", "costumePrompt", "isDefault"}
 
     with sqlite3.connect(temp_data_root / "db" / "mely.db") as connection:
         rows = connection.execute(
@@ -93,6 +95,35 @@ def test_generation_workbench_blocks_untrained_character(temp_data_root: Path) -
     assert body["promptSources"]["dnaPrompt"] == ""
     assert body["promptSources"]["triggerWord"] == ""
     assert body["promptSources"]["costumePrompt"] == ""
+
+
+def test_generation_workbench_blocks_incomplete_visual_assets(temp_data_root: Path) -> None:
+    app = create_app()
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/characters",
+            json={
+                "name": "训练未绑定角色",
+                "visual": {
+                    "loraPath": None,
+                    "triggerWord": "melychar",
+                    "baseCheckpoint": "flux-dev",
+                    "trainingStatus": "completed",
+                    "trainingProgress": 1.0,
+                },
+            },
+        )
+        character_id = created.json()["id"]
+
+        response = client.get(f"/api/characters/{character_id}/generation-workbench")
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["canGenerate"] is False
+    assert body["blockingReason"] == "该角色的视觉资产还不完整，请先完成训练结果绑定。"
+    assert body["parameterDefaults"]["loraWeight"] == 0.85
 
 
 def test_generation_workbench_returns_404_for_unknown_character(temp_data_root: Path) -> None:

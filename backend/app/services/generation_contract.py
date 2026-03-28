@@ -19,10 +19,10 @@ DEFAULT_TAG_OPTIONS = ["封面图", "表情包", "周边", "预告图"]
 DEFAULT_PARAMETER_WIDTH = 1024
 DEFAULT_PARAMETER_HEIGHT = 1024
 DEFAULT_PARAMETER_STEPS = 28
-DEFAULT_PARAMETER_SAMPLER = "Euler a"
-DEFAULT_PARAMETER_CFG_SCALE = 7.0
-DEFAULT_PARAMETER_SEED = -1
-DEFAULT_PARAMETER_LORA_WEIGHT = 0.8
+DEFAULT_PARAMETER_SAMPLER = "DPM++ 2M Karras"
+DEFAULT_PARAMETER_CFG_SCALE = 3.5
+DEFAULT_PARAMETER_SEED = None
+DEFAULT_PARAMETER_LORA_WEIGHT = 0.85
 
 
 class GenerationContractValidationError(ValueError):
@@ -33,34 +33,15 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def _preview_images_for_costume(
-    connection: sqlite3.Connection,
-    costume_id: str,
-) -> list[str]:
-    rows = connection.execute(
-        """
-        SELECT image_path
-        FROM costume_previews
-        WHERE costume_id = ?
-        ORDER BY COALESCE(sort_order, 0) ASC, id ASC
-        """,
-        (costume_id,),
-    ).fetchall()
-    return [row["image_path"] for row in rows]
-
-
 def _costume_row_to_response(
-    connection: sqlite3.Connection,
     row: sqlite3.Row,
+    is_default: bool,
 ) -> GenerationCostumeResponse:
     return GenerationCostumeResponse(
         id=row["id"],
         name=row["name"],
-        parent_id=row["parent_id"],
-        costume_lora=row["costume_lora"],
         costume_prompt=row["costume_prompt"],
-        created_at=row["created_at"],
-        preview_images=_preview_images_for_costume(connection, row["id"]),
+        is_default=is_default,
     )
 
 
@@ -189,7 +170,10 @@ def get_generation_workbench_contract(
         can_generate=can_generate,
         blocking_reason=blocking_reason,
         costumes=[
-            _costume_row_to_response(connection, costume_row)
+            _costume_row_to_response(
+                costume_row,
+                costume_row["id"] == selected_costume["id"],
+            )
             for costume_row in costume_rows
         ],
         selected_costume_id=selected_costume["id"],

@@ -8,11 +8,8 @@ class GenerationCostumeResponse(BaseModel):
 
     id: str
     name: str
-    parent_id: str | None = Field(default=None, alias="parentId")
-    costume_lora: str | None = Field(default=None, alias="costumeLora")
     costume_prompt: str = Field(alias="costumePrompt")
-    created_at: str = Field(alias="createdAt")
-    preview_images: list[str] = Field(default_factory=list, alias="previewImages")
+    is_default: bool = Field(alias="isDefault")
 
 
 class GenerationPromptSources(BaseModel):
@@ -31,7 +28,7 @@ class GenerationParameterDefaults(BaseModel):
     steps: int
     sampler: str
     cfg_scale: float = Field(alias="cfgScale")
-    seed: int
+    seed: int | None = None
     lora_weight: float = Field(alias="loraWeight")
 
 
