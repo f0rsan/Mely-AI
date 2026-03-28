@@ -4,11 +4,14 @@ from uuid import uuid4
 
 from app.schemas.generations import (
     GenerationCostumeResponse,
+    GenerationMockJobResponse,
     GenerationParameterDefaults,
     GenerationPromptSources,
+    GenerationSubmitRequest,
     GenerationWorkbenchResponse,
 )
 from app.services.characters import CharacterNotFoundError, CharacterServiceError, get_character_detail
+from app.services.task_queue import TaskSnapshot
 
 
 BASE_COSTUME_NAME = "基础造型"
@@ -20,6 +23,10 @@ DEFAULT_PARAMETER_SAMPLER = "Euler a"
 DEFAULT_PARAMETER_CFG_SCALE = 7.0
 DEFAULT_PARAMETER_SEED = -1
 DEFAULT_PARAMETER_LORA_WEIGHT = 0.8
+
+
+class GenerationContractValidationError(ValueError):
+    """Raised when generation submission does not satisfy the contract."""
 
 
 def _utc_now_iso() -> str:
@@ -192,4 +199,59 @@ def get_generation_workbench_contract(
         ),
         parameter_defaults=_resolve_parameter_defaults(character_detail),
         tag_options=DEFAULT_TAG_OPTIONS,
+    )
+
+
+def build_generation_workbench_contract(
+    connection: sqlite3.Connection,
+    character_id: str,
+) -> GenerationWorkbenchResponse:
+    return get_generation_workbench_contract(connection, character_id)
+
+
+def validate_generation_submission(
+    contract: GenerationWorkbenchResponse,
+    payload: GenerationSubmitRequest,
+) -> None:
+    if payload.character_id != contract.character_id:
+        raise GenerationContractValidationError("提交的角色信息与当前上下文不一致，请刷新后重试。")
+
+    if not contract.can_generate:
+        raise GenerationContractValidationError(
+            contract.blocking_reason or "该角色当前还不能生成，请先完成视觉训练。"
+        )
+
+    has_costume = any(costume.id == payload.costume_id for costume in contract.costumes)
+    if not has_costume:
+        raise GenerationContractValidationError("所选造型不存在，请刷新后重试。")
+
+
+def build_mock_generation_job(
+    task: TaskSnapshot,
+    payload: GenerationSubmitRequest,
+) -> GenerationMockJobResponse:
+    stage = (
+        "queued"
+        if task.status == "pending"
+        else "running"
+        if task.status == "running"
+        else "completed"
+        if task.status == "completed"
+        else "failed"
+    )
+
+    return GenerationMockJobResponse(
+        id=task.id,
+        task_id=task.id,
+        character_id=payload.character_id,
+        costume_id=payload.costume_id,
+        scene_prompt=payload.scene_prompt,
+        status=task.status,
+        stage=stage,
+        progress=task.progress,
+        message=task.message,
+        error=task.error,
+        tags=payload.tags,
+        created_at=task.created_at,
+        updated_at=task.updated_at,
     )
