@@ -6,10 +6,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.characters import router as characters_router
+from app.api.datasets import router as datasets_router
 from app.api.downloads import router as downloads_router
 from app.api.health import router as health_router
 from app.api.tasks import router as tasks_router
+from app.api.training import router as training_router
 from app.services.downloads import create_download_service
+from app.services.training import create_training_service
 from app.services.task_queue import TaskQueue
 from app.services.bootstrap import bootstrap_application
 
@@ -21,6 +24,7 @@ async def lifespan(app: FastAPI):
     task_queue = TaskQueue()
     app.state.task_queue = task_queue
     app.state.download_service = None
+    app.state.training_service = None
     await task_queue.start()
 
     if bootstrap_state.status == "ok":
@@ -30,6 +34,10 @@ async def lifespan(app: FastAPI):
             queue=task_queue,
         )
         app.state.download_service = download_service
+        app.state.training_service = create_training_service(
+            db_path=bootstrap_state.db_path,
+            queue=task_queue,
+        )
         await download_service.recover_pending_tasks()
     try:
         yield
@@ -48,8 +56,10 @@ def create_app() -> FastAPI:
     )
     app.include_router(health_router, prefix="/api")
     app.include_router(characters_router, prefix="/api")
+    app.include_router(datasets_router, prefix="/api")
     app.include_router(tasks_router, prefix="/api")
     app.include_router(downloads_router, prefix="/api")
+    app.include_router(training_router, prefix="/api")
 
     @app.exception_handler(RequestValidationError)
     async def handle_validation_error(_request, _exc):

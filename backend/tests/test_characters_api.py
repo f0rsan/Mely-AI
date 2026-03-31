@@ -133,6 +133,101 @@ def test_update_character_updates_basic_fields(temp_data_root: Path) -> None:
     assert row == ("新名称", "after-update")
 
 
+def test_update_character_dna_persists_and_returns_auto_prompt(temp_data_root: Path) -> None:
+    app = create_app()
+
+    payload = {
+        "hairColor": "银色",
+        "eyeColor": "红色",
+        "skinTone": "白皙",
+        "bodyType": "纤细",
+        "style": "二次元",
+        "extraTags": ["直播封面", "偶像风"],
+    }
+
+    with TestClient(app) as client:
+        created = client.post("/api/characters", json={"name": "DNA 角色"})
+        character_id = created.json()["id"]
+
+        update_response = client.put(f"/api/characters/{character_id}/dna", json=payload)
+
+    assert update_response.status_code == 200
+    body = update_response.json()
+    assert body["id"] == character_id
+    assert body["dna"]["hairColor"] == "银色"
+    assert body["dna"]["eyeColor"] == "红色"
+    assert body["dna"]["skinTone"] == "白皙"
+    assert body["dna"]["bodyType"] == "纤细"
+    assert body["dna"]["style"] == "二次元"
+    assert body["dna"]["extraTags"] == ["直播封面", "偶像风"]
+    assert isinstance(body["dna"]["autoPrompt"], str)
+    assert "silver hair" in body["dna"]["autoPrompt"]
+    assert "red eyes" in body["dna"]["autoPrompt"]
+    assert "anime style" in body["dna"]["autoPrompt"]
+
+    with sqlite3.connect(temp_data_root / "db" / "mely.db") as connection:
+        row = connection.execute(
+            """
+            SELECT hair_color, eye_color, skin_tone, body_type, style, extra_tags, auto_prompt
+            FROM character_dna
+            WHERE character_id = ?
+            """,
+            (character_id,),
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == "银色"
+    assert row[1] == "红色"
+    assert row[2] == "白皙"
+    assert row[3] == "纤细"
+    assert row[4] == "二次元"
+    assert row[5] == '["直播封面", "偶像风"]'
+    assert isinstance(row[6], str) and "silver hair" in row[6]
+
+
+def test_get_dna_suggestions_returns_manual_defaults_when_wd14_not_ready(
+    temp_data_root: Path,
+) -> None:
+    app = create_app()
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/characters",
+            json={
+                "name": "建议值角色",
+                "dna": {
+                    "hairColor": "粉色",
+                    "eyeColor": "紫色",
+                    "skinTone": "白皙",
+                    "bodyType": "纤细",
+                    "style": "二次元",
+                    "autoPrompt": "pink hair, violet eyes",
+                },
+            },
+        )
+        character_id = created.json()["id"]
+
+        response = client.get(f"/api/characters/{character_id}/dna/suggestions")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["characterId"] == character_id
+    assert body["source"] == "manual_default"
+    assert body["fields"]["hairColor"]["label"] == "发色"
+    assert body["fields"]["hairColor"]["recommended"] == "粉色"
+    assert body["fields"]["eyeColor"]["recommended"] == "紫色"
+    assert body["fields"]["skinTone"]["recommended"] == "白皙"
+    assert body["fields"]["bodyType"]["recommended"] == "纤细"
+    assert body["fields"]["style"]["recommended"] == "二次元"
+    assert isinstance(body["autoPromptPreview"], str)
+    assert "pink hair" in body["autoPromptPreview"]
+    assert "anime style" in body["autoPromptPreview"]
+    assert body["wd14"]["available"] is False
+    assert body["wd14"]["modelId"] is None
+    assert isinstance(body["wd14"]["reason"], str)
+    assert "WD14" in body["wd14"]["reason"]
+
+
 def test_delete_character_removes_record_and_directory(temp_data_root: Path) -> None:
     app = create_app()
 

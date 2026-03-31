@@ -2,14 +2,17 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from app.core.paths import ensure_character_directories, remove_character_directory
 from app.schemas.characters import (
     CharacterCreateRequest,
+    CharacterDNAUpdateRequest,
     CharacterDetailResponse,
     CharacterListItemResponse,
 )
+from app.services.dna_suggestions import build_auto_prompt
 
 
 class CharacterServiceError(Exception):
@@ -38,6 +41,57 @@ def _loads_json(value: str | None) -> object | None:
     if value is None:
         return None
     return json.loads(value)
+
+
+def upsert_visual_training_state(
+    connection: sqlite3.Connection,
+    character_id: str,
+    *,
+    training_status: str,
+    training_progress: float,
+    training_config: dict[str, Any] | None = None,
+) -> None:
+    existing = connection.execute(
+        "SELECT character_id FROM visual_assets WHERE character_id = ?",
+        (character_id,),
+    ).fetchone()
+
+    if existing is None:
+        connection.execute(
+            """
+            INSERT INTO visual_assets (
+                character_id,
+                training_config,
+                training_status,
+                training_progress
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                character_id,
+                _dumps_json(training_config),
+                training_status,
+                training_progress,
+            ),
+        )
+        return
+
+    connection.execute(
+        """
+        UPDATE visual_assets
+        SET
+            training_config = ?,
+            training_status = ?,
+            training_progress = ?
+        WHERE character_id = ?
+        """,
+        (
+            _dumps_json(training_config),
+            training_status,
+            training_progress,
+            character_id,
+        ),
+    )
 
 
 def _fetch_character_detail(
@@ -309,6 +363,72 @@ def update_character(
     updated = _fetch_character_detail(connection, character_id)
     if updated is None:
         raise CharacterNotFoundError("角色不存在")
+    return updated
+
+
+def upsert_character_dna(
+    connection: sqlite3.Connection,
+    character_id: str,
+    payload: CharacterDNAUpdateRequest,
+) -> CharacterDetailResponse:
+    exists = connection.execute(
+        "SELECT id FROM characters WHERE id = ?",
+        (character_id,),
+    ).fetchone()
+    if exists is None:
+        raise CharacterNotFoundError("角色不存在")
+
+    auto_prompt = build_auto_prompt(
+        hair_color=payload.hair_color,
+        eye_color=payload.eye_color,
+        skin_tone=payload.skin_tone,
+        body_type=payload.body_type,
+        style=payload.style,
+        extra_tags=payload.extra_tags,
+    )
+
+    try:
+        connection.execute(
+            """
+            INSERT INTO character_dna (
+                character_id,
+                hair_color,
+                eye_color,
+                skin_tone,
+                body_type,
+                style,
+                extra_tags,
+                auto_prompt
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(character_id) DO UPDATE SET
+                hair_color = excluded.hair_color,
+                eye_color = excluded.eye_color,
+                skin_tone = excluded.skin_tone,
+                body_type = excluded.body_type,
+                style = excluded.style,
+                extra_tags = excluded.extra_tags,
+                auto_prompt = excluded.auto_prompt
+            """,
+            (
+                character_id,
+                payload.hair_color,
+                payload.eye_color,
+                payload.skin_tone,
+                payload.body_type,
+                payload.style,
+                _dumps_json(payload.extra_tags),
+                auto_prompt,
+            ),
+        )
+        connection.commit()
+    except sqlite3.DatabaseError as exc:
+        connection.rollback()
+        raise CharacterServiceError("DNA 保存失败，请稍后重试") from exc
+
+    updated = _fetch_character_detail(connection, character_id)
+    if updated is None:
+        raise CharacterServiceError("DNA 保存失败，请稍后重试")
     return updated
 
 
