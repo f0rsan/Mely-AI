@@ -26,6 +26,7 @@ import {
   type TaskConnectionState,
   type TaskSnapshot,
 } from "./api/tasks";
+import { GenerationWorkbenchPage } from "./components/GenerationWorkbenchPage";
 import { TaskProgressList } from "./components/TaskProgressList";
 import { TrainingProgressPanel } from "./components/TrainingProgressPanel";
 import {
@@ -45,7 +46,7 @@ type DatasetPreviewItem = {
   previewUrl: string;
 };
 
-type DetailTab = "dataset" | "textToCharacter" | "dna" | "training";
+type DetailTab = "dataset" | "textToCharacter" | "dna" | "training" | "generation";
 
 type DnaFormState = Record<DnaFieldKey, string>;
 
@@ -625,6 +626,8 @@ function DatasetWorkspace({
         ? "文字创角（Mock）"
       : activeTab === "dna"
         ? "角色 DNA 配置"
+      : activeTab === "generation"
+        ? "生成工作台"
         : "训练进度与验证";
 
   return (
@@ -665,6 +668,13 @@ function DatasetWorkspace({
           onClick={() => onSwitchTab("training")}
         >
           训练进度与验证
+        </button>
+        <button
+          className={`detail-tab-button ${activeTab === "generation" ? "detail-tab-active" : ""}`}
+          type="button"
+          onClick={() => onSwitchTab("generation")}
+        >
+          生成工作台
         </button>
       </div>
 
@@ -835,6 +845,11 @@ function DatasetWorkspace({
           onGenerate={onGenerateTextCandidates}
           onToggleCandidate={onToggleTextCandidate}
           onAddToDataset={onAddTextCandidatesToDataset}
+        />
+      ) : activeTab === "generation" ? (
+        <GenerationWorkbenchPage
+          characterId={character.id}
+          characterName={character.name}
         />
       ) : (
         <>

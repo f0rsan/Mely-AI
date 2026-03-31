@@ -1174,6 +1174,70 @@ body {
   overflow-x: auto;
 }
 
+.generation-contract-panel {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  border-radius: 1rem;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.generation-contract-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.generation-contract-lead {
+  margin-top: 0.75rem;
+  color: #cbd5e1;
+}
+
+.generation-contract-grid {
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.875rem;
+}
+
+.generation-contract-card,
+.generation-job-card {
+  padding: 1rem;
+  border-radius: 0.875rem;
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.generation-contract-list,
+.generation-contract-definition {
+  margin-top: 0.75rem;
+}
+
+.generation-contract-definition div + div {
+  margin-top: 0.5rem;
+}
+
+.generation-ready {
+  color: #86efac;
+}
+
+.generation-blocked,
+.generation-contract-error {
+  color: #fca5a5;
+}
+
+.generation-contract-actions {
+  margin-top: 1rem;
+}
+
+.generation-contract-tags,
+.generation-job-title {
+  margin-top: 0.75rem;
+  color: #cbd5e1;
+  font-weight: 600;
+}
+
 @media (max-width: 780px) {
   .app-shell {
     padding: 16px;
