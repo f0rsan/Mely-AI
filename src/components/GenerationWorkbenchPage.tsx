@@ -11,6 +11,8 @@ import { archiveGeneration, type GenerationArchiveRecord } from "../api/archive"
 import { createTaskStream, type TaskConnectionState } from "../api/tasks";
 import { EngineStatusBadge } from "./EngineStatusBadge";
 import { PromptAssemblyPanel } from "./PromptAssemblyPanel";
+import { BatchQueuePanel } from "./BatchQueuePanel";
+import { GenerationHistoryGallery } from "./GenerationHistoryGallery";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -234,6 +236,7 @@ export function GenerationWorkbenchPage({
   const [generateState, setGenerateState] = useState<GenerateState>({ kind: "idle" });
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [taskConnection, setTaskConnection] = useState<TaskConnectionState>("disconnected");
+  const [activeTab, setActiveTab] = useState<"single" | "batch" | "history">("single");
   const wsDisconnectRef = useRef<(() => void) | null>(null);
   const paramsRef = useRef(params);
   paramsRef.current = params;
@@ -381,6 +384,38 @@ export function GenerationWorkbenchPage({
     setSubmitError(null);
   }, []);
 
+  const handleRegenerateFromHistory = useCallback(
+    (historyParams: {
+      costumeId: string;
+      assembledPrompt: string;
+      width: number;
+      height: number;
+      steps: number;
+      sampler: string;
+      cfgScale: number;
+      seed: number | null;
+      loraWeight: number;
+    }) => {
+      setSelectedCostumeId(historyParams.costumeId);
+      setAssembledPrompt(historyParams.assembledPrompt);
+      setPromptReady(true);
+      setParams((p) => ({
+        ...p,
+        width: historyParams.width,
+        height: historyParams.height,
+        steps: historyParams.steps,
+        sampler: historyParams.sampler,
+        cfgScale: historyParams.cfgScale,
+        seed: historyParams.seed,
+        loraWeight: historyParams.loraWeight,
+      }));
+      setGenerateState({ kind: "idle" });
+      setSubmitError(null);
+      setActiveTab("single");
+    },
+    [],
+  );
+
   // Compute the costume prompt for PromptAssemblyPanel based on selected costume.
   const selectedCostume =
     workbench.kind === "ready"
@@ -415,6 +450,12 @@ export function GenerationWorkbenchPage({
 
   const { contract } = workbench;
 
+  const tabs: { id: "single" | "batch" | "history"; label: string }[] = [
+    { id: "single", label: "单张生成" },
+    { id: "batch", label: "批量生成" },
+    { id: "history", label: "历史记录" },
+  ];
+
   return (
     <div className="flex flex-col gap-4">
       {/* Engine status */}
@@ -430,6 +471,56 @@ export function GenerationWorkbenchPage({
         </div>
       )}
 
+      {/* Tab bar */}
+      <div role="tablist" className="flex gap-1 border-b border-gray-700">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              activeTab === tab.id
+                ? "border-indigo-500 text-indigo-400"
+                : "border-transparent text-gray-400 hover:text-gray-200"
+            }`}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* History tab */}
+      {activeTab === "history" && (
+        <GenerationHistoryGallery
+          characterId={characterId}
+          costumes={contract.costumes}
+          onRegenerate={handleRegenerateFromHistory}
+        />
+      )}
+
+      {/* Batch tab */}
+      {activeTab === "batch" && (
+        <BatchQueuePanel
+          characterId={characterId}
+          costumeId={selectedCostumeId || contract.selectedCostumeId}
+          params={{
+            width: params.width,
+            height: params.height,
+            steps: params.steps,
+            sampler: params.sampler,
+            cfgScale: params.cfgScale,
+            seed: params.seed,
+            loraWeight: params.loraWeight,
+            tags: params.tags,
+          }}
+          disabled={!contract.canGenerate}
+        />
+      )}
+
+      {/* Single generation tab */}
+      {activeTab === "single" && (
+      <>
       {/* Costume selector */}
       <div className="flex flex-col gap-2">
         <span className="text-xs text-gray-400">造型选择</span>
@@ -550,6 +641,8 @@ export function GenerationWorkbenchPage({
         <p className="text-sm text-red-400" role="alert">
           {submitError}
         </p>
+      )}
+      </>
       )}
     </div>
   );
