@@ -6,11 +6,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.characters import router as characters_router
+from app.api.engine import router as engine_router
 from app.api.generations import router as generations_router
 from app.api.downloads import router as downloads_router
 from app.api.health import router as health_router
 from app.api.tasks import router as tasks_router
 from app.services.downloads import create_download_service
+from app.services.engine_runtime import ComfyUIRuntime
 from app.services.task_queue import TaskQueue
 from app.services.bootstrap import bootstrap_application
 
@@ -24,6 +26,9 @@ async def lifespan(app: FastAPI):
     app.state.download_service = None
     await task_queue.start()
 
+    engine_runtime = ComfyUIRuntime(task_queue=task_queue)
+    app.state.engine_runtime = engine_runtime
+
     if bootstrap_state.status == "ok":
         download_service = create_download_service(
             db_path=bootstrap_state.db_path,
@@ -35,6 +40,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        await engine_runtime.stop()
         await task_queue.stop()
 
 
@@ -49,6 +55,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(health_router, prefix="/api")
     app.include_router(characters_router, prefix="/api")
+    app.include_router(engine_router, prefix="/api")
     app.include_router(generations_router, prefix="/api")
     app.include_router(tasks_router, prefix="/api")
     app.include_router(downloads_router, prefix="/api")
