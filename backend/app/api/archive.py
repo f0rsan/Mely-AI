@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
 
 from app.db.connection import connect_database
 from app.schemas.archive import GenerationArchiveRecord, GenerationArchiveRequest
@@ -78,3 +79,22 @@ def list_character_generations(
         )
 
     return {"items": [r.model_dump(by_alias=True) for r in records]}
+
+
+@router.get("/generations/{generation_id}/image")
+def get_generation_image(generation_id: str, request: Request) -> FileResponse:
+    runtime = _resolve_runtime(request)
+
+    with _open_connection(runtime.db_path) as conn:
+        row = conn.execute(
+            "SELECT output_path FROM generations WHERE id = ?", (generation_id,)
+        ).fetchone()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="生成记录不存在。")
+
+    image_path = Path(row["output_path"])
+    if not image_path.exists():
+        raise HTTPException(status_code=404, detail="生成图片文件不存在。")
+
+    return FileResponse(str(image_path), media_type="image/png")
