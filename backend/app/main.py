@@ -10,6 +10,7 @@ from app.api.engine import router as engine_router
 from app.api.generations import router as generations_router
 from app.api.downloads import router as downloads_router
 from app.api.health import router as health_router
+from app.api.prompt import router as prompt_router
 from app.api.tasks import router as tasks_router
 from app.services.downloads import create_download_service
 from app.services.engine_runtime import ComfyUIRuntime
@@ -56,6 +57,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router, prefix="/api")
     app.include_router(characters_router, prefix="/api")
     app.include_router(engine_router, prefix="/api")
+    app.include_router(prompt_router, prefix="/api")
     app.include_router(generations_router, prefix="/api")
     app.include_router(tasks_router, prefix="/api")
     app.include_router(downloads_router, prefix="/api")
