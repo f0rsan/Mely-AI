@@ -7,6 +7,7 @@ import {
   type GenerationMockJob,
   type GenerationWorkbenchContract,
 } from "../api/generations";
+import { archiveGeneration, type GenerationArchiveRecord } from "../api/archive";
 import { createTaskStream, type TaskConnectionState } from "../api/tasks";
 import { EngineStatusBadge } from "./EngineStatusBadge";
 import { PromptAssemblyPanel } from "./PromptAssemblyPanel";
@@ -35,7 +36,8 @@ type GenerateState =
   | { kind: "idle" }
   | { kind: "submitting" }
   | { kind: "running"; job: GenerationMockJob }
-  | { kind: "done"; job: GenerationMockJob }
+  | { kind: "archiving"; job: GenerationMockJob }
+  | { kind: "done"; job: GenerationMockJob; record: GenerationArchiveRecord }
   | { kind: "failed"; job: GenerationMockJob; message: string };
 
 function randomSeed(): number {
@@ -233,6 +235,8 @@ export function GenerationWorkbenchPage({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [taskConnection, setTaskConnection] = useState<TaskConnectionState>("disconnected");
   const wsDisconnectRef = useRef<(() => void) | null>(null);
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
 
   // Load workbench contract.
   useEffect(() => {
@@ -274,7 +278,7 @@ export function GenerationWorkbenchPage({
         if (event.task.id !== job.taskId) return prev;
 
         const updated = mergeTaskIntoGenerationJob(job, event.task);
-        if (updated.status === "completed") return { kind: "done", job: updated };
+        if (updated.status === "completed") return { kind: "archiving", job: updated };
         if (updated.status === "failed")
           return {
             kind: "failed",
@@ -289,6 +293,54 @@ export function GenerationWorkbenchPage({
       wsDisconnectRef.current?.();
     };
   }, []);
+
+  // Auto-archive when generation completes.
+  useEffect(() => {
+    if (generateState.kind !== "archiving") return;
+    const { job } = generateState;
+    const p = paramsRef.current;
+    let cancelled = false;
+
+    archiveGeneration({
+      characterId: job.characterId,
+      costumeId: job.costumeId,
+      assembledPrompt: job.scenePrompt,
+      width: p.width,
+      height: p.height,
+      steps: p.steps,
+      sampler: p.sampler,
+      cfgScale: p.cfgScale,
+      seed: p.seed,
+      loraWeight: p.loraWeight,
+      tags: p.tags,
+    })
+      .then((record) => {
+        if (!cancelled) setGenerateState({ kind: "done", job, record });
+      })
+      .catch((err: Error) => {
+        if (!cancelled) {
+          // Archive failure is non-fatal — show done but surface the error.
+          setGenerateState({
+            kind: "done",
+            job,
+            record: {
+              id: "",
+              characterId: job.characterId,
+              costumeId: job.costumeId,
+              outputPath: "",
+              paramsSnapshot: {},
+              tags: [],
+              createdAt: "",
+            },
+          });
+          setSubmitError(`生成已完成，但保存结果时出错：${err.message}`);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [generateState]);
 
   const handlePromptConfirm = useCallback((prompt: string) => {
     setAssembledPrompt(prompt);
@@ -422,6 +474,12 @@ export function GenerationWorkbenchPage({
       )}
 
       {/* Running */}
+      {generateState.kind === "archiving" && (
+        <p className="text-sm text-gray-400" role="status">
+          正在保存生成结果…
+        </p>
+      )}
+
       {generateState.kind === "running" && (
         <div className="flex flex-col gap-2">
           <div className="flex justify-between text-xs text-gray-400">
@@ -444,15 +502,20 @@ export function GenerationWorkbenchPage({
             className="rounded bg-green-900/30 border border-green-700 px-3 py-2 text-sm text-green-300"
             role="status"
           >
-            生成完成
+            生成完成，已保存至角色历史
           </div>
-          {/* Image placeholder — real file path will be wired in M2-F */}
+          {generateState.record.outputPath && (
+            <p className="text-xs text-gray-500 break-all">
+              文件：{generateState.record.outputPath}
+            </p>
+          )}
+          {/* Image preview — real rendering will come when engine returns bytes */}
           <div
             className="rounded bg-gray-800 border border-gray-700 flex items-center justify-center text-gray-500 text-sm"
             style={{ height: 200 }}
             aria-label="生成结果占位符"
           >
-            图片归档将在 M2-F 接入后显示
+            图片预览将在真实引擎接入后显示
           </div>
           <button
             type="button"

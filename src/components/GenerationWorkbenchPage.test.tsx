@@ -56,6 +56,18 @@ function buildContract(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function buildArchiveRecord() {
+  return {
+    id: "gen-1",
+    characterId: "char-1",
+    costumeId: "costume-1",
+    outputPath: "/tmp/.mely/characters/char-1/generations/gen-1.png",
+    paramsSnapshot: { assembledPrompt: "hoshino_mika, pink hair, 在咖啡馆", seed: 42 },
+    tags: [],
+    createdAt: "2026-03-31T00:00:00Z",
+  };
+}
+
 function buildAssembled() {
   return {
     assembled: "hoshino_mika, pink hair, 在咖啡馆",
@@ -226,12 +238,15 @@ test("submits generation job and shows progress via WebSocket", async () => {
   expect(screen.getByRole("progressbar")).toBeInTheDocument();
 });
 
-test("shows 再来一张 button after generation completes", async () => {
+test("shows 再来一张 button after generation completes and archives", async () => {
   const user = userEvent.setup();
 
   fetchMock.mockImplementation((url: string, opts?: RequestInit) => {
     if (url.includes("/generations/mock") && opts?.method === "POST") {
       return Promise.resolve({ ok: true, json: async () => ({ job: buildJob() }) });
+    }
+    if (url.includes("/generations/archive") && opts?.method === "POST") {
+      return Promise.resolve({ ok: true, json: async () => buildArchiveRecord() });
     }
     if (url.includes("/engine/status")) {
       return Promise.resolve({ ok: true, json: async () => buildEngineStatus("running") });
@@ -258,6 +273,6 @@ test("shows 再来一张 button after generation completes", async () => {
     task: { id: "task-1", name: "gen", status: "completed", progress: 100, message: "任务已完成", error: null, createdAt: "2026-03-31T00:00:00Z", updatedAt: "2026-03-31T00:00:02Z" },
   });
 
-  await screen.findByText("生成完成");
+  await screen.findByText("生成完成，已保存至角色历史");
   expect(screen.getByRole("button", { name: "再来一张" })).toBeInTheDocument();
 });

@@ -5,6 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.archive import router as archive_router
 from app.api.characters import router as characters_router
 from app.api.engine import router as engine_router
 from app.api.generations import router as generations_router
@@ -56,6 +57,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(health_router, prefix="/api")
     app.include_router(characters_router, prefix="/api")
+    app.include_router(archive_router, prefix="/api")
     app.include_router(engine_router, prefix="/api")
     app.include_router(prompt_router, prefix="/api")
     app.include_router(generations_router, prefix="/api")
