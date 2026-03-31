@@ -38,7 +38,7 @@ type GenerateState =
   | { kind: "idle" }
   | { kind: "submitting" }
   | { kind: "running"; job: GenerationMockJob }
-  | { kind: "archiving"; job: GenerationMockJob }
+  | { kind: "archiving"; job: GenerationMockJob; assembledPrompt: string }
   | { kind: "done"; job: GenerationMockJob; record: GenerationArchiveRecord }
   | { kind: "failed"; job: GenerationMockJob; message: string };
 
@@ -240,6 +240,8 @@ export function GenerationWorkbenchPage({
   const wsDisconnectRef = useRef<(() => void) | null>(null);
   const paramsRef = useRef(params);
   paramsRef.current = params;
+  const assembledPromptRef = useRef(assembledPrompt);
+  assembledPromptRef.current = assembledPrompt;
 
   // Load workbench contract.
   useEffect(() => {
@@ -281,7 +283,8 @@ export function GenerationWorkbenchPage({
         if (event.task.id !== job.taskId) return prev;
 
         const updated = mergeTaskIntoGenerationJob(job, event.task);
-        if (updated.status === "completed") return { kind: "archiving", job: updated };
+        if (updated.status === "completed")
+          return { kind: "archiving", job: updated, assembledPrompt: assembledPromptRef.current };
         if (updated.status === "failed")
           return {
             kind: "failed",
@@ -300,14 +303,14 @@ export function GenerationWorkbenchPage({
   // Auto-archive when generation completes.
   useEffect(() => {
     if (generateState.kind !== "archiving") return;
-    const { job } = generateState;
+    const { job, assembledPrompt: snapshotPrompt } = generateState;
     const p = paramsRef.current;
     let cancelled = false;
 
     archiveGeneration({
       characterId: job.characterId,
       costumeId: job.costumeId,
-      assembledPrompt: job.scenePrompt,
+      assembledPrompt: snapshotPrompt,
       width: p.width,
       height: p.height,
       steps: p.steps,

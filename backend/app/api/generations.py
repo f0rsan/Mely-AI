@@ -126,18 +126,20 @@ async def create_batch_generation(request: Request, payload: BatchGenerationRequ
     batch_id = uuid4().hex
     jobs: list[BatchJobItem] = []
 
-    for scene_prompt in payload.scene_prompts:
-        async def run_mock_batch_job(progress, _sp=scene_prompt) -> None:
-            await progress(20, f"正在处理：{_sp[:20]}")
+    def _make_batch_runner(sp: str):
+        async def _run(progress) -> None:
+            await progress(20, f"正在处理：{sp[:20]}")
             await asyncio.sleep(0.05)
             await progress(60, "正在准备图像引擎")
             await asyncio.sleep(0.05)
             await progress(90, "批量任务执行中")
             await asyncio.sleep(0.05)
+        return _run
 
+    for scene_prompt in payload.scene_prompts:
         task = await queue.submit(
             name=f"batch-{batch_id}-{payload.character_id}",
-            runner=run_mock_batch_job,
+            runner=_make_batch_runner(scene_prompt),
             initial_message="批量生成任务已进入队列",
         )
 

@@ -87,13 +87,23 @@ def get_generation_image(generation_id: str, request: Request) -> FileResponse:
 
     with _open_connection(runtime.db_path) as conn:
         row = conn.execute(
-            "SELECT output_path FROM generations WHERE id = ?", (generation_id,)
+            "SELECT character_id, output_path FROM generations WHERE id = ?",
+            (generation_id,),
         ).fetchone()
 
     if row is None:
         raise HTTPException(status_code=404, detail="生成记录不存在。")
 
-    image_path = Path(row["output_path"])
+    image_path = Path(row["output_path"]).resolve()
+    allowed_root = (
+        runtime.data_root / "characters" / row["character_id"] / "generations"
+    ).resolve()
+
+    try:
+        image_path.relative_to(allowed_root)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="无权访问该资源。")
+
     if not image_path.exists():
         raise HTTPException(status_code=404, detail="生成图片文件不存在。")
 
