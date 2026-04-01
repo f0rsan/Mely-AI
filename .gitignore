@@ -22,3 +22,7 @@ backend/*.egg-info/
 worktrees/
 .mely/
 tmp/
+
+# PyInstaller build artifacts
+backend/build/
+backend/dist/
