@@ -32,6 +32,8 @@ import { TTSGeneratePanel } from "./components/TTSGeneratePanel";
 import { AudioHistoryGallery } from "./components/AudioHistoryGallery";
 import { TaskProgressList } from "./components/TaskProgressList";
 import { TrainingProgressPanel } from "./components/TrainingProgressPanel";
+import { CostumeWorkspace } from "./components/CostumeWorkspace";
+import { ExportWorkspace } from "./components/ExportWorkspace";
 import {
   createDatasetFilesFromMockCandidates,
   generateTextToCharacterCandidatesMock,
@@ -49,7 +51,7 @@ type DatasetPreviewItem = {
   previewUrl: string;
 };
 
-type DetailTab = "dataset" | "textToCharacter" | "dna" | "training" | "generation" | "voice";
+type DetailTab = "dataset" | "textToCharacter" | "dna" | "training" | "generation" | "voice" | "costume" | "export";
 
 type DnaFormState = Record<DnaFieldKey, string>;
 
@@ -673,6 +675,10 @@ function DatasetWorkspace({
         ? "生成工作台"
       : activeTab === "voice"
         ? "声音绑定"
+      : activeTab === "costume"
+        ? "造型版本树"
+      : activeTab === "export"
+        ? "导出设定书"
         : "训练进度与验证";
 
   return (
@@ -727,6 +733,20 @@ function DatasetWorkspace({
           onClick={() => onSwitchTab("voice")}
         >
           声音绑定
+        </button>
+        <button
+          className={`detail-tab-button ${activeTab === "costume" ? "detail-tab-active" : ""}`}
+          type="button"
+          onClick={() => onSwitchTab("costume")}
+        >
+          造型管理
+        </button>
+        <button
+          className={`detail-tab-button ${activeTab === "export" ? "detail-tab-active" : ""}`}
+          type="button"
+          onClick={() => onSwitchTab("export")}
+        >
+          导出设定书
         </button>
       </div>
 
@@ -905,6 +925,10 @@ function DatasetWorkspace({
         />
       ) : activeTab === "voice" ? (
         <VoiceWorkspace characterId={character.id} />
+      ) : activeTab === "costume" ? (
+        <CostumeWorkspace characterId={character.id} />
+      ) : activeTab === "export" ? (
+        <ExportWorkspace characterId={character.id} />
       ) : (
         <>
           {activeTab === "dna" ? (
