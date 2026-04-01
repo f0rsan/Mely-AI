@@ -16,6 +16,7 @@ from app.api.prompt import router as prompt_router
 from app.api.tasks import router as tasks_router
 from app.api.training import router as training_router
 from app.api.voice import router as voice_router
+from app.api.exports import router as exports_router
 from app.services.downloads import create_download_service
 from app.services.training import create_training_service
 from app.services.engine_runtime import ComfyUIRuntime
@@ -88,6 +89,7 @@ def create_app() -> FastAPI:
     app.include_router(downloads_router, prefix="/api")
     app.include_router(training_router, prefix="/api")
     app.include_router(voice_router, prefix="/api")
+    app.include_router(exports_router, prefix="/api")
 
     @app.exception_handler(RequestValidationError)
     async def handle_validation_error(_request, _exc):
