@@ -46,6 +46,12 @@ def resolve_model_registry_path(settings: Settings) -> Path:
     return (Path(__file__).resolve().parents[1] / "config" / "model_registry.json").resolve()
 
 
+def is_f5tts_model_available(data_root: Path) -> bool:
+    """Return True if the F5-TTS base model file is present on disk."""
+    model_path = data_root / "models" / "tts" / "f5-tts-base" / "model_1200000.safetensors"
+    return model_path.exists()
+
+
 def load_model_registry(settings: Settings) -> ModelRegistry:
     path = resolve_model_registry_path(settings)
     if not path.exists():
