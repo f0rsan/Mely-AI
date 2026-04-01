@@ -2,25 +2,32 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 import httpx
 
-from app.schemas.engine import EngineState, EngineStatus
 from app.services.gpu_mutex import EngineGpuMutexError, check_gpu_exclusive
 
 if TYPE_CHECKING:
     from app.services.task_queue import TaskQueue
 
-_DEFAULT_COMFYUI_CMD = [
-    "python",
-    "ComfyUI/main.py",
-    "--listen",
-    "127.0.0.1",
-    "--port",
-    "8188",
-    "--headless",
-]
+TTSEngineState = Literal["stopped", "starting", "running", "crashed", "restarting", "failed"]
+
+_DEFAULT_TTS_CMD = ["python", "-m", "f5_tts.serve", "--port", "8189"]
+
+
+class TTSEngineStatus:
+    def __init__(
+        self,
+        state: TTSEngineState,
+        restart_count: int,
+        error_message: str | None,
+        pid: int | None,
+    ) -> None:
+        self.state = state
+        self.restart_count = restart_count
+        self.error_message = error_message
+        self.pid = pid
 
 
 @runtime_checkable
@@ -35,21 +42,21 @@ class DefaultProcessLauncher:
         return subprocess.Popen(cmd, **kwargs)  # pragma: no cover
 
 
-class ComfyUIRuntime:
+class TTSRuntime:
     MAX_RESTARTS: int = 3
-    HEALTH_CHECK_URL: str = "http://127.0.0.1:8188/"
+    HEALTH_CHECK_URL: str = "http://127.0.0.1:8189/health"
     HEALTH_CHECK_TIMEOUT_S: float = 2.0
     HEALTH_POLL_INTERVAL_S: float = 1.0
-    STARTUP_TIMEOUT_S: float = 30.0
+    STARTUP_TIMEOUT_S: float = 60.0
     BACKOFF_BASE_S: float = 2.0
     # Consecutive ping failures before declaring a crash during run-phase monitoring.
     PING_FAILURE_THRESHOLD: int = 3
 
     def __init__(
         self,
-        task_queue: TaskQueue,
+        task_queue: "TaskQueue",
         launcher: ProcessLauncher | None = None,
-        comfyui_cmd: list[str] | None = None,
+        tts_cmd: list[str] | None = None,
         http_client: httpx.AsyncClient | None = None,
         *,
         health_check_timeout_s: float | None = None,
@@ -59,7 +66,7 @@ class ComfyUIRuntime:
     ) -> None:
         self._task_queue = task_queue
         self._launcher: ProcessLauncher = launcher or DefaultProcessLauncher()
-        self._comfyui_cmd: list[str] = comfyui_cmd or _DEFAULT_COMFYUI_CMD
+        self._tts_cmd: list[str] = tts_cmd or _DEFAULT_TTS_CMD
         self._http_client = http_client
 
         # Allow tests to override timing constants via constructor.
@@ -72,7 +79,7 @@ class ComfyUIRuntime:
         if backoff_base_s is not None:
             self.BACKOFF_BASE_S = backoff_base_s
 
-        self._state: EngineState = "stopped"
+        self._state: TTSEngineState = "stopped"
         self._restart_count: int = 0
         self._error_message: str | None = None
         self._process: subprocess.Popen[bytes] | None = None
@@ -94,7 +101,7 @@ class ComfyUIRuntime:
             self._state = "starting"
             self._error_message = None
             self._process = self._launcher.launch(
-                self._comfyui_cmd,
+                self._tts_cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
@@ -114,14 +121,14 @@ class ComfyUIRuntime:
             await self._terminate_process()
             self._state = "stopped"
 
-    def get_status(self) -> EngineStatus:
+    def get_status(self) -> TTSEngineStatus:
         pid: int | None = None
         if self._process is not None and self._process.poll() is None:
             pid = self._process.pid
-        return EngineStatus(
+        return TTSEngineStatus(
             state=self._state,
-            restartCount=self._restart_count,
-            errorMessage=self._error_message,
+            restart_count=self._restart_count,
+            error_message=self._error_message,
             pid=pid,
         )
 
@@ -211,7 +218,7 @@ class ComfyUIRuntime:
             if self._restart_count > self.MAX_RESTARTS:
                 self._state = "failed"
                 self._error_message = (
-                    "图像引擎多次崩溃后仍无法恢复，请检查 GPU 驱动是否正常"
+                    "语音引擎多次崩溃后仍无法恢复，请检查 GPU 驱动是否正常"
                 )
                 await self._terminate_process()
                 return
@@ -228,7 +235,7 @@ class ComfyUIRuntime:
                 return
             self._state = "starting"
             self._process = self._launcher.launch(
-                self._comfyui_cmd,
+                self._tts_cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )

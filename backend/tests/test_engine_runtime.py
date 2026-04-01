@@ -272,7 +272,7 @@ async def test_gpu_mutex_blocks_start_when_training_is_running():
     with pytest.raises(EngineGpuMutexError) as exc_info:
         await runtime.start()
 
-    assert "训练任务" in str(exc_info.value)
+    assert "GPU" in str(exc_info.value)
     assert runtime.get_status().state == "stopped"
 
     await queue.stop()
