@@ -14,7 +14,7 @@ vi.mock("../api/tasks", () => ({
 }));
 
 import { synthesizeSpeech, fetchTTSEngineStatus } from "../api/voice";
-import { createTaskStream } from "../api/tasks";
+import { type TaskEvent, type TaskStatus, createTaskStream } from "../api/tasks";
 import { TTSGeneratePanel } from "./TTSGeneratePanel";
 
 const mockSynthesize = vi.mocked(synthesizeSpeech);
@@ -34,11 +34,11 @@ class MockWebSocket {
   }
 }
 
-function buildTask(overrides = {}) {
+function buildTask(overrides: Partial<{ id: string; name: string; status: TaskStatus; progress: number; message: string | null; error: string | null; createdAt: string; updatedAt: string }> = {}) {
   return {
     id: "task-1",
     name: "tts-char-1",
-    status: "running",
+    status: "running" as TaskStatus,
     progress: 50,
     message: "正在合成语音",
     error: null,
@@ -86,7 +86,7 @@ test("shows submitting then generating state after submit", async () => {
     message: "语音合成任务已提交",
   });
 
-  let streamCallback: ((event: unknown) => void) | null = null;
+  let streamCallback: ((event: TaskEvent) => void) | null = null;
   mockCreateTaskStream.mockImplementation((cb) => {
     streamCallback = cb;
     return vi.fn();
@@ -113,9 +113,9 @@ test("shows done state when task completes", async () => {
     message: "ok",
   });
 
-  let streamCallback: ((event: unknown) => void) | null = null;
+  let streamCallback: ((event: TaskEvent) => void) | null = null;
   mockCreateTaskStream.mockImplementation((cb) => {
-    streamCallback = cb as (event: unknown) => void;
+    streamCallback = cb;
     return vi.fn();
   });
 
@@ -142,9 +142,9 @@ test("shows failed state when task fails", async () => {
     message: "ok",
   });
 
-  let streamCallback: ((event: unknown) => void) | null = null;
+  let streamCallback: ((event: TaskEvent) => void) | null = null;
   mockCreateTaskStream.mockImplementation((cb) => {
-    streamCallback = cb as (event: unknown) => void;
+    streamCallback = cb;
     return vi.fn();
   });
 

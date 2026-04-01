@@ -27,6 +27,9 @@ import {
   type TaskSnapshot,
 } from "./api/tasks";
 import { GenerationWorkbenchPage } from "./components/GenerationWorkbenchPage";
+import { VoiceBindPanel } from "./components/VoiceBindPanel";
+import { TTSGeneratePanel } from "./components/TTSGeneratePanel";
+import { AudioHistoryGallery } from "./components/AudioHistoryGallery";
 import { TaskProgressList } from "./components/TaskProgressList";
 import { TrainingProgressPanel } from "./components/TrainingProgressPanel";
 import {
@@ -46,7 +49,7 @@ type DatasetPreviewItem = {
   previewUrl: string;
 };
 
-type DetailTab = "dataset" | "textToCharacter" | "dna" | "training" | "generation";
+type DetailTab = "dataset" | "textToCharacter" | "dna" | "training" | "generation" | "voice";
 
 type DnaFormState = Record<DnaFieldKey, string>;
 
@@ -587,6 +590,46 @@ function TextToCharacterWorkspace({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Voice sub-tab workspace
+// ---------------------------------------------------------------------------
+
+type VoiceSubTab = "bind" | "generate" | "history";
+
+function VoiceWorkspace({ characterId }: { characterId: string }) {
+  const [subTab, setSubTab] = useState<VoiceSubTab>("bind");
+
+  return (
+    <div className="flex flex-col gap-0">
+      <div className="flex gap-1 border-b border-gray-700 mb-0">
+        {(["bind", "generate", "history"] as VoiceSubTab[]).map((t) => (
+          <button
+            key={t}
+            type="button"
+            className={`text-xs px-3 py-1.5 border-b-2 transition-colors ${
+              subTab === t
+                ? "border-blue-500 text-blue-400"
+                : "border-transparent text-gray-400 hover:text-gray-200"
+            }`}
+            onClick={() => setSubTab(t)}
+          >
+            {t === "bind" ? "绑定" : t === "generate" ? "生成" : "历史"}
+          </button>
+        ))}
+      </div>
+
+      {subTab === "bind" && <VoiceBindPanel characterId={characterId} />}
+      {subTab === "generate" && (
+        <TTSGeneratePanel
+          characterId={characterId}
+          onViewHistory={() => setSubTab("history")}
+        />
+      )}
+      {subTab === "history" && <AudioHistoryGallery characterId={characterId} />}
+    </div>
+  );
+}
+
 function DatasetWorkspace({
   character,
   activeTab,
@@ -628,6 +671,8 @@ function DatasetWorkspace({
         ? "角色 DNA 配置"
       : activeTab === "generation"
         ? "生成工作台"
+      : activeTab === "voice"
+        ? "声音绑定"
         : "训练进度与验证";
 
   return (
@@ -675,6 +720,13 @@ function DatasetWorkspace({
           onClick={() => onSwitchTab("generation")}
         >
           生成工作台
+        </button>
+        <button
+          className={`detail-tab-button ${activeTab === "voice" ? "detail-tab-active" : ""}`}
+          type="button"
+          onClick={() => onSwitchTab("voice")}
+        >
+          声音绑定
         </button>
       </div>
 
@@ -851,6 +903,8 @@ function DatasetWorkspace({
           characterId={character.id}
           characterName={character.name}
         />
+      ) : activeTab === "voice" ? (
+        <VoiceWorkspace characterId={character.id} />
       ) : (
         <>
           {activeTab === "dna" ? (
