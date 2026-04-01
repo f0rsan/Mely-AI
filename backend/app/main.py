@@ -15,9 +15,12 @@ from app.api.health import router as health_router
 from app.api.prompt import router as prompt_router
 from app.api.tasks import router as tasks_router
 from app.api.training import router as training_router
+from app.api.voice import router as voice_router
 from app.services.downloads import create_download_service
 from app.services.training import create_training_service
 from app.services.engine_runtime import ComfyUIRuntime
+from app.services.tts_runtime import TTSRuntime
+from app.services.voice_service import create_voice_service
 from app.services.task_queue import TaskQueue
 from app.services.bootstrap import bootstrap_application
 
@@ -35,6 +38,10 @@ async def lifespan(app: FastAPI):
     engine_runtime = ComfyUIRuntime(task_queue=task_queue)
     app.state.engine_runtime = engine_runtime
 
+    tts_runtime = TTSRuntime(task_queue=task_queue)
+    app.state.tts_runtime = tts_runtime
+    app.state.voice_service = None
+
     if bootstrap_state.status == "ok":
         download_service = create_download_service(
             db_path=bootstrap_state.db_path,
@@ -46,10 +53,17 @@ async def lifespan(app: FastAPI):
             db_path=bootstrap_state.db_path,
             queue=task_queue,
         )
+        app.state.voice_service = create_voice_service(
+            db_path=bootstrap_state.db_path,
+            data_root=bootstrap_state.data_root,
+            queue=task_queue,
+            tts_runtime=tts_runtime,
+        )
         await download_service.recover_pending_tasks()
     try:
         yield
     finally:
+        await tts_runtime.stop()
         await engine_runtime.stop()
         await task_queue.stop()
 
@@ -73,6 +87,7 @@ def create_app() -> FastAPI:
     app.include_router(tasks_router, prefix="/api")
     app.include_router(downloads_router, prefix="/api")
     app.include_router(training_router, prefix="/api")
+    app.include_router(voice_router, prefix="/api")
 
     @app.exception_handler(RequestValidationError)
     async def handle_validation_error(_request, _exc):
