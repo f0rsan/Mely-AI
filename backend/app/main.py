@@ -18,8 +18,20 @@ from app.api.training import router as training_router
 from app.api.voice import router as voice_router
 from app.api.costumes import router as costumes_router
 from app.api.exports import router as exports_router
+from app.api.llm import router as llm_router
+from app.api.llm_datasets import router as llm_datasets_router
+from app.api.llm_training import router as llm_training_router
+from app.api.llm_models import router as llm_models_router
+from app.api.chat import router as chat_router
+from app.api.visual_datasets import router as visual_datasets_router
+from app.api.visual_training import router as visual_training_router
 from app.services.downloads import create_download_service
 from app.services.training import create_training_service
+from app.services.llm_training import create_llm_training_service
+from app.services.llm_model_service import create_llm_model_service
+from app.services.chat_service import create_chat_service
+from app.services.visual_dataset_service import create_visual_dataset_service
+from app.services.visual_training_service import create_visual_training_service
 from app.services.engine_runtime import ComfyUIRuntime
 from app.services.tts_runtime import TTSRuntime
 from app.services.voice_service import create_voice_service
@@ -61,6 +73,24 @@ async def lifespan(app: FastAPI):
             queue=task_queue,
             tts_runtime=tts_runtime,
         )
+        app.state.llm_training_service = create_llm_training_service(
+            db_path=bootstrap_state.db_path,
+            queue=task_queue,
+        )
+        app.state.llm_model_service = create_llm_model_service(
+            db_path=bootstrap_state.db_path,
+        )
+        app.state.chat_service = create_chat_service(
+            db_path=bootstrap_state.db_path,
+        )
+        app.state.visual_dataset_service = create_visual_dataset_service(
+            db_path=bootstrap_state.db_path,
+            data_root=bootstrap_state.data_root,
+        )
+        app.state.visual_training_service = create_visual_training_service(
+            db_path=bootstrap_state.db_path,
+            queue=task_queue,
+        )
         await download_service.recover_pending_tasks()
     try:
         yield
@@ -92,6 +122,13 @@ def create_app() -> FastAPI:
     app.include_router(voice_router, prefix="/api")
     app.include_router(costumes_router, prefix="/api")
     app.include_router(exports_router, prefix="/api")
+    app.include_router(llm_router, prefix="/api")
+    app.include_router(llm_datasets_router, prefix="/api")
+    app.include_router(llm_training_router, prefix="/api")
+    app.include_router(llm_models_router, prefix="/api")
+    app.include_router(chat_router, prefix="/api")
+    app.include_router(visual_datasets_router, prefix="/api")
+    app.include_router(visual_training_router, prefix="/api")
 
     @app.exception_handler(RequestValidationError)
     async def handle_validation_error(_request, _exc):

@@ -34,6 +34,8 @@ import { TaskProgressList } from "./components/TaskProgressList";
 import { TrainingProgressPanel } from "./components/TrainingProgressPanel";
 import { CostumeWorkspace } from "./components/CostumeWorkspace";
 import { ExportWorkspace } from "./components/ExportWorkspace";
+import { LLMWorkspace } from "./components/LLMWorkspace";
+import { VisualWorkspace } from "./components/VisualWorkspace";
 import {
   createDatasetFilesFromMockCandidates,
   generateTextToCharacterCandidatesMock,
@@ -51,7 +53,7 @@ type DatasetPreviewItem = {
   previewUrl: string;
 };
 
-type DetailTab = "dataset" | "textToCharacter" | "dna" | "training" | "generation" | "voice" | "costume" | "export";
+type DetailTab = "dataset" | "textToCharacter" | "dna" | "training" | "generation" | "voice" | "costume" | "export" | "llm" | "visual";
 
 type DnaFormState = Record<DnaFieldKey, string>;
 
@@ -679,6 +681,10 @@ function DatasetWorkspace({
         ? "造型版本树"
       : activeTab === "export"
         ? "导出设定书"
+      : activeTab === "llm"
+        ? "LLM 工作台"
+      : activeTab === "visual"
+        ? "视觉工作台"
         : "训练进度与验证";
 
   return (
@@ -747,6 +753,44 @@ function DatasetWorkspace({
           onClick={() => onSwitchTab("export")}
         >
           导出设定书
+        </button>
+        <button
+          className={`detail-tab-button ${activeTab === "llm" ? "detail-tab-active" : ""}`}
+          type="button"
+          onClick={() => onSwitchTab("llm")}
+        >
+          LLM 工作台
+          <span
+            aria-hidden="true"
+            style={{
+              display: "inline-block",
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: "#6366f1",
+              marginLeft: 5,
+              verticalAlign: "middle",
+            }}
+          />
+        </button>
+        <button
+          className={`detail-tab-button ${activeTab === "visual" ? "detail-tab-active" : ""}`}
+          type="button"
+          onClick={() => onSwitchTab("visual")}
+        >
+          视觉工作台
+          <span
+            aria-hidden="true"
+            style={{
+              display: "inline-block",
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: "#10b981",
+              marginLeft: 5,
+              verticalAlign: "middle",
+            }}
+          />
         </button>
       </div>
 
@@ -929,6 +973,10 @@ function DatasetWorkspace({
         <CostumeWorkspace characterId={character.id} />
       ) : activeTab === "export" ? (
         <ExportWorkspace characterId={character.id} />
+      ) : activeTab === "llm" ? (
+        <LLMWorkspace characterId={character.id} characterName={character.name} />
+      ) : activeTab === "visual" ? (
+        <VisualWorkspace characterId={character.id} />
       ) : (
         <>
           {activeTab === "dna" ? (

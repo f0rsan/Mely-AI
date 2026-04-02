@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.services.task_queue import TaskQueue
 
-GPU_EXCLUSIVE_PREFIXES = ("training-", "generation-", "tts-")
+GPU_EXCLUSIVE_PREFIXES = ("training-", "generation-", "tts-", "llm-training-", "visual-training-")
 
 
 class EngineGpuMutexError(Exception):
