@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mely AI — M0–M2 阶段成果</title>
+<style>
+  :root {
+    --bg: #0b0f1a;
+    --surface: #111827;
+    --surface2: #1a2234;
+    --border: rgba(255,255,255,0.08);
+    --accent: #6366f1;
+    --accent2: #818cf8;
+    --green: #22c55e;
+    --yellow: #f59e0b;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+    --chip-bg: rgba(99,102,241,0.12);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, 'PingFang SC', 'Segoe UI', sans-serif;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ── header ── */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 20px 40px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: rgba(17,24,39,0.8);
+    backdrop-filter: blur(12px);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .logo {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, #6366f1, #a78bfa);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+  }
+  header h1 { font-size: 18px; font-weight: 700; letter-spacing: -.3px; }
+  header .tagline { margin-left: auto; color: var(--muted); font-size: 13px; }
+  .badge-green {
+    background: rgba(34,197,94,0.15);
+    color: #4ade80;
+    font-size: 11px;
+    padding: 2px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(34,197,94,0.3);
+    font-weight: 600;
+    letter-spacing: .5px;
+  }
+
+  /* ── hero ── */
+  .hero {
+    padding: 72px 40px 56px;
+    max-width: 900px;
+    margin: 0 auto;
+    text-align: center;
+  }
+  .hero .phase-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--chip-bg);
+    border: 1px solid rgba(99,102,241,0.3);
+    color: var(--accent2);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 14px;
+    border-radius: 999px;
+    letter-spacing: .5px;
+    margin-bottom: 24px;
+  }
+  .hero h2 {
+    font-size: clamp(28px, 5vw, 48px);
+    font-weight: 800;
+    letter-spacing: -1px;
+    line-height: 1.15;
+    margin-bottom: 18px;
+  }
+  .hero h2 span {
+    background: linear-gradient(90deg, #818cf8, #c084fc, #f472b6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .hero p {
+    color: var(--muted);
+    font-size: 16px;
+    max-width: 560px;
+    margin: 0 auto 36px;
+  }
+
+  /* ── stats bar ── */
+  .stats-bar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    max-width: 760px;
+    margin: 0 auto 80px;
+  }
+  .stat {
+    background: var(--surface);
+    padding: 20px 24px;
+    text-align: center;
+  }
+  .stat-value {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--accent2);
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+  .stat-value.green { color: #4ade80; }
+  .stat-label { font-size: 12px; color: var(--muted); }
+
+  /* ── section ── */
+  .section {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 0 40px 80px;
+  }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+  .module-tag {
+    background: var(--chip-bg);
+    border: 1px solid rgba(99,102,241,0.25);
+    color: var(--accent2);
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 6px;
+    letter-spacing: 1px;
+  }
+  .module-tag.m0 { background: rgba(20,184,166,0.1); border-color: rgba(20,184,166,0.3); color: #5eead4; }
+  .module-tag.m1 { background: rgba(249,115,22,0.1); border-color: rgba(249,115,22,0.3); color: #fb923c; }
+  .module-tag.m2 { background: rgba(99,102,241,0.12); border-color: rgba(99,102,241,0.3); color: #a5b4fc; }
+  .section-title { font-size: 22px; font-weight: 700; }
+  .section-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+  /* ── cards grid ── */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 22px;
+    transition: border-color .2s, transform .2s;
+  }
+  .card:hover {
+    border-color: rgba(99,102,241,0.4);
+    transform: translateY(-2px);
+  }
+  .card-icon {
+    font-size: 22px;
+    margin-bottom: 10px;
+    display: block;
+  }
+  .card-title {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .card-desc {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+  .card-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 12px;
+  }
+  .chip {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .chip.done {
+    background: rgba(34,197,94,0.08);
+    border-color: rgba(34,197,94,0.2);
+    color: #86efac;
+  }
+
+  /* ── timeline ── */
+  .timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .timeline-item {
+    display: grid;
+    grid-template-columns: 160px 24px 1fr;
+    gap: 0 16px;
+    align-items: start;
+  }
+  .timeline-item + .timeline-item { margin-top: 0; }
+  .tl-commit {
+    font-size: 12px;
+    color: var(--muted);
+    padding-top: 3px;
+    text-align: right;
+    font-family: ui-monospace, monospace;
+  }
+  .tl-dot-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .tl-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+    flex-shrink: 0;
+    margin-top: 4px;
+  }
+  .tl-dot.m0 { background: #5eead4; }
+  .tl-dot.m1 { background: #fb923c; }
+  .tl-dot.m2 { background: #a5b4fc; }
+  .tl-line {
+    flex: 1;
+    width: 1px;
+    background: var(--border);
+    min-height: 36px;
+  }
+  .tl-content {
+    padding-bottom: 24px;
+  }
+  .tl-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 2px;
+  }
+  .tl-sub { font-size: 12px; color: var(--muted); }
+
+  /* ── arch diagram ── */
+  .arch {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+    margin-top: 8px;
+  }
+  .arch-col {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .arch-col-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .8px;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .arch-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    padding: 5px 0;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+  }
+  .arch-item:last-child { border-bottom: none; }
+  .arch-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent2);
+    flex-shrink: 0;
+  }
+  .arch-dot.green { background: #4ade80; }
+  .arch-dot.orange { background: #fb923c; }
+
+  /* ── test bar ── */
+  .test-summary {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  .test-group-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .5px;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .test-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .test-row:last-child { border-bottom: none; }
+  .test-count {
+    font-family: ui-monospace, monospace;
+    font-size: 13px;
+    color: #4ade80;
+    font-weight: 700;
+  }
+
+  /* ── next ── */
+  .next-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+  }
+  .next-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    opacity: .7;
+  }
+  .next-card .tag {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .8px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .next-card .title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .next-card .desc { font-size: 12px; color: var(--muted); }
+
+  /* ── footer ── */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 28px 40px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  @media (max-width: 640px) {
+    header { padding: 16px 20px; }
+    .hero { padding: 48px 20px 40px; }
+    .section { padding: 0 20px 60px; }
+    .arch { grid-template-columns: 1fr; }
+    .test-summary { grid-template-columns: 1fr; }
+    .timeline-item { grid-template-columns: 100px 20px 1fr; }
+    header .tagline { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">M</div>
+  <h1>Mely AI</h1>
+  <span class="badge-green">M0–M2 完成</span>
+  <span class="tagline">本地优先 · AI 角色创作 · Windows-first</span>
+</header>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="phase-label">📦 阶段里程碑 · 2026-03-31</div>
+  <h2>你的角色，<span>永远是同一个人</span></h2>
+  <p>从基础骨架到完整生成工作台，M0 → M1 → M2 三个模块已全部落地 main，覆盖 107 项后端测试 + 98 项前端测试。</p>
+
+  <div class="stats-bar">
+    <div class="stat">
+      <div class="stat-value">3</div>
+      <div class="stat-label">已完成模块</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">107</div>
+      <div class="stat-label">后端测试</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">98</div>
+      <div class="stat-label">前端测试</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value green">205</div>
+      <div class="stat-label">总计全部通过</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">0</div>
+      <div class="stat-label">失败用例</div>
+    </div>
+  </div>
+</section>
+
+<!-- M0 -->
+<section class="section">
+  <div class="section-header">
+    <span class="module-tag m0">M0</span>
+    <div>
+      <div class="section-title">基础层</div>
+      <div class="section-sub">Tauri 桌面壳 · FastAPI sidecar · SQLite · 任务队列 · 按需下载</div>
+    </div>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <span class="card-icon">🖥️</span>
+      <div class="card-title">Tauri 2.x 桌面壳</div>
+      <div class="card-desc">React 18 + TypeScript strict mode，Vite 构建，Tailwind CSS 样式系统，首页后端连接状态显示。</div>
+      <div class="card-chips">
+        <span class="chip done">✓ Tauri 2.x</span>
+        <span class="chip done">✓ React 18</span>
+        <span class="chip done">✓ Vite</span>
+      </div>
+    </div>
+    <div class="card">
+      <span class="card-icon">⚙️</span>
+      <div class="card-title">FastAPI Sidecar 后端</div>
+      <div class="card-desc">Python FastAPI 作为 Tauri sidecar 进程，CORS 配置，统一中文错误响应，lifespan 服务初始化。</div>
+      <div class="card-chips">
+        <span class="chip done">✓ FastAPI</span>
+        <span class="chip done">✓ Pydantic v2</span>
+        <span class="chip done">✓ CORS</span>
+      </div>
+    </div>
+    <div class="card">
+      <span class="card-icon">🗄️</span>
+      <div class="card-title">SQLite 数据库</div>
+      <div class="card-desc">单文件零配置，自动迁移系统，schema 版本控制，首次启动自动初始化 ~/.mely/db/mely.db。</div>
+      <div class="card-chips">
+        <span class="chip done">✓ 迁移系统</span>
+        <span class="chip done">✓ WAL 模式</span>
+        <span class="chip done">✓ FK 约束</span>
+      </div>
+    </div>
+    <div class="card">
+      <span class="card-icon">📋</span>
+      <div class="card-title">异步任务队列</div>
+      <div class="card-desc">FIFO 任务队列，实时进度推送（WebSocket /api/tasks/stream），订阅/退订机制，任务快照。</div>
+      <div class="card-chips">
+        <span class="chip done">✓ WebSocket</span>
+        <span class="chip done">✓ 进度推送</span>
+        <span class="chip done">✓ FIFO</span>
+      </div>
+    </div>
+    <div class="card">
+      <span class="card-icon">⬇️</span>
+      <div class="card-title">按需下载框架</div>
+      <div class="card-desc">可恢复下载服务，断点续传，下载任务入队，启动恢复 pending 任务，支持进度报告。</div>
+      <div class="card-chips">
+        <span class="chip done">✓ 断点续传</span>
+        <span class="chip done">✓ 任务恢复</span>
+      </div>
+    </div>
+    <div class="card">
+      <span class="card-icon">👤</span>
+      <div class="card-title">角色管理 API</div>
+      <div class="card-desc">角色 CRUD，LoRA 元信息存储，角色目录自动创建，Pydantic 模型验证，中文错误响应。</div>
+      <div class="card-chips">
+        <span class="chip done">✓ CRUD</span>
+        <span class="chip done">✓ LoRA 元信息</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- M1 -->
+<section class="section">
+  <div class="section-header">
+    <span class="module-tag m1">M1</span>
+    <div>
+      <div class="section-title">视觉训练</div>
+      <div class="section-sub">数据集管理 · 角色 DNA · LoRA 训练进度 · 文字创角 Mock</div>
+    </div>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <span class="card-icon">📁</span>
+      <div class="card-title">数据集导入与评估</div>
+      <div class="card-desc">批量上传训练图片，质量评分系统，角度覆盖分析，改进建议生成，历史记录查看。</div>
+      <div class="card-chips">
+        <span class="chip done">✓ 批量上传</span>
+        <span class="chip done">✓ 质量评分</span>
+        <span class="chip done">✓ 历史记录</span>
+      </div>
+    </div>
+    <div class="card">
+      <span class="card-icon">🧬</span>
+      <div class="card-title">角色 DNA 配置</div>
+      <div class="card-desc">发色 / 瞳色 / 肤色 / 体型 / 风格五维 DNA 表单，AI 一键建议，Prompt 预览，持久化保存。</div>
+      <div class="card-chips">
+        <span class="chip done">✓ 五维 DNA</span>
+        <span class="chip done">✓ AI 建议</span>
+        <span class="chip done">✓ Prompt 预览</span>
+      </div>
+    </div>
+    <div class="card">
+      <span class="card-icon">🎓</span>
+      <div class="card-title">训练进度可视化</div>
+      <div class="card-desc">LoRA 训练任务提交，实时进度条，Loss 曲线展示，训练参数快照，验证图预览。</div>
+      <div class="card-chips">
+        <span class="chip done">✓ 实时进度</span>
+        <span class="chip done">✓ Loss 曲线</span>
+        <span class="chip done">✓ 验证图</span>
+      </div>
+    </div>
+    <div class="card">
+      <span class="card-icon">✍️</span>
+      <div class="card-title">文字创角（Mock）</div>
+      <div class="card-desc">输入角色描述文本，AI 生成候选外貌描述，多选后一键导入数据集，支持空结果和错误状态。</div>
+      <div class="card-chips">
+        <span class="chip done">✓ 文字输入</span>
+        <span class="chip done">✓ 候选选择</span>
+        <span class="chip done">✓ 导入数据集</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- M2 -->
+<section class="section">
+  <div class="section-header">
+    <span class="module-tag m2">M2</span>
+    <div>
+      <div class="section-title">生成工作台</div>
+      <div class="section-sub">ComfyUI 引擎 · Prompt 组装 · 单张生成 · 批量队列 · 历史图库</div>
+    </div>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <span class="card-icon">🚀</span>
+      <div class="card-title">ComfyUI 引擎运行时</div>
+      <div class="card-desc">状态机（stopped → starting → running → crashed → restarting → failed），GPU 互斥锁，崩溃自动重启最多 3 次，指数退避，引擎状态徽章轮询组件。</div>
+      <div class="card-chips">
+        <span class="chip done">✓ 状态机</span>
+        <span class="chip done">✓ GPU 互斥</span>
+        <span class="chip done">✓ 自动重启</span>
+        <span class="chip done">✓ 状态徽章 UI</span>
+      </div>
+    </div>
+    <div class="card">
+      <span class="card-icon">🔧</span>
+      <div class="card-title">Prompt 自动组装</div>
+      <div class="card-desc">优先级：触发词 → DNA → 造型词 → 场景词。大小写去重，250 token 上限，组件拆解展示，覆盖模式手动编辑，400ms 防抖自动组装。</div>
+      <div class="card-chips">
+        <span class="chip done">✓ 优先级组装</span>
+        <span class="chip done">✓ 去重</span>
+        <span class="chip done">✓ Token 计数</span>
+        <span class="chip done">✓ 覆盖模式</span>
+      </div>
+    </div>
+    <div class="card">
+      <span class="card-icon">🎨</span>
+      <div class="card-title">单张生成 UI</div>
+      <div class="card-desc">造型选择器，场景描述输入，参数面板（可折叠：seed / steps / CFG / LoRA 权重 / 尺寸 / 采样器），WebSocket 实时进度，生成完成自动归档，再来一张。</div>
+      <div class="card-chips">
+        <span class="chip done">✓ 造型选择</span>
+        <span class="chip done">✓ 参数面板</span>
+        <span class="chip done">✓ 实时进度</span>
+        <span class="chip done">✓ 自动归档</span>
+      </div>
+    </div>
+    <div class="card">
+      <span class="card-icon">📦</span>
+      <div class="card-title">生成结果归档</div>
+      <div class="card-desc">生成完成自动写入 SQLite generations 表，完整参数快照（seed / steps / sampler / LoRA weight），图片文件写入 ~/.mely/characters/{id}/generations/，标签分类。</div>
+      <div class="card-chips">
+        <span class="chip done">✓ SQLite 持久化</span>
+        <span class="chip done">✓ 参数快照</span>
+        <span class="chip done">✓ 图片归档</span>
+        <span class="chip done">✓ 标签系统</span>
+      </div>
+    </div>
+    <div class="card">
+      <span class="card-icon">🗂️</span>
+      <div class="card-title">批量生成队列</div>
+      <div class="card-desc">Textarea 多行输入（每行一个场景，最多 20 个），提交后逐个入队，WebSocket 实时追踪每个任务，全部完成显示重置。</div>
+      <div class="card-chips">
+        <span class="chip done">✓ 多场景输入</span>
+        <span class="chip done">✓ 队列管理</span>
+        <span class="chip done">✓ 独立进度追踪</span>
+      </div>
+    </div>
+    <div class="card">
+      <span class="card-icon">🖼️</span>
+      <div class="card-title">历史图库</div>
+      <div class="card-desc">缩略图 3 列网格，按造型 / 标签筛选，点击大图预览 + 参数详情，「用此参数重新生成」一键切回单张生成 tab 并填充参数。</div>
+      <div class="card-chips">
+        <span class="chip done">✓ 缩略图网格</span>
+        <span class="chip done">✓ 多维筛选</span>
+        <span class="chip done">✓ 详情 Modal</span>
+        <span class="chip done">✓ 重新生成</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Architecture -->
+<section class="section">
+  <div class="section-header">
+    <span class="module-tag">ARCH</span>
+    <div>
+      <div class="section-title">技术架构</div>
+      <div class="section-sub">三层架构 · 本地优先 · 零云依赖</div>
+    </div>
+  </div>
+
+  <div class="arch">
+    <div class="arch-col">
+      <div class="arch-col-title">前端（Tauri + React）</div>
+      <div class="arch-item"><span class="arch-dot"></span>Tauri 2.x 桌面壳</div>
+      <div class="arch-item"><span class="arch-dot"></span>React 18 + TypeScript</div>
+      <div class="arch-item"><span class="arch-dot"></span>Vite + Tailwind CSS</div>
+      <div class="arch-item"><span class="arch-dot"></span>WebSocket 实时推送</div>
+      <div class="arch-item"><span class="arch-dot"></span>角色库 / DNA / 训练 / 生成</div>
+    </div>
+    <div class="arch-col">
+      <div class="arch-col-title">后端（Python FastAPI）</div>
+      <div class="arch-item"><span class="arch-dot orange"></span>FastAPI sidecar 进程</div>
+      <div class="arch-item"><span class="arch-dot orange"></span>SQLite 单文件数据库</div>
+      <div class="arch-item"><span class="arch-dot orange"></span>异步任务队列</div>
+      <div class="arch-item"><span class="arch-dot orange"></span>ComfyUI 引擎运行时</div>
+      <div class="arch-item"><span class="arch-dot orange"></span>Prompt 组装引擎</div>
+    </div>
+    <div class="arch-col">
+      <div class="arch-col-title">数据（本地文件系统）</div>
+      <div class="arch-item"><span class="arch-dot green"></span>~/.mely/db/mely.db</div>
+      <div class="arch-item"><span class="arch-dot green"></span>characters/{id}/lora/</div>
+      <div class="arch-item"><span class="arch-dot green"></span>characters/{id}/dataset/</div>
+      <div class="arch-item"><span class="arch-dot green"></span>characters/{id}/generations/</div>
+      <div class="arch-item"><span class="arch-dot green"></span>models/comfyui/ (按需下载)</div>
+    </div>
+  </div>
+</section>
+
+<!-- Tests -->
+<section class="section">
+  <div class="section-header">
+    <span class="module-tag">TEST</span>
+    <div>
+      <div class="section-title">测试覆盖</div>
+      <div class="section-sub">205 用例全部绿灯 · TDD 驱动开发</div>
+    </div>
+  </div>
+
+  <div class="test-summary">
+    <div>
+      <div class="test-group-title">后端 Python · 107 passed</div>
+      <div class="test-row"><span>task_queue</span><span class="test-count">12</span></div>
+      <div class="test-row"><span>generation_contract</span><span class="test-count">18</span></div>
+      <div class="test-row"><span>prompt_assembler</span><span class="test-count">16</span></div>
+      <div class="test-row"><span>engine_runtime</span><span class="test-count">9</span></div>
+      <div class="test-row"><span>engine_api</span><span class="test-count">6</span></div>
+      <div class="test-row"><span>generation_archive</span><span class="test-count">14</span></div>
+      <div class="test-row"><span>batch_generation</span><span class="test-count">9</span></div>
+      <div class="test-row"><span>history_gallery</span><span class="test-count">3</span></div>
+      <div class="test-row"><span>其他（下载、角色、数据集…）</span><span class="test-count">20</span></div>
+    </div>
+    <div>
+      <div class="test-group-title">前端 TypeScript · 98 passed</div>
+      <div class="test-row"><span>GenerationWorkbenchPage</span><span class="test-count">7</span></div>
+      <div class="test-row"><span>GenerationWorkbenchPage (integration)</span><span class="test-count">5</span></div>
+      <div class="test-row"><span>BatchQueuePanel</span><span class="test-count">8</span></div>
+      <div class="test-row"><span>GenerationHistoryGallery</span><span class="test-count">10</span></div>
+      <div class="test-row"><span>EngineStatusBadge</span><span class="test-count">6</span></div>
+      <div class="test-row"><span>PromptAssemblyPanel</span><span class="test-count">6</span></div>
+      <div class="test-row"><span>api/batch · api/archive</span><span class="test-count">9</span></div>
+      <div class="test-row"><span>api/engine · api/prompt</span><span class="test-count">12</span></div>
+      <div class="test-row"><span>App + 其他</span><span class="test-count">35</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- Commit Timeline -->
+<section class="section">
+  <div class="section-header">
+    <span class="module-tag">LOG</span>
+    <div>
+      <div class="section-title">关键提交历史</div>
+    </div>
+  </div>
+
+  <div class="timeline">
+    <div class="timeline-item">
+      <div class="tl-commit">46c4111</div>
+      <div class="tl-dot-col"><div class="tl-dot m2"></div><div class="tl-line"></div></div>
+      <div class="tl-content">
+        <div class="tl-title">[M2] Merge generation workbench into main</div>
+        <div class="tl-sub">全部 M2 叶节点落地 main，解决 M1/M2 分支冲突</div>
+      </div>
+    </div>
+    <div class="timeline-item">
+      <div class="tl-commit">647a047</div>
+      <div class="tl-dot-col"><div class="tl-dot m2"></div><div class="tl-line"></div></div>
+      <div class="tl-content">
+        <div class="tl-title">[M2] Wire batch and history tabs into generation workbench</div>
+        <div class="tl-sub">三 tab 整合：单张 / 批量 / 历史，onRegenerate 回填参数</div>
+      </div>
+    </div>
+    <div class="timeline-item">
+      <div class="tl-commit">3bfec75</div>
+      <div class="tl-dot-col"><div class="tl-dot m2"></div><div class="tl-line"></div></div>
+      <div class="tl-content">
+        <div class="tl-title">[M2] Add generation history gallery</div>
+        <div class="tl-sub">缩略图网格 + 筛选 + 详情 Modal + 图片服务端点</div>
+      </div>
+    </div>
+    <div class="timeline-item">
+      <div class="tl-commit">de5ec55</div>
+      <div class="tl-dot-col"><div class="tl-dot m2"></div><div class="tl-line"></div></div>
+      <div class="tl-content">
+        <div class="tl-title">[M2] Add batch generation queue</div>
+        <div class="tl-sub">POST /api/generations/batch + BatchQueuePanel + 8 前端测试</div>
+      </div>
+    </div>
+    <div class="timeline-item">
+      <div class="tl-commit">ba28cec</div>
+      <div class="tl-dot-col"><div class="tl-dot m2"></div><div class="tl-line"></div></div>
+      <div class="tl-content">
+        <div class="tl-title">[M2] Add generation result archiving</div>
+        <div class="tl-sub">SQLite generations 表 + 图片文件写入 + tags + 14 后端测试</div>
+      </div>
+    </div>
+    <div class="timeline-item">
+      <div class="tl-commit">8a755bf</div>
+      <div class="tl-dot-col"><div class="tl-dot m2"></div><div class="tl-line"></div></div>
+      <div class="tl-content">
+        <div class="tl-title">[M2] Add single-generation workbench UI</div>
+        <div class="tl-sub">GenerationWorkbenchPage，WebSocket 进度，参数面板，再来一张</div>
+      </div>
+    </div>
+    <div class="timeline-item">
+      <div class="tl-commit">4af420a</div>
+      <div class="tl-dot-col"><div class="tl-dot m2"></div><div class="tl-line"></div></div>
+      <div class="tl-content">
+        <div class="tl-title">[M2] Add prompt auto-assembly layer</div>
+        <div class="tl-sub">优先级组装，去重，250 token 上限，PromptAssemblyPanel</div>
+      </div>
+    </div>
+    <div class="timeline-item">
+      <div class="tl-commit">98772af</div>
+      <div class="tl-dot-col"><div class="tl-dot m2"></div><div class="tl-line"></div></div>
+      <div class="tl-content">
+        <div class="tl-title">[M2] Add ComfyUI engine runtime layer</div>
+        <div class="tl-sub">状态机，GPU 互斥，崩溃重启，EngineStatusBadge</div>
+      </div>
+    </div>
+    <div class="timeline-item">
+      <div class="tl-commit">f53fd0c</div>
+      <div class="tl-dot-col"><div class="tl-dot m1"></div><div class="tl-line"></div></div>
+      <div class="tl-content">
+        <div class="tl-title">[M1] Merge visual training into main</div>
+        <div class="tl-sub">数据集管理，角色 DNA，训练进度，文字创角 Mock</div>
+      </div>
+    </div>
+    <div class="timeline-item">
+      <div class="tl-commit">6886e1b</div>
+      <div class="tl-dot-col"><div class="tl-dot m0"></div><div class="tl-line"></div></div>
+      <div class="tl-content">
+        <div class="tl-title">[M0] Foundation complete</div>
+        <div class="tl-sub">Tauri 壳 + FastAPI + SQLite + 任务队列 + 按需下载框架</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Next -->
+<section class="section">
+  <div class="section-header">
+    <span class="module-tag" style="background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.3);color:#fca5a5;">NEXT</span>
+    <div>
+      <div class="section-title">下一阶段</div>
+      <div class="section-sub">M3–M5 待开发</div>
+    </div>
+  </div>
+
+  <div class="next-grid">
+    <div class="next-card">
+      <div class="tag">M3 · W11–12</div>
+      <div class="title">声音绑定</div>
+      <div class="desc">F5-TTS / CosyVoice3 集成，声纹绑定，声音克隆</div>
+    </div>
+    <div class="next-card">
+      <div class="tag">M4 · W13–15</div>
+      <div class="title">造型 &amp; 导出</div>
+      <div class="desc">造型版本树，设定书 PDF 导出，IP 包导出</div>
+    </div>
+    <div class="next-card">
+      <div class="tag">M5 · W16–18</div>
+      <div class="title">打包发布</div>
+      <div class="desc">Windows 安装引导，首次引导向导，自动更新</div>
+    </div>
+    <div class="next-card">
+      <div class="tag">M2 待补</div>
+      <div class="title">真实引擎接入</div>
+      <div class="desc">ComfyUI 真实 API 对接，diffusers fallback</div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  Mely AI · 本地优先 AI 角色创作 · M0–M2 阶段成果 · 2026-03-31
+  <br>
+  <span style="opacity:.5">107 backend · 98 frontend · 205 total · 0 failures</span>
+</footer>
+
+</body>
+</html>

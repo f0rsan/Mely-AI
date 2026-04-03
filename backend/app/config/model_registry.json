@@ -1,0 +1,20 @@
+{
+  "models": [
+    {
+      "id": "flux-schnell",
+      "name": "FLUX Schnell 基础模型",
+      "url": "https://example.com/models/flux-schnell.safetensors",
+      "size": 0,
+      "sha256": "",
+      "relativePath": "checkpoints/flux-schnell.safetensors"
+    },
+    {
+      "id": "f5-tts-base",
+      "name": "F5-TTS 基础模型（语音克隆）",
+      "url": "https://huggingface.co/SWivid/F5-TTS/resolve/main/F5TTS_Base/model_1200000.safetensors",
+      "size": 1340000000,
+      "sha256": "",
+      "relativePath": "tts/f5-tts-base/model_1200000.safetensors"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+[package]
+name = "mely-ai"
+version = "0.1.0"
+description = "Mely AI desktop shell"
+authors = ["yangyingjia"]
+license = ""
+repository = ""
+default-run = "mely-ai"
+edition = "2021"
+rust-version = "1.85"
+
+[build-dependencies]
+tauri-build = { version = "2.0.0", features = [] }
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tauri = { version = "2.0.0", features = [] }
+tauri-plugin-shell = "2.0.0"
+

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Mely AI",
+  "version": "0.1.0",
+  "identifier": "com.mely.character-workbench",
+  "build": {
+    "beforeDevCommand": "npm run dev:stack",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "security": {
+      "capabilities": ["main-capability"]
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "Mely AI",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "center": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../backend/dist/mely-backend": "resources/mely-backend"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "displayLanguageSelector": false,
+        "languages": ["SimpChinese"],
+        "shortcutName": "Mely AI",
+        "license": null,
+        "headerImage": null,
+        "sidebarImage": null
+      }
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": false,
+      "sidecar": true
+    }
+  }
+}
