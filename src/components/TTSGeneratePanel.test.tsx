@@ -164,15 +164,17 @@ test("shows failed state when task fails", async () => {
   expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
 });
 
-test("shows error when synthesizeSpeech API call fails", async () => {
-  mockSynthesize.mockRejectedValueOnce(new Error("请先完成声音绑定再合成语音。"));
+test("shows unavailable message when synthesizeSpeech API reports feature unavailable", async () => {
+  mockSynthesize.mockRejectedValueOnce(
+    new Error("当前版本暂不支持语音合成，请先完成声音绑定并等待引擎接入。")
+  );
 
   render(<TTSGeneratePanel characterId="char-1" />);
 
   await userEvent.type(screen.getByPlaceholderText(/输入想让角色说的话/), "你好");
   await userEvent.click(screen.getByRole("button", { name: "开始合成" }));
 
-  await screen.findByText("请先完成声音绑定再合成语音。");
+  await screen.findByText("当前版本暂不支持语音合成，请先完成声音绑定并等待引擎接入。");
 });
 
 test("shows character count", async () => {

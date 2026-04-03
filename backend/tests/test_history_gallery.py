@@ -90,6 +90,7 @@ def test_list_includes_archived_record(temp_data_root):
                     "assembledPrompt": f"lc, scene {i}", "width": 512, "height": 512,
                     "steps": 20, "sampler": "Euler a", "cfgScale": 7.0,
                     "seed": i, "loraWeight": 0.8,
+                    "imageDataB64": _PNG_B64,
                 },
             )
 

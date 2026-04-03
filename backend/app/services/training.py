@@ -539,6 +539,7 @@ class TrainingService:
             snapshot = await self._queue.submit(
                 name=f"training-{payload.character_id}",
                 runner=self._build_placeholder_runner(task_id),
+                category="gpu_exclusive",
                 task_id=task_id,
                 initial_progress=0,
                 initial_message="训练任务已进入队列",

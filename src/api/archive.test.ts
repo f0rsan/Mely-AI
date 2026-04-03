@@ -30,6 +30,7 @@ function buildRequest() {
     seed: 42,
     loraWeight: 0.85,
     tags: ["封面图"],
+    imageDataB64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
   };
 }
 

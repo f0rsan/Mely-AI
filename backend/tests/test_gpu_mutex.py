@@ -13,9 +13,10 @@ from app.services.task_queue import TaskQueue
 
 
 class _FakeTask:
-    def __init__(self, name: str, status: str) -> None:
+    def __init__(self, name: str, status: str, category: str | None = None) -> None:
         self.name = name
         self.status = status
+        self.category = category
 
 
 class _FakeQueue:
@@ -62,3 +63,8 @@ def test_running_tts_task():
 def test_completed_exclusive_task():
     queue = _FakeQueue([_FakeTask("training-char1", "completed")])
     check_gpu_exclusive(queue)  # completed task must not raise
+
+
+def test_running_task_with_background_category_does_not_block():
+    queue = _FakeQueue([_FakeTask("tts-extract-char1", "running", category="background")])
+    check_gpu_exclusive(queue)  # explicit background category must not raise

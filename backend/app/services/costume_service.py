@@ -338,6 +338,7 @@ async def submit_preview_generation(
         snapshot = await task_queue.submit(
             name=f"generation-preview-{costume_id}-{i}",
             runner=runner,
+            category="gpu_exclusive",
             initial_message="预览图生成任务已提交",
         )
         task_ids.append(snapshot.id)

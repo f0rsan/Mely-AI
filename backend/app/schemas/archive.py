@@ -22,8 +22,8 @@ class GenerationArchiveRequest(BaseModel):
     seed: int | None = None
     lora_weight: float = Field(alias="loraWeight")
     tags: list[str] = Field(default_factory=list)
-    # Base64-encoded image bytes OR a file path already on disk (from engine).
-    # For M2-F we accept a base64 PNG so the archive is self-contained in tests.
+    # Base64-encoded image bytes from engine output.
+    # Formal archive rejects empty payloads (placeholder files are not allowed).
     image_data_b64: str | None = Field(default=None, alias="imageDataB64")
 
 

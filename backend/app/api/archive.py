@@ -9,7 +9,13 @@ from fastapi.responses import FileResponse
 from app.db.connection import connect_database
 from app.schemas.archive import GenerationArchiveRecord, GenerationArchiveRequest
 from app.services.characters import CharacterNotFoundError
-from app.services.generation_archive import GenerationArchiveError, archive_generation, list_generation_archives
+from app.services.generation_archive import (
+    GenerationArchiveError,
+    GenerationArchiveRequestError,
+    archive_generation,
+    get_generation_archive_by_id,
+    list_generation_archives,
+)
 
 router = APIRouter()
 
@@ -57,6 +63,8 @@ def create_generation_archive(
             return archive_generation(conn, runtime.data_root, payload)
     except CharacterNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GenerationArchiveRequestError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except GenerationArchiveError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -79,6 +87,22 @@ def list_character_generations(
         )
 
     return {"items": [r.model_dump(by_alias=True) for r in records]}
+
+
+@router.get(
+    "/generations/{generation_id}",
+    response_model=GenerationArchiveRecord,
+)
+def get_generation_archive(generation_id: str, request: Request) -> GenerationArchiveRecord:
+    runtime = _resolve_runtime(request)
+
+    with _open_connection(runtime.db_path) as conn:
+        record = get_generation_archive_by_id(conn, generation_id)
+
+    if record is None:
+        raise HTTPException(status_code=404, detail="生成记录不存在。")
+
+    return record
 
 
 @router.get("/generations/{generation_id}/image")

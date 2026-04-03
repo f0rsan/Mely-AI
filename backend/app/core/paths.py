@@ -24,6 +24,19 @@ def ensure_data_directories(data_root: Path) -> dict[str, Path]:
     return directories
 
 
+def ensure_llm_directories(data_root: Path, character_id: str) -> dict[str, Path]:
+    """Ensure LLM-related directories exist for a character."""
+    character_root = data_root / "characters" / character_id
+    directories = {
+        "llm_datasets": character_root / "llm_datasets",
+        "llm_adapters": character_root / "llm_adapters",
+        "llm_models": character_root / "llm_models",
+    }
+    for path in directories.values():
+        path.mkdir(parents=True, exist_ok=True)
+    return directories
+
+
 def ensure_character_directories(data_root: Path, character_id: str) -> dict[str, Path]:
     character_root = data_root / "characters" / character_id
     directories = {

@@ -19,8 +19,7 @@ type Props = {
   characterId: string;
 };
 
-const ALLOWED_TYPES = ["audio/wav", "audio/mpeg", "audio/flac", "audio/x-m4a", "audio/ogg", "audio/mp3"];
-const ALLOWED_EXT = ".wav,.mp3,.flac,.m4a,.ogg";
+const ALLOWED_EXT = ".wav";
 
 export function VoiceBindPanel({ characterId }: Props) {
   const [state, setState] = useState<VoiceBindState>({ kind: "loading" });
@@ -83,6 +82,11 @@ export function VoiceBindPanel({ characterId }: Props) {
   }
 
   async function handleFile(file: File) {
+    if (!isWavFile(file)) {
+      setState({ kind: "error", message: "当前仅支持 WAV 参考音频，请先转换后再上传" });
+      return;
+    }
+
     // Basic duration estimation: just use a nominal value — the backend validates.
     // For a real impl this would use the Web Audio API to get actual duration.
     // We use a default of 10s if we can't determine it.
@@ -158,7 +162,7 @@ export function VoiceBindPanel({ characterId }: Props) {
             />
             <p className="text-sm text-gray-300 mb-1">拖拽或点击上传参考音频</p>
             <p className="text-xs text-gray-500">
-              支持 WAV、MP3、FLAC、M4A、OGG · 时长 3–30 秒
+              当前仅支持 WAV · 时长 3–30 秒
             </p>
           </div>
         )}
@@ -236,4 +240,9 @@ function getAudioDuration(file: File): Promise<number> {
       reject(new Error("无法读取音频时长"));
     });
   });
+}
+
+function isWavFile(file: File): boolean {
+  const name = file.name.toLowerCase();
+  return file.type === "audio/wav" || name.endsWith(".wav");
 }

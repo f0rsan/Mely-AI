@@ -35,6 +35,15 @@ class MockWebSocket {
     this.onopen?.({} as Event);
   }
 
+  emitClose(): void {
+    this.readyState = MockWebSocket.CLOSED;
+    this.onclose?.({} as CloseEvent);
+  }
+
+  emitError(): void {
+    this.onerror?.({} as Event);
+  }
+
   emitMessage(payload: unknown): void {
     this.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent<string>);
   }
@@ -87,9 +96,10 @@ test("streams task events through websocket and reports connection status", () =
 
   const ws = MockWebSocket.instances[0];
   expect(ws.url).toBe("ws://127.0.0.1:8000/api/tasks/stream");
+  expect(connectionMock).toHaveBeenNthCalledWith(1, "connecting");
 
   ws.emitOpen();
-  expect(connectionMock).toHaveBeenCalledWith("connected");
+  expect(connectionMock).toHaveBeenNthCalledWith(2, "connected");
 
   ws.emitMessage({
     event: "task_updated",
@@ -118,5 +128,65 @@ test("streams task events through websocket and reports connection status", () =
   );
 
   disconnect();
-  expect(connectionMock).toHaveBeenCalledWith("disconnected");
+  expect(connectionMock).toHaveBeenLastCalledWith("disconnected");
+});
+
+test("reconnects after websocket closes and keeps streaming task events", () => {
+  vi.useFakeTimers();
+  try {
+    const disconnect = createTaskStream(eventMock, connectionMock);
+
+    const firstSocket = MockWebSocket.instances[0];
+    firstSocket.emitOpen();
+    firstSocket.emitClose();
+
+    expect(connectionMock).toHaveBeenCalledWith("disconnected");
+
+    vi.advanceTimersByTime(500);
+    expect(MockWebSocket.instances).toHaveLength(2);
+
+    const secondSocket = MockWebSocket.instances[1];
+    secondSocket.emitOpen();
+    secondSocket.emitMessage({
+      event: "task_updated",
+      task: {
+        id: "task-3",
+        name: "mock-success",
+        status: "running",
+        progress: 80,
+        message: "模拟任务进行中（4/5）",
+        error: null,
+        createdAt: "2026-03-27T00:00:00+00:00",
+        updatedAt: "2026-03-27T00:00:03+00:00",
+      },
+    });
+
+    expect(eventMock).toHaveBeenCalledTimes(1);
+    expect(eventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({ id: "task-3", progress: 80 }),
+      }),
+    );
+
+    disconnect();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("does not reconnect after manual teardown", () => {
+  vi.useFakeTimers();
+  try {
+    const disconnect = createTaskStream(eventMock, connectionMock);
+
+    const socket = MockWebSocket.instances[0];
+    socket.emitOpen();
+    disconnect();
+    socket.emitClose();
+
+    vi.advanceTimersByTime(5_000);
+    expect(MockWebSocket.instances).toHaveLength(1);
+  } finally {
+    vi.useRealTimers();
+  }
 });

@@ -7,7 +7,7 @@ import {
   type GenerationMockJob,
   type GenerationWorkbenchContract,
 } from "../api/generations";
-import { archiveGeneration, type GenerationArchiveRecord } from "../api/archive";
+import { fetchGenerationById, type GenerationArchiveRecord } from "../api/archive";
 import { createTaskStream, type TaskConnectionState } from "../api/tasks";
 import { EngineStatusBadge } from "./EngineStatusBadge";
 import { PromptAssemblyPanel } from "./PromptAssemblyPanel";
@@ -29,6 +29,19 @@ type Params = {
   tags: string[];
 };
 
+type GenerationSubmitSnapshot = {
+  costumeId: string;
+  assembledPrompt: string;
+  width: number;
+  height: number;
+  steps: number;
+  sampler: string;
+  cfgScale: number;
+  seed: number | null;
+  loraWeight: number;
+  tags: string[];
+};
+
 type WorkbenchState =
   | { kind: "loading" }
   | { kind: "error"; message: string }
@@ -37,8 +50,8 @@ type WorkbenchState =
 type GenerateState =
   | { kind: "idle" }
   | { kind: "submitting" }
-  | { kind: "running"; job: GenerationMockJob }
-  | { kind: "archiving"; job: GenerationMockJob; assembledPrompt: string }
+  | { kind: "running"; job: GenerationMockJob; snapshot: GenerationSubmitSnapshot }
+  | { kind: "archiving"; job: GenerationMockJob; snapshot: GenerationSubmitSnapshot; archiveId?: string }
   | { kind: "done"; job: GenerationMockJob; record: GenerationArchiveRecord }
   | { kind: "failed"; job: GenerationMockJob; message: string };
 
@@ -238,10 +251,6 @@ export function GenerationWorkbenchPage({
   const [taskConnection, setTaskConnection] = useState<TaskConnectionState>("disconnected");
   const [activeTab, setActiveTab] = useState<"single" | "batch" | "history">("single");
   const wsDisconnectRef = useRef<(() => void) | null>(null);
-  const paramsRef = useRef(params);
-  paramsRef.current = params;
-  const assembledPromptRef = useRef(assembledPrompt);
-  assembledPromptRef.current = assembledPrompt;
 
   // Load workbench contract.
   useEffect(() => {
@@ -276,22 +285,32 @@ export function GenerationWorkbenchPage({
   useEffect(() => {
     wsDisconnectRef.current = createTaskStream((event) => {
       setGenerateState((prev) => {
-        if (prev.kind !== "running" && prev.kind !== "done" && prev.kind !== "failed") {
+        if (prev.kind !== "running") {
           return prev;
         }
-        const job = prev.kind === "running" ? prev.job : prev.job;
+        const { job, snapshot } = prev;
         if (event.task.id !== job.taskId) return prev;
 
         const updated = mergeTaskIntoGenerationJob(job, event.task);
-        if (updated.status === "completed")
-          return { kind: "archiving", job: updated, assembledPrompt: assembledPromptRef.current };
+        if (updated.status === "completed") {
+          let archiveId: string | undefined;
+          try {
+            const parsed = JSON.parse(updated.message ?? "");
+            if (typeof parsed === "object" && parsed !== null && typeof parsed.archiveId === "string") {
+              archiveId = parsed.archiveId;
+            }
+          } catch {
+            // message is not JSON — handled below as missing archiveId
+          }
+          return { kind: "archiving", job: updated, snapshot, archiveId };
+        }
         if (updated.status === "failed")
           return {
             kind: "failed",
             job: updated,
             message: updated.error ?? "生成任务失败，请稍后重试。",
           };
-        return { kind: "running", job: updated };
+        return { kind: "running", job: updated, snapshot };
       });
     }, setTaskConnection);
 
@@ -303,43 +322,33 @@ export function GenerationWorkbenchPage({
   // Auto-archive when generation completes.
   useEffect(() => {
     if (generateState.kind !== "archiving") return;
-    const { job, assembledPrompt: snapshotPrompt } = generateState;
-    const p = paramsRef.current;
+    const { job, archiveId } = generateState;
     let cancelled = false;
 
-    archiveGeneration({
-      characterId: job.characterId,
-      costumeId: job.costumeId,
-      assembledPrompt: snapshotPrompt,
-      width: p.width,
-      height: p.height,
-      steps: p.steps,
-      sampler: p.sampler,
-      cfgScale: p.cfgScale,
-      seed: p.seed,
-      loraWeight: p.loraWeight,
-      tags: p.tags,
-    })
+    if (!archiveId) {
+      setGenerateState({
+        kind: "failed",
+        job,
+        message: "生成任务已完成，但归档标识缺失，请重试。",
+      });
+      return;
+    }
+
+    // Mock path: backend already archived — fetch the record by archiveId.
+    fetchGenerationById(archiveId)
       .then((record) => {
-        if (!cancelled) setGenerateState({ kind: "done", job, record });
+        if (!cancelled) {
+          setSubmitError(null);
+          setGenerateState({ kind: "done", job, record });
+        }
       })
       .catch((err: Error) => {
         if (!cancelled) {
-          // Archive failure is non-fatal — show done but surface the error.
           setGenerateState({
-            kind: "done",
+            kind: "failed",
             job,
-            record: {
-              id: "",
-              characterId: job.characterId,
-              costumeId: job.costumeId,
-              outputPath: "",
-              paramsSnapshot: {},
-              tags: [],
-              createdAt: "",
-            },
+            message: `生成任务已完成，但读取归档记录失败：${err.message}`,
           });
-          setSubmitError(`生成已完成，但保存结果时出错：${err.message}`);
         }
       });
 
@@ -358,22 +367,35 @@ export function GenerationWorkbenchPage({
     setSubmitError(null);
     setGenerateState({ kind: "submitting" });
 
+    const submitSnapshot: GenerationSubmitSnapshot = {
+      costumeId: selectedCostumeId,
+      assembledPrompt: assembledPrompt || "（未输入场景描述）",
+      width: params.width,
+      height: params.height,
+      steps: params.steps,
+      sampler: params.sampler,
+      cfgScale: params.cfgScale,
+      seed: params.seed,
+      loraWeight: params.loraWeight,
+      tags: [...params.tags],
+    };
+
     try {
       const job = await createMockGenerationJob({
         characterId,
-        costumeId: selectedCostumeId,
-        scenePrompt: assembledPrompt || "（未输入场景描述）",
+        costumeId: submitSnapshot.costumeId,
+        scenePrompt: submitSnapshot.assembledPrompt,
         negativePrompt: "",
-        width: params.width,
-        height: params.height,
-        steps: params.steps,
-        sampler: params.sampler,
-        cfgScale: params.cfgScale,
-        seed: params.seed,
-        loraWeight: params.loraWeight,
-        tags: params.tags,
+        width: submitSnapshot.width,
+        height: submitSnapshot.height,
+        steps: submitSnapshot.steps,
+        sampler: submitSnapshot.sampler,
+        cfgScale: submitSnapshot.cfgScale,
+        seed: submitSnapshot.seed,
+        loraWeight: submitSnapshot.loraWeight,
+        tags: submitSnapshot.tags,
       });
-      setGenerateState({ kind: "running", job });
+      setGenerateState({ kind: "running", job, snapshot: submitSnapshot });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "生成任务提交失败，请稍后重试。";
       setSubmitError(msg);

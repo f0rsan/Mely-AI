@@ -12,7 +12,7 @@ from app.db.migrations import apply_migrations
 from app.main import create_app
 from app.schemas.archive import GenerationArchiveRequest
 from app.services.generation_archive import (
-    GenerationArchiveError,
+    GenerationArchiveRequestError,
     archive_generation,
     list_generation_archives,
 )
@@ -64,9 +64,20 @@ def make_request(**overrides) -> GenerationArchiveRequest:
         seed=42,
         loraWeight=0.85,
         tags=["封面图"],
+        imageDataB64=PNG_B64,
     )
     defaults.update(overrides)
     return GenerationArchiveRequest(**defaults)
+
+
+# Minimal 1x1 transparent PNG bytes encoded as base64.
+PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+    b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+    b"\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01"
+    b"\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+PNG_B64 = base64.b64encode(PNG_BYTES).decode()
 
 
 # ---------------------------------------------------------------------------
@@ -116,31 +127,28 @@ def test_archive_stores_tags(db_and_root):
     assert sorted(tags) == ["封面图", "表情包"]
 
 
-def test_archive_writes_placeholder_image_when_no_data(db_and_root):
+def test_archive_rejects_missing_image_data_and_leaves_no_artifacts(db_and_root):
     conn, data_root = db_and_root
-    req = make_request()
-    record = archive_generation(conn, data_root, req)
+    before_count = conn.execute("SELECT COUNT(*) AS c FROM generations").fetchone()["c"]
+    req = make_request(imageDataB64=None)
 
-    image_path = Path(record.output_path)
-    assert image_path.exists()
-    assert image_path.suffix == ".png"
+    with pytest.raises(GenerationArchiveRequestError) as exc_info:
+        archive_generation(conn, data_root, req)
+
+    assert "真实图片数据" in str(exc_info.value)
+    after_count = conn.execute("SELECT COUNT(*) AS c FROM generations").fetchone()["c"]
+    assert after_count == before_count
+    gen_dir = data_root / "characters" / "char-1" / "generations"
+    assert list(gen_dir.glob("*.png")) == []
 
 
 def test_archive_writes_image_from_base64(db_and_root):
     conn, data_root = db_and_root
-    # Minimal 1x1 transparent PNG bytes encoded as base64.
-    png_bytes = (
-        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
-        b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
-        b"\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01"
-        b"\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
-    )
-    b64 = base64.b64encode(png_bytes).decode()
-    req = make_request(imageDataB64=b64)
+    req = make_request(imageDataB64=PNG_B64)
     record = archive_generation(conn, data_root, req)
 
     image_path = Path(record.output_path)
-    assert image_path.read_bytes() == png_bytes
+    assert image_path.read_bytes() == PNG_BYTES
 
 
 def test_archive_record_has_correct_output_path(db_and_root):
@@ -204,10 +212,15 @@ def test_list_archives_respects_limit_and_offset(db_and_root):
 
 def test_invalid_base64_raises_archive_error(db_and_root):
     conn, data_root = db_and_root
+    before_count = conn.execute("SELECT COUNT(*) AS c FROM generations").fetchone()["c"]
     req = make_request(imageDataB64="not-valid-base64!!!")
-    with pytest.raises(GenerationArchiveError) as exc_info:
+    with pytest.raises(GenerationArchiveRequestError) as exc_info:
         archive_generation(conn, data_root, req)
     assert "解码" in str(exc_info.value)
+    after_count = conn.execute("SELECT COUNT(*) AS c FROM generations").fetchone()["c"]
+    assert after_count == before_count
+    gen_dir = data_root / "characters" / "char-1" / "generations"
+    assert list(gen_dir.glob("*.png")) == []
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +260,7 @@ def test_api_archive_returns_201_with_record(temp_data_root):
                 "seed": 99,
                 "loraWeight": 0.85,
                 "tags": ["封面图"],
+                "imageDataB64": PNG_B64,
             },
         )
 
@@ -278,6 +292,7 @@ def test_api_list_archives_returns_array(temp_data_root):
             "assembledPrompt": "tc, smiling", "width": 512, "height": 512,
             "steps": 20, "sampler": "Euler a", "cfgScale": 7.0,
             "seed": None, "loraWeight": 0.8, "tags": [],
+            "imageDataB64": PNG_B64,
         }
         client.post("/api/generations/archive", json=payload)
         client.post("/api/generations/archive", json=payload)
@@ -301,6 +316,47 @@ def test_api_archive_404_for_unknown_character(temp_data_root):
                 "width": 512, "height": 512, "steps": 20,
                 "sampler": "Euler a", "cfgScale": 7.0,
                 "seed": None, "loraWeight": 0.8,
+                "imageDataB64": PNG_B64,
             },
         )
     assert resp.status_code == 404
+
+
+def test_api_archive_422_when_image_data_missing(temp_data_root):
+    app = create_app()
+    with TestClient(app, raise_server_exceptions=False) as client:
+        char_resp = client.post(
+            "/api/characters",
+            json={
+                "name": "Test Char",
+                "visual": {"loraPath": "/tmp/lora.pt", "triggerWord": "tc", "trainingStatus": "completed"},
+            },
+        )
+        char_id = char_resp.json()["id"]
+        wb_resp = client.get(f"/api/characters/{char_id}/generation-workbench")
+        costume_id = wb_resp.json()["selectedCostumeId"]
+
+        resp = client.post(
+            "/api/generations/archive",
+            json={
+                "characterId": char_id,
+                "costumeId": costume_id,
+                "assembledPrompt": "tc, smiling",
+                "width": 512,
+                "height": 512,
+                "steps": 20,
+                "sampler": "Euler a",
+                "cfgScale": 7.0,
+                "seed": None,
+                "loraWeight": 0.8,
+                "tags": [],
+                "imageDataB64": None,
+            },
+        )
+
+        list_resp = client.get(f"/api/characters/{char_id}/generations")
+
+    assert resp.status_code == 422
+    assert "真实图片数据" in resp.json()["detail"]
+    assert list_resp.status_code == 200
+    assert list_resp.json()["items"] == []

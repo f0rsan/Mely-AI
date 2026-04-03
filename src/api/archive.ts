@@ -13,6 +13,7 @@ export type GenerationArchiveRequest = {
   seed: number | null;
   loraWeight: number;
   tags?: string[];
+  // Formal archive requires real image bytes; backend rejects empty payloads.
   imageDataB64?: string | null;
 };
 
@@ -77,6 +78,38 @@ export async function archiveGeneration(
 
   if (!response.ok) {
     throw new Error(readBackendDetail(payload) ?? "ARCHIVE_FAILED");
+  }
+
+  if (!isArchiveRecord(payload)) {
+    throw new Error("ARCHIVE_INVALID_RESPONSE");
+  }
+
+  return payload;
+}
+
+export async function fetchGenerationById(
+  generationId: string,
+  signal?: AbortSignal
+): Promise<GenerationArchiveRecord> {
+  let response: Response;
+  try {
+    response = await fetch(
+      `${API_BASE_URL}/api/generations/${generationId}`,
+      { signal }
+    );
+  } catch {
+    throw new Error("ARCHIVE_SERVICE_UNAVAILABLE");
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error("ARCHIVE_SERVICE_UNAVAILABLE");
+  }
+
+  if (!response.ok) {
+    throw new Error(readBackendDetail(payload) ?? "ARCHIVE_FETCH_FAILED");
   }
 
   if (!isArchiveRecord(payload)) {

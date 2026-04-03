@@ -1,0 +1,1591 @@
+<!DOCTYPE html>
+<html lang="zh" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mely AI · 完整原型</title>
+  <script>tailwind.config = { darkMode: 'class' }</script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; overflow: hidden; font-family: 'Inter', system-ui, sans-serif; }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+    @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes pulse-ring { 0%{transform:scale(1);opacity:0.6} 100%{transform:scale(2.2);opacity:0} }
+    @keyframes progress-stripe {
+      0%{background-position:0 0}
+      100%{background-position:40px 0}
+    }
+    @keyframes waveform {
+      0%,100%{transform:scaleY(0.3)} 50%{transform:scaleY(1)}
+    }
+
+    .blink-cursor { animation: blink 1s step-end infinite; }
+    .spin { animation: spin 1.2s linear infinite; }
+    .fade-in { animation: fadeIn 0.2s ease-out; }
+    .pulse-dot::after {
+      content:'';position:absolute;inset:-3px;border-radius:50%;
+      background:currentColor;opacity:0.3;
+      animation:pulse-ring 1.8s ease-out infinite;
+    }
+    .progress-animated {
+      background-image: repeating-linear-gradient(
+        45deg,
+        transparent,transparent 10px,
+        rgba(255,255,255,0.05) 10px,rgba(255,255,255,0.05) 20px
+      );
+      background-size: 40px 40px;
+      animation: progress-stripe 0.8s linear infinite;
+    }
+  </style>
+</head>
+<body class="bg-zinc-950">
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const CHARACTERS = [
+  { id:"c1", name:"星野ミカ",    initials:"ミ", color:"#FF6B9D", llmStatus:"已训练 v2",  loraStatus:"已训练" },
+  { id:"c2", name:"晴雪",       initials:"雪", color:"#6366f1",  llmStatus:"训练中",     loraStatus:"未训练" },
+  { id:"c3", name:"黑渊",       initials:"渊", color:"#E94560",  llmStatus:"未训练",     loraStatus:"训练中" },
+  { id:"c4", name:"小橘猫 Maru",initials:"橘", color:"#FF8C42",  llmStatus:"未训练",     loraStatus:"未训练" },
+];
+
+const DETAIL_TABS = [
+  "数据集评估","文字创角","角色 DNA","训练进度","生成工作台",
+  "声音绑定","造型管理","导出设定书","LLM 工作台","视觉工作台"
+];
+
+const LLM_SUB_TABS = ["文字数据集","模型训练","私有模型","角色对话"];
+const VOICE_SUB_TABS = ["绑定","生成","历史"];
+
+const SAMPLE_LOGS = [
+  "2026-04-03 14:21:03 [INFO] Initializing training environment...",
+  "2026-04-03 14:21:05 [INFO] Loading base model: Qwen2.5-7B Q4_K_M",
+  "2026-04-03 14:21:18 [INFO] Dataset loaded: 164 training samples",
+  "2026-04-03 14:21:19 [INFO] Starting LoRA training with rank=16, alpha=32",
+  "2026-04-03 14:21:22 [STEP] step=100/1500 loss=0.3241 lr=1e-4",
+  "2026-04-03 14:21:35 [STEP] step=200/1500 loss=0.2876 lr=1e-4",
+  "2026-04-03 14:21:48 [STEP] step=300/1500 loss=0.2514 lr=9.8e-5",
+];
+
+const BOT_REPLIES = [
+  "欸嘿嘿～我最喜欢说「加油哦♡」了！还有就是「欸欸欸？！」这个感叹词，每次遇到惊讶的事情就会脱口而出呢。对了，你平时喜欢什么类型的游戏？",
+  "哦哦！这个问题好有趣！(○´ω`○) 我觉得最重要的是做自己喜欢的事情，管别人怎么看！加油哦♡",
+  "嗯嗯！我最近在练习唱新歌呢～希望下次直播能给大家一个惊喜！欸嘿嘿，敬请期待哦～",
+  "欸嘛～这个我还在想呢！不过有你们陪着，什么困难都能克服的！加油哦♡ 一起加油！",
+];
+
+const INITIAL_CHAT = [
+  { role:"user", content:"你好！介绍一下自己吧～" },
+  { role:"assistant", content:"哦哦！你好哦～！我是星野ミカ！一个来自虚拟次元的女孩✨ 最近在忙直播的事情呢，有什么想聊的嘛？(○´ω`○)" },
+  { role:"user", content:"你有什么特别的口头禅吗？" },
+];
+
+const AUDIO_HISTORY = [
+  { id:"a1", text:"哦哦！你好哦～！我是星野ミカ！", duration:"0:08", ago:"5分钟前" },
+  { id:"a2", text:"加油哦♡ 今天也要元气满满地过哦！", duration:"0:06", ago:"1小时前" },
+  { id:"a3", text:"欸嘿嘿～谢谢你的关注，我会继续努力的！", duration:"0:09", ago:"昨天" },
+];
+
+const TASK_QUEUE = [
+  { id:"t1", name:"星野ミカ · LoRA 训练", status:"running",  progress:42, ago:"15分钟前" },
+  { id:"t2", name:"晴雪 · LLM 微调 v1",  status:"done",    progress:100, ago:"2小时前" },
+];
+
+// ─── Mock color blocks for "images" ───────────────────────────────────────────
+
+const MOCK_COLORS = [
+  ["#FF6B9D","#ff8fb3"],["#6366f1","#818cf8"],["#E94560","#f87171"],["#FF8C42","#fbbf24"],
+  ["#10b981","#34d399"],["#8b5cf6","#a78bfa"],["#0ea5e9","#38bdf8"],["#ec4899","#f472b6"],
+];
+
+function MockImage({ idx=0, label="", w="100%", h=80, radius=8 }) {
+  const [c1,c2] = MOCK_COLORS[idx % MOCK_COLORS.length];
+  return (
+    <div style={{
+      width:w, height:h, borderRadius:radius,
+      background:`linear-gradient(135deg,${c1},${c2})`,
+      display:"flex", alignItems:"center", justifyContent:"center",
+      flexShrink:0, position:"relative", overflow:"hidden"
+    }}>
+      {label && <span style={{color:"rgba(255,255,255,0.7)",fontSize:11,fontWeight:600}}>{label}</span>}
+      <div style={{
+        position:"absolute",bottom:-8,right:-8,width:40,height:40,borderRadius:"50%",
+        background:"rgba(255,255,255,0.08)"
+      }}/>
+    </div>
+  );
+}
+
+// ─── Icons ────────────────────────────────────────────────────────────────────
+
+function IconSend({size=14}) {
+  return <svg width={size} height={size} viewBox="0 0 14 14" fill="none"><path d="M12 2L6 8M12 2L8.5 12l-2-4.5L2 5.5 12 2z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round"/></svg>;
+}
+function IconStop({size=14}) {
+  return <svg width={size} height={size} viewBox="0 0 14 14" fill="none"><rect x="3" y="3" width="8" height="8" rx="1.5" fill="currentColor"/></svg>;
+}
+function IconPlus({size=14}) {
+  return <svg width={size} height={size} viewBox="0 0 14 14" fill="none"><path d="M7 3v8M3 7h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>;
+}
+function IconX({size=12}) {
+  return <svg width={size} height={size} viewBox="0 0 12 12" fill="none"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>;
+}
+function IconSpinner({size=14}) {
+  return <svg width={size} height={size} viewBox="0 0 14 14" fill="none" className="spin"><circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="22" strokeDashoffset="8"/></svg>;
+}
+function IconBack({size=14}) {
+  return <svg width={size} height={size} viewBox="0 0 14 14" fill="none"><path d="M9 2L4 7l5 5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+}
+function IconCheck({size=12}) {
+  return <svg width={size} height={size} viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+}
+function IconUpload({size=14}) {
+  return <svg width={size} height={size} viewBox="0 0 14 14" fill="none"><path d="M7 1v8M4 4l3-3 3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 11h10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>;
+}
+function IconPlay({size=14}) {
+  return <svg width={size} height={size} viewBox="0 0 14 14" fill="none"><path d="M3 2l9 5-9 5V2z" fill="currentColor"/></svg>;
+}
+function IconMic({size=14}) {
+  return <svg width={size} height={size} viewBox="0 0 14 14" fill="none"><rect x="4.5" y="1" width="5" height="7" rx="2.5" stroke="currentColor" strokeWidth="1.2"/><path d="M2 7c0 2.76 2.24 5 5 5s5-2.24 5-5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/><line x1="7" y1="12" x2="7" y2="13.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>;
+}
+function IconTree({size=14}) {
+  return <svg width={size} height={size} viewBox="0 0 14 14" fill="none"><circle cx="7" cy="2" r="1.5" stroke="currentColor" strokeWidth="1.2"/><circle cx="2.5" cy="11" r="1.5" stroke="currentColor" strokeWidth="1.2"/><circle cx="11.5" cy="11" r="1.5" stroke="currentColor" strokeWidth="1.2"/><path d="M7 3.5V6M7 6L2.5 9.5M7 6l4.5 3.5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/></svg>;
+}
+
+// ─── Reusable components ───────────────────────────────────────────────────────
+
+function GreenDot() {
+  return (
+    <span className="relative inline-flex" style={{width:8,height:8}}>
+      <span className="absolute inset-0 rounded-full bg-green-400 opacity-40 animate-ping" style={{animationDuration:'2.5s'}}/>
+      <span className="relative inline-flex rounded-full bg-green-400" style={{width:8,height:8}}/>
+    </span>
+  );
+}
+
+function LLMBadge({status}) {
+  if (status==="训练中") return (
+    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-950 text-indigo-400 font-medium flex items-center gap-1">
+      <IconSpinner size={9}/>训练中
+    </span>
+  );
+  if (status==="未训练") return (
+    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-700 text-zinc-400 font-medium">未训练</span>
+  );
+  return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-950 text-green-400 font-medium">{status}</span>;
+}
+
+function LoraBadge({status}) {
+  if (status==="训练中") return (
+    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-950 text-purple-400 font-medium flex items-center gap-1">
+      <IconSpinner size={9}/>训练中
+    </span>
+  );
+  if (status==="未训练") return (
+    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-700/80 text-zinc-500 font-medium">未训练</span>
+  );
+  return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-950 text-purple-300 font-medium">{status}</span>;
+}
+
+function SectionLabel({children}) {
+  return <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">{children}</p>;
+}
+
+function ProgressBar({value, color="bg-indigo-500", animated=false}) {
+  return (
+    <div className="w-full h-1.5 bg-zinc-700/60 rounded-full overflow-hidden">
+      <div
+        className={`h-full ${color} rounded-full transition-all duration-300 ${animated?"progress-animated":""}`}
+        style={{width:`${Math.min(100,value)}%`}}
+      />
+    </div>
+  );
+}
+
+// ─── Character Library (Page 1) ───────────────────────────────────────────────
+
+function CharacterLibrary({onSelect}) {
+  const [showCreate, setShowCreate] = useState(false);
+  const [newName, setNewName] = useState("");
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="flex items-center justify-between px-8 py-5 border-b border-zinc-800 bg-zinc-900/50">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{background:"linear-gradient(135deg,#6366f1,#8b5cf6)"}}>
+            <span className="text-white font-bold text-sm">M</span>
+          </div>
+          <div>
+            <h1 className="text-base font-bold text-zinc-100">Mely AI</h1>
+            <p className="text-[11px] text-zinc-500">角色创作工作台</p>
+          </div>
+        </div>
+        <button
+          onClick={()=>setShowCreate(true)}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-white transition-colors shadow-lg shadow-indigo-900/30"
+        >
+          <IconPlus size={13}/> 创建角色
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-8 space-y-8">
+        {/* Character grid */}
+        <div>
+          <SectionLabel>我的角色</SectionLabel>
+          <div className="grid grid-cols-4 gap-4">
+            {CHARACTERS.map((c,i)=>(
+              <button
+                key={c.id}
+                onClick={()=>onSelect(c.id)}
+                className="group rounded-2xl border border-zinc-800 bg-zinc-900 hover:border-zinc-600 hover:bg-zinc-800/80 transition-all p-5 text-left"
+              >
+                <div
+                  className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-bold text-white mb-3 shadow-lg transition-transform group-hover:scale-105"
+                  style={{background:c.color}}
+                >
+                  {c.initials}
+                </div>
+                <p className="text-sm font-semibold text-zinc-200 truncate mb-2">{c.name}</p>
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] text-zinc-600 w-8">LLM</span>
+                    <LLMBadge status={c.llmStatus}/>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] text-zinc-600 w-8">LoRA</span>
+                    <LoraBadge status={c.loraStatus}/>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Task queue panel */}
+        <div>
+          <SectionLabel>任务队列</SectionLabel>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
+            <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
+              <span className="text-xs font-medium text-zinc-300">后台任务</span>
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-indigo-500"/>
+                <span className="text-xs text-zinc-500">1 个运行中</span>
+              </div>
+            </div>
+            <div className="divide-y divide-zinc-800/60">
+              {TASK_QUEUE.map(task=>(
+                <div key={task.id} className="px-4 py-3 flex items-center gap-4">
+                  <div className="shrink-0">
+                    {task.status==="running"
+                      ? <IconSpinner size={14}/>
+                      : <div className="w-3.5 h-3.5 rounded-full bg-green-500/20 flex items-center justify-center"><IconCheck size={9}/></div>
+                    }
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-zinc-300 truncate">{task.name}</p>
+                    {task.status==="running" && (
+                      <div className="mt-1.5"><ProgressBar value={task.progress} animated={true}/></div>
+                    )}
+                  </div>
+                  <div className="shrink-0 text-right">
+                    {task.status==="running"
+                      ? <span className="text-[11px] text-indigo-400 font-mono">{task.progress}%</span>
+                      : <span className="text-[11px] text-green-400">已完成</span>
+                    }
+                    <p className="text-[10px] text-zinc-600 mt-0.5">{task.ago}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Create modal */}
+      {showCreate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={()=>setShowCreate(false)}>
+          <div className="w-80 bg-zinc-900 rounded-2xl border border-zinc-700 p-6 fade-in" onClick={e=>e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-zinc-200 mb-4">新建角色</h3>
+            <input
+              value={newName}
+              onChange={e=>setNewName(e.target.value)}
+              placeholder="角色名称..."
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/60 mb-4"
+            />
+            <div className="flex gap-2">
+              <button onClick={()=>setShowCreate(false)} className="flex-1 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-400 transition-colors">取消</button>
+              <button onClick={()=>setShowCreate(false)} className="flex-1 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm text-white font-medium transition-colors">创建</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Tab 1: Dataset Assessment ─────────────────────────────────────────────────
+
+function TabDatasetAssessment() {
+  const [assessed, setAssessed] = useState(false);
+  const [assessing, setAssessing] = useState(false);
+
+  const handleAssess = () => {
+    setAssessing(true);
+    setTimeout(()=>{setAssessing(false);setAssessed(true);},2000);
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Upload area */}
+      <div className="rounded-xl border border-dashed border-zinc-700 hover:border-zinc-500 transition-colors bg-zinc-900/40 p-6 text-center">
+        <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center mx-auto mb-3">
+          <IconUpload size={18}/>
+        </div>
+        <p className="text-sm text-zinc-300 mb-1">拖拽图片或点击选择</p>
+        <p className="text-xs text-zinc-600 mb-4">支持 JPG / PNG，建议 512px 以上</p>
+        <div className="flex items-center justify-center gap-3">
+          <button className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 transition-colors">
+            选择训练图片
+          </button>
+          <button
+            onClick={handleAssess}
+            disabled={assessing}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-xs text-white font-medium transition-colors"
+          >
+            {assessing ? <><IconSpinner size={11}/>评估中…</> : "开始评估"}
+          </button>
+        </div>
+      </div>
+
+      {assessed && (
+        <div className="space-y-4 fade-in">
+          {/* Score cards */}
+          <div className="grid grid-cols-4 gap-3">
+            {[
+              {label:"质量分",value:"87",unit:"/100",color:"text-green-400"},
+              {label:"总数量",value:"12",unit:"张",color:"text-zinc-200"},
+              {label:"合格数",value:"10",unit:"张",color:"text-green-400"},
+              {label:"问题数",value:"2",unit:"张",color:"text-yellow-400"},
+            ].map(item=>(
+              <div key={item.label} className="rounded-xl border border-zinc-700/60 bg-zinc-800/30 px-4 py-3 text-center">
+                <div className={`text-2xl font-bold ${item.color}`}>{item.value}<span className="text-sm font-normal text-zinc-500 ml-1">{item.unit}</span></div>
+                <p className="text-[11px] text-zinc-500 mt-1">{item.label}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Angle coverage */}
+          <div className="rounded-xl border border-zinc-700/60 bg-zinc-800/20 p-4">
+            <SectionLabel>角度覆盖</SectionLabel>
+            <div className="space-y-2">
+              {[
+                {label:"正面",count:4,max:4},
+                {label:"3/4侧",count:3,max:4},
+                {label:"侧面",count:2,max:4},
+                {label:"特写",count:1,max:4},
+              ].map(a=>(
+                <div key={a.label} className="flex items-center gap-3">
+                  <span className="text-xs text-zinc-400 w-12 shrink-0">{a.label}</span>
+                  <div className="flex-1 h-1.5 bg-zinc-700 rounded-full overflow-hidden">
+                    <div className="h-full bg-indigo-500 rounded-full" style={{width:`${(a.count/a.max)*100}%`}}/>
+                  </div>
+                  <span className="text-xs text-zinc-500 font-mono w-8 text-right">{a.count}张</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Suggestions */}
+          <div className="rounded-xl border border-yellow-700/30 bg-yellow-950/10 p-4">
+            <SectionLabel>改进建议</SectionLabel>
+            <ul className="space-y-1.5">
+              <li className="flex items-start gap-2 text-xs text-yellow-400/80"><span className="mt-0.5 shrink-0">⚠</span>建议增加背面角度图片，目前缺少背面视角参考</li>
+              <li className="flex items-start gap-2 text-xs text-yellow-400/80"><span className="mt-0.5 shrink-0">⚠</span>2张图片分辨率低于 512px，建议替换为高清版本</li>
+              <li className="flex items-start gap-2 text-xs text-zinc-500"><span className="mt-0.5 shrink-0">ℹ</span>可适当增加特写细节图以提升细节训练效果</li>
+            </ul>
+          </div>
+
+          {/* Recommended mode */}
+          <div className="rounded-xl border border-indigo-700/40 bg-indigo-950/20 px-4 py-3 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-indigo-300">推荐训练模式</p>
+              <p className="text-xs text-zinc-400 mt-0.5">标准模式 · 1500 steps · rank 16</p>
+            </div>
+            <button className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs text-white font-medium transition-colors">
+              应用此模式
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Tab 2: Text-to-Character ──────────────────────────────────────────────────
+
+function TabTextToChar() {
+  const [desc, setDesc] = useState("");
+  const [generated, setGenerated] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [selected, setSelected] = useState(new Set());
+
+  const handleGenerate = () => {
+    if (!desc.trim()) return;
+    setGenerating(true);
+    setTimeout(()=>{setGenerating(false);setGenerated(true);},1800);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <SectionLabel>角色文字描述</SectionLabel>
+        <textarea
+          value={desc}
+          onChange={e=>setDesc(e.target.value)}
+          placeholder="银色长发，红色眼睛，身穿黑白女仆装，气质优雅冷淡，偶尔流露出温柔..."
+          rows={4}
+          className="w-full rounded-xl bg-zinc-800/50 border border-zinc-700 text-sm text-zinc-200 placeholder-zinc-600 px-4 py-3 focus:outline-none focus:border-indigo-500/60 resize-none transition-colors"
+        />
+      </div>
+      <button
+        onClick={handleGenerate}
+        disabled={generating || !desc.trim()}
+        className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-sm text-white font-medium transition-colors"
+      >
+        {generating ? <><IconSpinner size={13}/>生成候选图…</> : "生成候选图 (Mock)"}
+      </button>
+
+      {generated && (
+        <div className="fade-in space-y-4">
+          <SectionLabel>候选图 — 选择要加入数据集的图片</SectionLabel>
+          <div className="grid grid-cols-4 gap-3">
+            {[0,1,2,3].map(i=>(
+              <button
+                key={i}
+                onClick={()=>setSelected(prev=>{const n=new Set(prev); n.has(i)?n.delete(i):n.add(i); return n;})}
+                className={`relative rounded-xl overflow-hidden border-2 transition-all ${selected.has(i)?"border-indigo-500":"border-transparent hover:border-zinc-600"}`}
+              >
+                <MockImage idx={i} h={110} radius={0}/>
+                {selected.has(i) && (
+                  <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center">
+                    <IconCheck size={10}/>
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
+          <button
+            disabled={selected.size===0}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-sm text-white font-medium transition-colors"
+          >
+            加入数据集 ({selected.size} 张)
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Tab 3: Character DNA ──────────────────────────────────────────────────────
+
+function TabDNA() {
+  const [dna, setDna] = useState({
+    hair:"银色长发", eye:"红色", skin:"白皙", build:"纤细", style:"赛博朋克哥特"
+  });
+  const [saved, setSaved] = useState(false);
+
+  const prompt = `hair: ${dna.hair}, eyes: ${dna.eye} eyes, fair skin, ${dna.build} build, ${dna.style} aesthetic, anime style, high quality illustration`;
+
+  const options = {
+    hair:["银色长发","金色短发","黑色双马尾","粉色波浪卷","红色侧马尾"],
+    eye:["红色","蓝色","绿色","金色","紫色","琥珀色"],
+    skin:["白皙","小麦色","暗棕色","瓷白色"],
+    build:["纤细","娇小","高挑","健壮"],
+    style:["赛博朋克哥特","日系清纯","和风传统","魔幻奇幻","科幻未来"],
+  };
+
+  const labelMap = {hair:"发色/发型",eye:"瞳色",skin:"肤色",build:"体型",style:"风格"};
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3">
+        {Object.entries(dna).map(([key,val])=>(
+          <div key={key}>
+            <label className="block text-[11px] text-zinc-500 mb-1.5">{labelMap[key]}</label>
+            <select
+              value={val}
+              onChange={e=>setDna(d=>({...d,[key]:e.target.value}))}
+              className="w-full rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-zinc-200 px-3 py-2 focus:outline-none focus:border-indigo-500/60 appearance-none cursor-pointer"
+            >
+              {options[key].map(o=><option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
+        ))}
+      </div>
+
+      <div>
+        <SectionLabel>完整 DNA Prompt 预览</SectionLabel>
+        <div className="rounded-xl bg-zinc-800/50 border border-zinc-700 px-4 py-3">
+          <p className="text-xs text-zinc-300 font-mono leading-relaxed">{prompt}</p>
+        </div>
+      </div>
+
+      <div className="flex gap-3">
+        <button
+          onClick={()=>setDna({hair:"银色长发",eye:"红色",skin:"白皙",build:"纤细",style:"赛博朋克哥特"})}
+          className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-400 transition-colors"
+        >
+          使用建议值
+        </button>
+        <button
+          onClick={()=>{setSaved(true);setTimeout(()=>setSaved(false),2000);}}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm text-white font-medium transition-colors"
+        >
+          {saved ? <><IconCheck size={12}/>已保存</> : "保存 DNA"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Tab 4: Training Progress ──────────────────────────────────────────────────
+
+function TabTrainingProgress() {
+  const [progress, setProgress] = useState(42);
+  const [step, setStep] = useState(630);
+  const [loss, setLoss] = useState(0.2514);
+  const [logs, setLogs] = useState(SAMPLE_LOGS);
+  const [running, setRunning] = useState(true);
+  const logsRef = useRef(null);
+  const timerRef = useRef(null);
+
+  useEffect(()=>{
+    if (!running) return;
+    timerRef.current = setInterval(()=>{
+      setProgress(p=>{
+        if (p>=100){clearInterval(timerRef.current);setRunning(false);return 100;}
+        return p+0.4;
+      });
+      setStep(s=>s+2);
+      setLoss(l=>Math.max(0.08,l-0.0003));
+      setLogs(prev=>[...prev.slice(-20),
+        `2026-04-03 14:${String(21+Math.floor(Date.now()/60000)%10).padStart(2,'0')}:${String(Math.floor(Date.now()/1000)%60).padStart(2,'0')} [STEP] step=${step}/1500 loss=${loss.toFixed(4)}`
+      ]);
+    },800);
+    return ()=>clearInterval(timerRef.current);
+  },[running,step,loss]);
+
+  useEffect(()=>{
+    if (logsRef.current) logsRef.current.scrollTop=logsRef.current.scrollHeight;
+  },[logs]);
+
+  return (
+    <div className="space-y-4">
+      <div className={`rounded-xl border px-5 py-4 space-y-3 ${running?"border-indigo-700/50 bg-indigo-950/15":"border-green-700/50 bg-green-950/15"}`}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            {running
+              ? <span className="flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full bg-indigo-900/60 border border-indigo-700/60 text-indigo-300 font-medium"><IconSpinner size={10}/>训练中</span>
+              : <span className="text-xs px-2 py-0.5 rounded-full bg-green-900/60 border border-green-700/60 text-green-300 font-medium">已完成</span>
+            }
+            <span className="text-xs text-zinc-400">标准模式 · LoRA rank=16</span>
+          </div>
+          {running && (
+            <button
+              onClick={()=>{clearInterval(timerRef.current);setRunning(false);}}
+              className="text-xs text-zinc-500 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-zinc-800"
+            >
+              取消训练
+            </button>
+          )}
+        </div>
+        <ProgressBar value={progress} animated={running}/>
+        <div className="flex items-center gap-4 text-xs text-zinc-400 font-mono">
+          <span className={running?"text-indigo-300":"text-green-300"}>{Math.floor(progress)}%</span>
+          <span className="text-zinc-600">·</span>
+          <span>{step} / 1500 steps</span>
+          <span className="text-zinc-600">·</span>
+          <span>loss {loss.toFixed(4)}</span>
+          {running && <><span className="text-zinc-600">·</span><span>约 {Math.max(1,Math.round((100-progress)*0.4))} 分钟</span></>}
+        </div>
+      </div>
+
+      <div>
+        <SectionLabel>实时日志</SectionLabel>
+        <div
+          ref={logsRef}
+          className="rounded-xl bg-zinc-900 border border-zinc-700/60 p-3 h-40 overflow-y-auto font-mono text-[11px] text-zinc-400 space-y-0.5"
+        >
+          {logs.map((l,i)=>(
+            <div key={i} className={l.includes("[STEP]")?"text-zinc-400":l.includes("[INFO]")?"text-zinc-500":"text-zinc-300"}>{l}</div>
+          ))}
+          {running && <span className="blink-cursor inline-block w-1.5 h-3 bg-zinc-500 ml-0.5"/>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Tab 5: Generation Workbench ───────────────────────────────────────────────
+
+function TabGeneration() {
+  const [prompt, setPrompt] = useState("");
+  const [style, setStyle] = useState("anime");
+  const [count, setCount] = useState(4);
+  const [generating, setGenerating] = useState(false);
+  const [images, setImages] = useState([
+    {idx:0,params:"1024x1024 · CFG 7 · Steps 28"},
+    {idx:1,params:"1024x1024 · CFG 7.5 · Steps 28"},
+    {idx:2,params:"1024x1024 · CFG 8 · Steps 30"},
+    {idx:3,params:"512x768 · CFG 7 · Steps 25"},
+  ]);
+
+  const handleGenerate = () => {
+    setGenerating(true);
+    setTimeout(()=>{
+      setImages(prev=>[
+        ...prev,
+        ...[4,5,6,7].slice(0,count).map((idx,i)=>({idx,params:`1024x1024 · CFG ${7+i*0.5} · Steps 28`}))
+      ]);
+      setGenerating(false);
+    },2200);
+  };
+
+  return (
+    <div className="flex gap-5 h-full">
+      {/* Left panel */}
+      <div className="w-64 shrink-0 space-y-4">
+        <div>
+          <SectionLabel>场景描述</SectionLabel>
+          <textarea
+            value={prompt}
+            onChange={e=>setPrompt(e.target.value)}
+            placeholder="站在樱花树下，微风吹起发丝..."
+            rows={4}
+            className="w-full rounded-xl bg-zinc-800/50 border border-zinc-700 text-xs text-zinc-200 placeholder-zinc-600 px-3.5 py-2.5 focus:outline-none focus:border-indigo-500/60 resize-none"
+          />
+        </div>
+        <div>
+          <SectionLabel>风格</SectionLabel>
+          <div className="grid grid-cols-2 gap-2">
+            {[{id:"anime",label:"动漫"},{id:"realistic",label:"写实"},{id:"chibi",label:"Q版"},{id:"sketch",label:"素描"}].map(s=>(
+              <button
+                key={s.id}
+                onClick={()=>setStyle(s.id)}
+                className={`py-1.5 rounded-lg text-xs font-medium transition-colors border ${style===s.id?"border-indigo-500 bg-indigo-950/40 text-indigo-300":"border-zinc-700 bg-zinc-800/30 text-zinc-400 hover:border-zinc-600"}`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <SectionLabel>生成数量</SectionLabel>
+          <div className="flex gap-2">
+            {[1,2,4,8].map(n=>(
+              <button
+                key={n}
+                onClick={()=>setCount(n)}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors ${count===n?"border-indigo-500 bg-indigo-950/40 text-indigo-300":"border-zinc-700 text-zinc-400 hover:border-zinc-600"}`}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+        </div>
+        <button
+          onClick={handleGenerate}
+          disabled={generating}
+          className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-sm text-white font-semibold transition-colors shadow-lg shadow-indigo-900/30"
+        >
+          {generating ? <span className="flex items-center justify-center gap-2"><IconSpinner size={13}/>生成中…</span> : "开始生成"}
+        </button>
+
+        {/* Queue status */}
+        <div className="rounded-xl border border-zinc-700/60 bg-zinc-800/20 p-3">
+          <SectionLabel>批量队列</SectionLabel>
+          <div className="space-y-1 text-xs text-zinc-500">
+            <div className="flex justify-between"><span>等待中</span><span className="text-yellow-400 font-mono">2</span></div>
+            <div className="flex justify-between"><span>已完成</span><span className="text-green-400 font-mono">3</span></div>
+          </div>
+        </div>
+      </div>
+
+      {/* Right: image gallery */}
+      <div className="flex-1 min-w-0">
+        <SectionLabel>生成历史</SectionLabel>
+        <div className="grid grid-cols-3 gap-3 overflow-y-auto" style={{maxHeight:"calc(100vh - 280px)"}}>
+          {images.map((img,i)=>(
+            <div key={i} className="rounded-xl overflow-hidden border border-zinc-700/60 group">
+              <MockImage idx={img.idx} h={130} radius={0}/>
+              <div className="px-2.5 py-2 bg-zinc-800/80">
+                <p className="text-[10px] text-zinc-500 font-mono truncate">{img.params}</p>
+                <div className="flex gap-1 mt-1.5">
+                  <button className="text-[10px] text-zinc-500 hover:text-zinc-300 px-1.5 py-0.5 rounded hover:bg-zinc-700 transition-colors">保存</button>
+                  <button className="text-[10px] text-zinc-500 hover:text-zinc-300 px-1.5 py-0.5 rounded hover:bg-zinc-700 transition-colors">加入训练</button>
+                </div>
+              </div>
+            </div>
+          ))}
+          {generating && [...Array(count)].map((_,i)=>(
+            <div key={`gen-${i}`} className="rounded-xl border border-zinc-700/60 overflow-hidden">
+              <div className="h-32 bg-zinc-800 animate-pulse flex items-center justify-center">
+                <IconSpinner size={20}/>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Tab 6: Voice Binding ──────────────────────────────────────────────────────
+
+function WaveformSVG() {
+  const bars = Array.from({length:32},(_,i)=>({
+    h: 4+Math.sin(i*0.7)*12+Math.random()*8,
+    delay: i*0.05
+  }));
+  return (
+    <svg width="100%" height="40" viewBox="0 0 320 40" preserveAspectRatio="none">
+      {bars.map((b,i)=>(
+        <rect
+          key={i}
+          x={i*10+1}
+          y={(40-b.h)/2}
+          width={8}
+          height={b.h}
+          rx={3}
+          fill="#6366f1"
+          opacity={0.6+Math.random()*0.4}
+        />
+      ))}
+    </svg>
+  );
+}
+
+function TabVoice() {
+  const [voiceTab, setVoiceTab] = useState(0);
+  const [ttsText, setTtsText] = useState("");
+  const [intensity, setIntensity] = useState(75);
+  const [playing, setPlaying] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [generated, setGenerated] = useState(false);
+
+  const handleGenerate = () => {
+    setGenerating(true);
+    setTimeout(()=>{setGenerating(false);setGenerated(true);},1500);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex border-b border-zinc-800">
+        {VOICE_SUB_TABS.map((t,i)=>(
+          <button
+            key={t}
+            onClick={()=>setVoiceTab(i)}
+            className={`px-4 py-2 text-sm font-medium relative transition-colors ${voiceTab===i?"text-indigo-400":"text-zinc-500 hover:text-zinc-300"}`}
+          >
+            {t}
+            {voiceTab===i && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-t-full"/>}
+          </button>
+        ))}
+      </div>
+
+      {voiceTab===0 && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-dashed border-zinc-700 hover:border-zinc-500 p-6 text-center transition-colors">
+            <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center mx-auto mb-3">
+              <IconMic size={18}/>
+            </div>
+            <p className="text-sm text-zinc-300 mb-1">上传参考音频</p>
+            <p className="text-xs text-zinc-600 mb-3">3–30 秒的清晰语音，WAV / MP3</p>
+            <button className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 transition-colors">选择音频文件</button>
+          </div>
+
+          <div className="rounded-xl border border-green-700/40 bg-green-950/15 p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <GreenDot/>
+              <span className="text-sm font-medium text-green-300">声纹已绑定</span>
+            </div>
+            <div className="rounded-lg bg-zinc-900/60 px-3 py-2">
+              <WaveformSVG/>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-xs text-zinc-500">
+              <span>长度: 12.3s</span>
+              <span>采样率: 44100Hz</span>
+              <span>绑定时间: 昨天</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {voiceTab===1 && (
+        <div className="space-y-4">
+          <div>
+            <SectionLabel>输入文本</SectionLabel>
+            <textarea
+              value={ttsText}
+              onChange={e=>setTtsText(e.target.value)}
+              placeholder="输入要合成的台词..."
+              rows={3}
+              className="w-full rounded-xl bg-zinc-800/50 border border-zinc-700 text-sm text-zinc-200 placeholder-zinc-600 px-4 py-3 focus:outline-none focus:border-indigo-500/60 resize-none"
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <SectionLabel>音色强度</SectionLabel>
+              <span className="text-xs text-indigo-400 font-mono">{intensity}%</span>
+            </div>
+            <input
+              type="range" min={0} max={100} value={intensity}
+              onChange={e=>setIntensity(Number(e.target.value))}
+              className="w-full accent-indigo-500"
+            />
+          </div>
+
+          <button
+            onClick={handleGenerate}
+            disabled={generating||!ttsText.trim()}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-sm text-white font-medium transition-colors"
+          >
+            {generating ? <><IconSpinner size={13}/>合成中…</> : <><IconMic size={13}/>生成语音</>}
+          </button>
+
+          {generated && (
+            <div className="fade-in rounded-xl border border-zinc-700/60 bg-zinc-800/30 p-4 space-y-3">
+              <WaveformSVG/>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={()=>setPlaying(v=>!v)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm text-white transition-colors"
+                >
+                  {playing ? <IconStop size={12}/> : <IconPlay size={12}/>}
+                  {playing ? "暂停" : "播放"}
+                </button>
+                <span className="text-xs text-zinc-500">0:06 · 44.1kHz</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {voiceTab===2 && (
+        <div className="space-y-2">
+          <SectionLabel>历史音频</SectionLabel>
+          {AUDIO_HISTORY.map(a=>(
+            <div key={a.id} className="rounded-xl border border-zinc-700/60 bg-zinc-800/20 px-4 py-3 flex items-center gap-3">
+              <button className="w-8 h-8 rounded-full bg-indigo-600/20 border border-indigo-600/40 flex items-center justify-center shrink-0 hover:bg-indigo-600/30 transition-colors">
+                <IconPlay size={10}/>
+              </button>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-zinc-300 truncate">{a.text}</p>
+                <p className="text-[10px] text-zinc-600 mt-0.5">{a.duration} · {a.ago}</p>
+              </div>
+              <button className="text-[10px] text-zinc-600 hover:text-zinc-400 px-2 py-1 rounded hover:bg-zinc-700 transition-colors">下载</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Tab 7: Costume Management ─────────────────────────────────────────────────
+
+function TabCostume() {
+  const [selected, setSelected] = useState("root");
+  const [addingBranch, setAddingBranch] = useState(false);
+
+  const nodes = [
+    {id:"root", label:"标准服装", parent:null, color:"#6366f1", time:"2026-01-15"},
+    {id:"combat", label:"战斗服", parent:"root", color:"#E94560", time:"2026-02-08"},
+    {id:"casual", label:"休闲服", parent:"root", color:"#FF8C42", time:"2026-03-01"},
+    {id:"summer", label:"夏日泳装", parent:"casual", color:"#0ea5e9", time:"2026-03-20"},
+  ];
+
+  const renderNode = (nodeId, depth=0) => {
+    const node = nodes.find(n=>n.id===nodeId);
+    if (!node) return null;
+    const children = nodes.filter(n=>n.parent===nodeId);
+    return (
+      <div key={node.id} style={{marginLeft:depth*24}} className="space-y-2">
+        <button
+          onClick={()=>setSelected(node.id)}
+          className={`flex items-center gap-3 w-full text-left rounded-xl border px-3.5 py-3 transition-all ${selected===node.id?"border-indigo-500 bg-indigo-950/30":"border-zinc-700/60 bg-zinc-800/20 hover:border-zinc-600"}`}
+        >
+          {depth>0 && <div className="absolute" style={{left:-13,top:"50%",width:13,height:1,background:"#3f3f46"}}/>}
+          <MockImage idx={nodes.indexOf(node)} w={44} h={44} radius={8}/>
+          <div>
+            <p className={`text-sm font-medium ${selected===node.id?"text-indigo-200":"text-zinc-200"}`}>{node.label}</p>
+            <p className="text-[11px] text-zinc-500">{node.time}</p>
+          </div>
+          {node.id==="root" && <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-950 text-indigo-400 border border-indigo-800/50">基础</span>}
+        </button>
+        {children.map(c=>renderNode(c.id,depth+1))}
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <SectionLabel>造型版本树</SectionLabel>
+        <button
+          onClick={()=>setAddingBranch(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 transition-colors"
+        >
+          <IconPlus size={11}/>新建造型分支
+        </button>
+      </div>
+
+      <div className="relative space-y-2">
+        {renderNode("root")}
+      </div>
+
+      {addingBranch && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={()=>setAddingBranch(false)}>
+          <div className="w-72 bg-zinc-900 rounded-2xl border border-zinc-700 p-5 fade-in" onClick={e=>e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-zinc-200 mb-4">新建造型分支</h3>
+            <div className="space-y-3 mb-4">
+              <input placeholder="造型名称..." className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/60"/>
+              <select className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-sm text-zinc-200 focus:outline-none">
+                <option>基于: 标准服装</option>
+                <option>基于: 战斗服</option>
+                <option>基于: 休闲服</option>
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={()=>setAddingBranch(false)} className="flex-1 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-400 transition-colors">取消</button>
+              <button onClick={()=>setAddingBranch(false)} className="flex-1 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm text-white font-medium transition-colors">创建</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Tab 8: Export Profile ─────────────────────────────────────────────────────
+
+function TabExport() {
+  const [checks, setChecks] = useState({info:true,refs:true,dna:true,costumes:true});
+  const [selRefs, setSelRefs] = useState(new Set([0,2]));
+  const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
+  const [done, setDone] = useState(false);
+
+  const toggleCheck = k => setChecks(c=>({...c,[k]:!c[k]}));
+  const toggleRef = i => setSelRefs(prev=>{const n=new Set(prev);n.has(i)?n.delete(i):n.add(i);return n;});
+
+  const handleExport = () => {
+    setExporting(true); setDone(false); setExportProgress(0);
+    const t = setInterval(()=>{
+      setExportProgress(p=>{
+        if(p>=100){clearInterval(t);setExporting(false);setDone(true);return 100;}
+        return p+5;
+      });
+    },120);
+  };
+
+  const checkItems = [
+    {key:"info",label:"角色基础信息（姓名/DNA/简介）"},
+    {key:"refs",label:"参考图（已选）"},
+    {key:"dna",label:"DNA 参数与完整 Prompt"},
+    {key:"costumes",label:"造型版本列表"},
+  ];
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <SectionLabel>导出内容</SectionLabel>
+        <div className="space-y-2">
+          {checkItems.map(item=>(
+            <label key={item.key} className="flex items-center gap-3 rounded-lg border border-zinc-700/60 bg-zinc-800/20 px-4 py-2.5 cursor-pointer hover:border-zinc-600 transition-colors">
+              <input type="checkbox" checked={checks[item.key]} onChange={()=>toggleCheck(item.key)} className="w-4 h-4 accent-indigo-500 shrink-0"/>
+              <span className="text-sm text-zinc-300">{item.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <SectionLabel>选择参考图</SectionLabel>
+        <div className="grid grid-cols-4 gap-2">
+          {[0,1,2,3].map(i=>(
+            <button
+              key={i}
+              onClick={()=>toggleRef(i)}
+              className={`relative rounded-xl overflow-hidden border-2 transition-all ${selRefs.has(i)?"border-indigo-500":"border-transparent hover:border-zinc-600"}`}
+            >
+              <MockImage idx={i} h={80} radius={0}/>
+              {selRefs.has(i) && (
+                <div className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center">
+                  <IconCheck size={8}/>
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <button
+          onClick={handleExport}
+          disabled={exporting}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-sm text-white font-semibold transition-colors"
+        >
+          {exporting ? <><IconSpinner size={13}/>导出中…</> : "导出设定书 PDF"}
+        </button>
+
+        {(exporting || done) && (
+          <div className="fade-in space-y-1.5">
+            <ProgressBar value={exportProgress}/>
+            {done && (
+              <div className="flex items-center gap-2 text-xs text-green-400">
+                <IconCheck size={11}/>
+                导出完成！文件已保存到桌面
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Tab 9: LLM Workspace ──────────────────────────────────────────────────────
+
+function TabLLMWorkspace({char}) {
+  const [llmTab, setLlmTab] = useState(0);
+  const [selectedModel, setSelectedModel] = useState("m2");
+  const [ollamaRunning] = useState(true);
+
+  // Dataset sub-tab state
+  const [datasets] = useState([
+    {id:"ds1",name:"人设文档.md",count:8,quality:92,issue:null},
+    {id:"ds2",name:"对话样本.jsonl",count:156,quality:87,issue:"⚠ 建议增加到 200 条以上"},
+  ]);
+
+  // Training sub-tab state
+  const [mode, setMode] = useState("standard");
+  const [trainingLLM, setTrainingLLM] = useState(false);
+  const [llmProgress, setLlmProgress] = useState(0);
+  const timerRef = useRef(null);
+
+  const handleLLMTrain = () => {
+    setTrainingLLM(true); setLlmProgress(0);
+    timerRef.current = setInterval(()=>{
+      setLlmProgress(p=>{
+        if(p>=100){clearInterval(timerRef.current);setTrainingLLM(false);return 100;}
+        return p+Math.random()*1.2+0.3;
+      });
+    },300);
+  };
+
+  // Models sub-tab state
+  const [models] = useState([
+    {id:"m2",version:2,name:"mely-mika-v2.gguf",status:"ready",size:"4.2GB",ago:"3天前",isRec:true},
+    {id:"m1",version:1,name:"mely-mika-v1.gguf",status:"ready",size:"4.1GB",ago:"1周前",isRec:false},
+    {id:"m0",version:0,name:"mely-mika-v0.gguf",status:"deleted",size:"—",ago:"2周前",isRec:false},
+  ]);
+
+  // Chat sub-tab state
+  const [messages, setMessages] = useState(INITIAL_CHAT);
+  const [chatInput, setChatInput] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [streamText, setStreamText] = useState("");
+  const streamRef = useRef(null);
+  const bottomRef = useRef(null);
+
+  const sendChat = useCallback(()=>{
+    const text = chatInput.trim();
+    if (!text || streaming) return;
+    setChatInput("");
+    setMessages(prev=>[...prev,{role:"user",content:text}]);
+    setStreaming(true); setStreamText("");
+    const reply = BOT_REPLIES[Math.floor(Math.random()*BOT_REPLIES.length)];
+    let i=0;
+    setTimeout(()=>{
+      streamRef.current = setInterval(()=>{
+        i++;
+        setStreamText(reply.slice(0,i));
+        if (i>=reply.length){
+          clearInterval(streamRef.current);
+          setStreaming(false);
+          setMessages(prev=>[...prev,{role:"assistant",content:reply}]);
+          setStreamText("");
+        }
+      },38);
+    },400);
+  },[chatInput,streaming]);
+
+  useEffect(()=>{
+    if (bottomRef.current) bottomRef.current.scrollIntoView({behavior:"smooth"});
+  },[messages,streamText]);
+
+  const modes = [
+    {id:"light",label:"轻量",time:"~15分钟",steps:"200–400步"},
+    {id:"standard",label:"标准",time:"~35分钟",steps:"400–800步",rec:true},
+    {id:"fine",label:"精细",time:"~70分钟",steps:"800–1500步",warn:"⚠ 需 12GB VRAM"},
+  ];
+
+  return (
+    <div className="flex flex-col h-full gap-3">
+      {/* Ollama status */}
+      <div className="flex items-center gap-2.5 px-4 py-2 bg-zinc-900 border border-zinc-700/60 rounded-xl">
+        <GreenDot/>
+        <span className="text-xs text-zinc-300">Ollama 已就绪</span>
+        <span className="text-zinc-700 text-xs">·</span>
+        <span className="text-xs font-mono text-zinc-400">qwen2.5:7b-instruct-q4_K_M</span>
+        <span className="text-zinc-700 text-xs">·</span>
+        <span className="text-xs text-zinc-500">本地运行</span>
+      </div>
+
+      {/* Sub-tab bar */}
+      <div className="flex border-b border-zinc-800">
+        {LLM_SUB_TABS.map((t,i)=>(
+          <button key={t} onClick={()=>setLlmTab(i)}
+            className={`px-4 py-2.5 text-sm font-medium relative transition-colors ${llmTab===i?"text-indigo-400":"text-zinc-500 hover:text-zinc-300"}`}
+          >
+            {t}
+            {llmTab===i && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-t-full"/>}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 overflow-y-auto min-h-0">
+        {/* Sub-tab 0: Datasets */}
+        {llmTab===0 && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <SectionLabel>文字数据集</SectionLabel>
+              <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs text-white font-medium transition-colors">
+                <IconUpload size={11}/>上传新数据集
+              </button>
+            </div>
+            <div className="space-y-2">
+              {datasets.map(d=>(
+                <div key={d.id} className="rounded-xl border border-zinc-700/60 bg-zinc-800/20 px-4 py-3 flex items-center gap-3">
+                  <span className="text-lg shrink-0">{d.id==="ds1"?"📄":"💬"}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-zinc-200">{d.name}</p>
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      <span className="text-[11px] text-zinc-500">{d.count}条</span>
+                      <span className="text-zinc-700">·</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${d.quality>=80?"text-green-400 bg-green-950/40 border-green-800":"text-yellow-400 bg-yellow-950/40 border-yellow-800"}`}>质量 {d.quality}%</span>
+                    </div>
+                    {d.issue && <p className="text-[11px] text-yellow-500 mt-1">{d.issue}</p>}
+                  </div>
+                  <button className="px-2.5 py-1 rounded text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-colors">预览</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Sub-tab 1: Model Training */}
+        {llmTab===1 && (
+          <div className="space-y-5">
+            <div className="grid grid-cols-3 gap-2">
+              {modes.map(m=>(
+                <button key={m.id} onClick={()=>setMode(m.id)}
+                  className={`rounded-xl border px-3.5 py-3 text-left transition-all relative ${mode===m.id?"border-indigo-500 bg-indigo-950/40":"border-zinc-700/60 bg-zinc-800/20 hover:border-zinc-600"}`}
+                >
+                  {m.rec && <span className="absolute top-2 right-2 text-[9px] px-1 py-0.5 rounded bg-indigo-700/60 text-indigo-300">推荐</span>}
+                  <div className="flex items-center justify-between mb-1">
+                    <span className={`text-sm font-semibold ${mode===m.id?"text-indigo-200":"text-zinc-300"}`}>{m.label}</span>
+                  </div>
+                  <p className="text-[11px] text-zinc-500">{m.time}</p>
+                  <p className="text-[11px] text-zinc-600">{m.steps}</p>
+                  {m.warn && <p className="text-[11px] text-yellow-500 mt-1">{m.warn}</p>}
+                </button>
+              ))}
+            </div>
+
+            <div className="rounded-xl border border-zinc-700/60 bg-zinc-800/20 p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-zinc-400">基础模型</span>
+                <span className="text-xs font-mono text-zinc-300">Qwen2.5-7B Q4_K_M</span>
+                <div className="flex items-center gap-1.5"><GreenDot/><span className="text-[10px] text-zinc-500">已就绪</span></div>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-zinc-400">GPU 状态</span>
+                <span className="text-xs font-mono text-zinc-300">RTX 3070</span>
+                <div className="flex items-center gap-1.5"><GreenDot/><span className="text-[10px] text-zinc-500">空闲</span></div>
+              </div>
+            </div>
+
+            {trainingLLM ? (
+              <div className="rounded-xl border border-indigo-700/50 bg-indigo-950/15 p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <IconSpinner size={13}/>
+                  <span className="text-sm text-indigo-300 font-medium">训练中...</span>
+                </div>
+                <ProgressBar value={llmProgress} animated={true}/>
+                <p className="text-xs text-zinc-500 font-mono">{Math.floor(llmProgress)}% · 约 {Math.max(1,Math.round((100-llmProgress)*0.35))} 分钟</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="rounded-xl border border-zinc-700/40 bg-zinc-800/20 p-3">
+                  <p className="text-[11px] text-zinc-500">当前任务: <span className="text-zinc-400">preparing</span></p>
+                  <p className="text-[10px] text-zinc-600 mt-1">系统将自动从数据集生成训练格式，并配置 QLoRA 参数</p>
+                </div>
+                <button onClick={handleLLMTrain}
+                  className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold text-white transition-colors shadow-lg shadow-indigo-900/30">
+                  开始训练
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Sub-tab 2: Private Models */}
+        {llmTab===2 && (
+          <div className="space-y-3">
+            <SectionLabel>私有模型版本</SectionLabel>
+            {models.map(m=>(
+              <div key={m.id} className={`rounded-xl border px-4 py-3 flex items-center gap-3 ${m.status==="deleted"?"opacity-40 cursor-not-allowed border-zinc-800":selectedModel===m.id?"border-indigo-500 bg-indigo-950/20":"border-zinc-700/60 bg-zinc-800/20 hover:border-zinc-600 cursor-pointer"}`}
+                onClick={()=>m.status!=="deleted"&&setSelectedModel(m.id)}>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-zinc-200">v{m.version}</span>
+                    {m.isRec && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-950 text-indigo-400 border border-indigo-800/50">推荐</span>}
+                    {m.status==="ready"
+                      ? <span className="text-[10px] px-1.5 py-0.5 rounded border font-mono text-green-400 bg-green-950/40 border-green-800/60">已就绪</span>
+                      : <span className="text-[10px] px-1.5 py-0.5 rounded border font-mono text-zinc-500 bg-zinc-800 border-zinc-700">已删除</span>
+                    }
+                    {selectedModel===m.id && <span className="text-xs text-indigo-400 font-mono">● 当前选中</span>}
+                  </div>
+                  <p className="text-[11px] text-zinc-500 font-mono mt-1 truncate">{m.name}</p>
+                  <div className="flex gap-3 text-[10px] text-zinc-600 mt-0.5">
+                    <span>{m.size}</span><span>·</span><span>{m.ago}</span>
+                  </div>
+                </div>
+                {m.status==="ready" && (
+                  <div className="flex gap-1.5 shrink-0">
+                    <button onClick={e=>{e.stopPropagation();setSelectedModel(m.id)}}
+                      className="px-2.5 py-1 rounded text-xs text-indigo-400 hover:text-indigo-300 hover:bg-zinc-700 transition-colors">加载</button>
+                    <button onClick={e=>e.stopPropagation()}
+                      className="px-2.5 py-1 rounded text-xs text-zinc-500 hover:text-red-400 hover:bg-zinc-700 transition-colors">删除</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Sub-tab 3: Chat */}
+        {llmTab===3 && (
+          <div className="flex flex-col" style={{height:"calc(100vh - 320px)"}}>
+            {/* Model selector */}
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-xs text-zinc-500">当前模型:</span>
+              <select
+                value={selectedModel}
+                onChange={e=>setSelectedModel(e.target.value)}
+                className="bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500/60"
+              >
+                <option value="m2">星野ミカ v2</option>
+                <option value="m1">星野ミカ v1</option>
+                <option value="base">基础模型</option>
+              </select>
+            </div>
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto space-y-4 mb-3 pr-1">
+              {messages.map((msg,i)=>(
+                <div key={i} className={`flex ${msg.role==="user"?"justify-end":"justify-start"} fade-in`}>
+                  {msg.role==="assistant" && (
+                    <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 mr-2 text-[11px] font-bold text-white mt-0.5" style={{background:"#FF6B9D"}}>ミ</div>
+                  )}
+                  <div className={`max-w-xs rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${msg.role==="user"?"bg-indigo-600 text-white rounded-tr-sm":"bg-zinc-800 text-zinc-200 rounded-tl-sm"}`}>
+                    {msg.content}
+                  </div>
+                  {msg.role==="user" && <div className="w-7 h-7 rounded-full bg-zinc-600 flex items-center justify-center shrink-0 ml-2 text-[11px] font-bold text-zinc-200 mt-0.5">U</div>}
+                </div>
+              ))}
+              {streaming && (
+                <div className="flex justify-start fade-in">
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 mr-2 text-[11px] font-bold text-white mt-0.5" style={{background:"#FF6B9D"}}>ミ</div>
+                  <div className="max-w-xs rounded-2xl rounded-tl-sm px-3.5 py-2.5 text-sm bg-zinc-800 text-zinc-200 leading-relaxed">
+                    {streamText || <span className="text-zinc-600">思考中</span>}
+                    <span className="blink-cursor inline-block w-0.5 h-4 bg-indigo-400 ml-0.5 align-middle"/>
+                  </div>
+                </div>
+              )}
+              <div ref={bottomRef}/>
+            </div>
+
+            {/* Input */}
+            <div className="flex gap-2">
+              <textarea
+                value={chatInput}
+                onChange={e=>setChatInput(e.target.value)}
+                onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendChat();}}}
+                placeholder="输入消息… (Enter 发送，Shift+Enter 换行)"
+                rows={2}
+                className="flex-1 resize-none rounded-xl bg-zinc-800 border border-zinc-700 text-sm text-zinc-200 placeholder-zinc-600 px-3.5 py-2.5 focus:outline-none focus:border-indigo-500/60"
+              />
+              <button
+                onClick={streaming ? ()=>{if(streamRef.current)clearInterval(streamRef.current);setStreaming(false);setStreamText("");} : sendChat}
+                disabled={!streaming&&!chatInput.trim()}
+                className="w-9 h-9 self-end rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white flex items-center justify-center transition-colors"
+              >
+                {streaming ? <IconStop size={14}/> : <IconSend size={14}/>}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Tab 10: Visual Workbench ──────────────────────────────────────────────────
+
+function TabVisualWorkbench() {
+  const [mode, setMode] = useState("standard");
+  const [genDesc, setGenDesc] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [generatedImgs, setGeneratedImgs] = useState([]);
+  const [selImgs, setSelImgs] = useState(new Set());
+  const [taskStatus] = useState({status:"queued",progress:0});
+
+  const handleGenPreview = () => {
+    setGenerating(true);
+    setTimeout(()=>{setGenerating(false);setGeneratedImgs([4,5,6,7]);},1800);
+  };
+
+  const toggleSelImg = i => setSelImgs(prev=>{const n=new Set(prev);n.has(i)?n.delete(i):n.add(i);return n;});
+
+  const visualModes = [
+    {id:"light",label:"轻量模式",time:"~45分钟",steps:"500步",desc:"rank 8 · 适合快速测试"},
+    {id:"standard",label:"标准模式",time:"~90分钟",steps:"1500步",desc:"rank 16 · 推荐",rec:true},
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* Entry A: Image dataset */}
+      <div className="rounded-xl border border-zinc-700/60 bg-zinc-800/20 p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-zinc-200">入口 A · 图片数据集</p>
+            <p className="text-xs text-zinc-500 mt-0.5">使用已上传的12张图片训练 LoRA</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-right">
+              <p className="text-xs text-zinc-400">质量评分</p>
+              <p className="text-lg font-bold text-green-400">87<span className="text-xs text-zinc-500 font-normal">/100</span></p>
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-6 gap-1.5">
+          {[0,1,2,3,4,5].map(i=><MockImage key={i} idx={i} h={52} radius={6}/>)}
+        </div>
+        <p className="text-[11px] text-zinc-500">共 12 张 · 最后更新 2天前</p>
+      </div>
+
+      {/* Entry B: Text-to-image */}
+      <div className="rounded-xl border border-zinc-700/60 bg-zinc-800/20 p-4 space-y-3">
+        <div>
+          <p className="text-sm font-semibold text-zinc-200">入口 B · 文字生图</p>
+          <p className="text-xs text-zinc-500 mt-0.5">描述角色外观，生成候选图加入训练集</p>
+        </div>
+        <textarea
+          value={genDesc}
+          onChange={e=>setGenDesc(e.target.value)}
+          placeholder="银色长发，红色眼睛，身穿黑白女仆装..."
+          rows={2}
+          className="w-full rounded-xl bg-zinc-900/50 border border-zinc-700 text-sm text-zinc-200 placeholder-zinc-600 px-4 py-2.5 focus:outline-none focus:border-indigo-500/60 resize-none"
+        />
+        <button
+          onClick={handleGenPreview}
+          disabled={generating||!genDesc.trim()}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-sm text-white font-medium transition-colors"
+        >
+          {generating ? <><IconSpinner size={13}/>生成中…</> : "生成候选图"}
+        </button>
+        {generatedImgs.length>0 && (
+          <div className="fade-in space-y-2">
+            <div className="grid grid-cols-4 gap-2">
+              {generatedImgs.map(i=>(
+                <button key={i} onClick={()=>toggleSelImg(i)}
+                  className={`relative rounded-xl overflow-hidden border-2 transition-all ${selImgs.has(i)?"border-indigo-500":"border-transparent hover:border-zinc-600"}`}>
+                  <MockImage idx={i} h={80} radius={0}/>
+                  {selImgs.has(i) && <div className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center"><IconCheck size={8}/></div>}
+                </button>
+              ))}
+            </div>
+            <button disabled={selImgs.size===0}
+              className="px-4 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-xs text-white font-medium transition-colors">
+              加入训练集 ({selImgs.size} 张)
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Training config */}
+      <div className="space-y-3">
+        <SectionLabel>训练配置</SectionLabel>
+        <div className="grid grid-cols-2 gap-3">
+          {visualModes.map(m=>(
+            <button key={m.id} onClick={()=>setMode(m.id)}
+              className={`rounded-xl border px-4 py-3 text-left relative transition-all ${mode===m.id?"border-indigo-500 bg-indigo-950/40":"border-zinc-700/60 bg-zinc-800/20 hover:border-zinc-600"}`}>
+              {m.rec && <span className="absolute top-2 right-2 text-[9px] px-1 py-0.5 rounded bg-indigo-700/60 text-indigo-300">推荐</span>}
+              <p className={`text-sm font-semibold ${mode===m.id?"text-indigo-200":"text-zinc-200"}`}>{m.label}</p>
+              <p className="text-xs text-zinc-500 mt-0.5">{m.time} · {m.steps}</p>
+              <p className="text-[11px] text-zinc-600">{m.desc}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Current task */}
+      <div className="rounded-xl border border-zinc-700/40 bg-zinc-800/20 px-4 py-3 flex items-center justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-700 text-zinc-400 font-mono">queued</span>
+            <span className="text-xs text-zinc-500">视觉 LoRA 训练</span>
+          </div>
+          <p className="text-[11px] text-zinc-600 mt-1">等待 GPU 资源释放...</p>
+        </div>
+        <div className="text-right">
+          <span className="text-lg font-bold text-zinc-500 font-mono">0%</span>
+        </div>
+      </div>
+
+      <button className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold text-white transition-colors shadow-lg shadow-indigo-900/30">
+        开始视觉训练
+      </button>
+    </div>
+  );
+}
+
+// ─── Character Detail (Page 2) ─────────────────────────────────────────────────
+
+function CharacterDetail({charId, onBack}) {
+  const [activeTab, setActiveTab] = useState(0);
+  const char = CHARACTERS.find(c=>c.id===charId) || CHARACTERS[0];
+  const tabBarRef = useRef(null);
+
+  const renderTabContent = () => {
+    switch(activeTab) {
+      case 0: return <TabDatasetAssessment/>;
+      case 1: return <TabTextToChar/>;
+      case 2: return <TabDNA/>;
+      case 3: return <TabTrainingProgress/>;
+      case 4: return <TabGeneration/>;
+      case 5: return <TabVoice/>;
+      case 6: return <TabCostume/>;
+      case 7: return <TabExport/>;
+      case 8: return <TabLLMWorkspace char={char}/>;
+      case 9: return <TabVisualWorkbench/>;
+      default: return null;
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="flex items-center gap-4 px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 shrink-0">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors px-2 py-1.5 rounded-lg hover:bg-zinc-800"
+        >
+          <IconBack size={13}/> 返回角色库
+        </button>
+        <div className="flex items-center gap-2.5">
+          <div
+            className="w-8 h-8 rounded-xl flex items-center justify-center text-sm font-bold text-white shrink-0"
+            style={{background:char.color}}
+          >
+            {char.initials}
+          </div>
+          <div>
+            <h2 className="text-sm font-bold text-zinc-100">{char.name}</h2>
+            <div className="flex items-center gap-2 mt-0.5">
+              <LLMBadge status={char.llmStatus}/>
+              <LoraBadge status={char.loraStatus}/>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Tab bar */}
+      <div
+        ref={tabBarRef}
+        className="flex border-b border-zinc-800 bg-zinc-900/30 overflow-x-auto shrink-0"
+        style={{scrollbarWidth:"none"}}
+      >
+        {DETAIL_TABS.map((tab,i)=>(
+          <button
+            key={tab}
+            onClick={()=>setActiveTab(i)}
+            className={`relative px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors flex-shrink-0 ${activeTab===i?"text-zinc-100":"text-zinc-500 hover:text-zinc-300"}`}
+          >
+            {tab}
+            {activeTab===i && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-t-full"/>}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div className="flex-1 overflow-y-auto p-6">
+        {renderTabContent()}
+      </div>
+    </div>
+  );
+}
+
+// ─── App Root ──────────────────────────────────────────────────────────────────
+
+function App() {
+  const [page, setPage] = useState("library"); // "library" | "detail"
+  const [selectedChar, setSelectedChar] = useState(null);
+
+  const handleSelectChar = (id) => {
+    setSelectedChar(id);
+    setPage("detail");
+  };
+
+  const handleBack = () => {
+    setPage("library");
+    setSelectedChar(null);
+  };
+
+  return (
+    <div className="h-screen bg-zinc-950 text-zinc-200 overflow-hidden" style={{fontFamily:"'Inter',system-ui,sans-serif"}}>
+      {page==="library" && (
+        <CharacterLibrary onSelect={handleSelectChar}/>
+      )}
+      {page==="detail" && selectedChar && (
+        <CharacterDetail charId={selectedChar} onBack={handleBack}/>
+      )}
+    </div>
+  );
+}
+
+// ─── Mount ─────────────────────────────────────────────────────────────────────
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App/>);
+</script>
+</body>
+</html>

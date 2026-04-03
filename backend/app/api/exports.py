@@ -155,6 +155,7 @@ async def export_pdf(
     snapshot = await queue.submit(
         name=f"export-pdf-{character_id}",
         runner=runner,
+        category="background",
         initial_message="PDF 导出任务已提交",
     )
 

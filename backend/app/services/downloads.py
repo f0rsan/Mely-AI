@@ -372,6 +372,7 @@ class DownloadService:
         await self._queue.submit(
             name=f"download-{model.id}",
             runner=self._build_runner(task_id),
+            category="background",
             task_id=task_id,
             initial_progress=initial_progress,
             initial_message="下载任务已进入队列",
@@ -402,6 +403,7 @@ class DownloadService:
         await self._queue.submit(
             name=f"download-{pending.model_id}",
             runner=self._build_runner(task_id),
+            category="background",
             task_id=task_id,
             initial_progress=pending.progress,
             initial_message="下载任务已重新进入队列",
@@ -423,6 +425,7 @@ class DownloadService:
             await self._queue.submit(
                 name=f"download-{pending.model_id}",
                 runner=self._build_runner(pending.id),
+                category="background",
                 task_id=pending.id,
                 initial_progress=pending.progress,
                 initial_message="应用重启后恢复下载",

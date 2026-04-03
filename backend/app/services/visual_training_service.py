@@ -260,6 +260,7 @@ class VisualTrainingService:
             snapshot = await self._queue.submit(
                 name=f"visual-training-{character_id}",
                 runner=self._build_runner(job_id),
+                category="gpu_exclusive",
                 task_id=job_id,
                 initial_progress=0,
                 initial_message="视觉训练任务已进入队列",

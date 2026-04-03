@@ -68,16 +68,16 @@ function buildArchiveRecord() {
   };
 }
 
-function buildAssembled() {
+function buildAssembled(scenePrompt = "在咖啡馆") {
   return {
-    assembled: "hoshino_mika, pink hair, 在咖啡馆",
+    assembled: `hoshino_mika, pink hair, ${scenePrompt}`,
     tokenCount: 5,
     wasOverridden: false,
     components: [
       { source: "trigger_word", label: "LoRA 触发词", content: "hoshino_mika", active: true },
       { source: "dna_prompt", label: "角色 DNA", content: "pink hair", active: true },
       { source: "costume_prompt", label: "造型词", content: "", active: false },
-      { source: "scene_prompt", label: "场景描述", content: "在咖啡馆", active: true },
+      { source: "scene_prompt", label: "场景描述", content: scenePrompt, active: true },
     ],
   };
 }
@@ -275,4 +275,115 @@ test("shows 再来一张 button after generation completes and archives", async 
 
   await screen.findByText("生成完成，已保存至角色历史");
   expect(screen.getByRole("button", { name: "再来一张" })).toBeInTheDocument();
+});
+
+test("archives submitted snapshot even if prompt and params change while running", async () => {
+  const user = userEvent.setup();
+  const archiveRequests: Record<string, unknown>[] = [];
+
+  fetchMock.mockImplementation((url: string, opts?: RequestInit) => {
+    if (url.includes("/generations/mock") && opts?.method === "POST") {
+      return Promise.resolve({ ok: true, json: async () => ({ job: buildJob() }) });
+    }
+    if (url.includes("/generations/archive") && opts?.method === "POST") {
+      archiveRequests.push(JSON.parse(String(opts.body)) as Record<string, unknown>);
+      return Promise.resolve({ ok: true, json: async () => buildArchiveRecord() });
+    }
+    if (url.includes("/engine/status")) {
+      return Promise.resolve({ ok: true, json: async () => buildEngineStatus("running") });
+    }
+    if (url.includes("/generation-workbench")) {
+      return Promise.resolve({ ok: true, json: async () => buildContract() });
+    }
+    if (url.includes("/prompt/assemble") && opts?.method === "POST") {
+      const body = JSON.parse(String(opts.body)) as { scenePrompt?: string };
+      return Promise.resolve({ ok: true, json: async () => buildAssembled(body.scenePrompt ?? "") });
+    }
+    return Promise.resolve({ ok: true, json: async () => ({}) });
+  });
+
+  render(<GenerationWorkbenchPage characterId="char-1" characterName="星野ミカ" />);
+
+  await screen.findByText("基础造型");
+  const sceneInput = screen.getByPlaceholderText(/在直播封面/) as HTMLTextAreaElement;
+
+  await user.type(sceneInput, "在咖啡馆");
+  await screen.findByText("hoshino_mika, pink hair, 在咖啡馆");
+  await user.click(screen.getByRole("button", { name: "使用此 Prompt" }));
+
+  await user.click(screen.getByRole("button", { name: /参数设置/ }));
+  const widthInput = screen.getByLabelText("宽度");
+  const heightInput = screen.getByLabelText("高度");
+  const stepsInput = screen.getByLabelText("步数");
+  const cfgScaleInput = screen.getByLabelText("CFG Scale");
+  const seedInput = screen.getByLabelText("Seed（空 = 随机）");
+  const loraWeightInput = screen.getByLabelText("LoRA 权重");
+  const samplerSelect = screen.getByLabelText("采样器");
+
+  await user.clear(widthInput);
+  await user.type(widthInput, "768");
+  await user.clear(heightInput);
+  await user.type(heightInput, "1152");
+  await user.clear(stepsInput);
+  await user.type(stepsInput, "40");
+  await user.clear(cfgScaleInput);
+  await user.type(cfgScaleInput, "7");
+  await user.clear(seedInput);
+  await user.type(seedInput, "12345");
+  await user.clear(loraWeightInput);
+  await user.type(loraWeightInput, "0.95");
+  await user.selectOptions(samplerSelect, "Euler a");
+
+  const ws = MockWebSocket.instances[0];
+  ws.emitOpen();
+
+  await user.click(screen.getByRole("button", { name: "开始生成" }));
+
+  await user.clear(sceneInput);
+  await user.type(sceneInput, "在海边");
+  await screen.findByText("hoshino_mika, pink hair, 在海边");
+  await user.click(screen.getByRole("button", { name: "使用此 Prompt" }));
+
+  await user.clear(widthInput);
+  await user.type(widthInput, "1536");
+  await user.clear(heightInput);
+  await user.type(heightInput, "1536");
+  await user.clear(stepsInput);
+  await user.type(stepsInput, "55");
+  await user.clear(cfgScaleInput);
+  await user.type(cfgScaleInput, "9");
+  await user.clear(seedInput);
+  await user.type(seedInput, "67890");
+  await user.clear(loraWeightInput);
+  await user.type(loraWeightInput, "0.6");
+  await user.selectOptions(samplerSelect, "DDIM");
+
+  ws.emitMessage({
+    event: "task_updated",
+    task: {
+      id: "task-1",
+      name: "gen",
+      status: "completed",
+      progress: 100,
+      message: "任务已完成",
+      error: null,
+      createdAt: "2026-03-31T00:00:00Z",
+      updatedAt: "2026-03-31T00:00:02Z",
+    },
+  });
+
+  await screen.findByText("生成完成，已保存至角色历史");
+  expect(archiveRequests).toHaveLength(1);
+  expect(archiveRequests[0]).toMatchObject({
+    costumeId: "costume-1",
+    assembledPrompt: "hoshino_mika, pink hair, 在咖啡馆",
+    width: 768,
+    height: 1152,
+    steps: 40,
+    sampler: "Euler a",
+    cfgScale: 7,
+    seed: 12345,
+    loraWeight: 0.95,
+    tags: [],
+  });
 });

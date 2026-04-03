@@ -65,7 +65,11 @@ async def create_mock_task(request: Request, payload: MockTaskRequest) -> dict:
             percent = int((step / payload.steps) * 100)
             await progress(percent, f"模拟任务进行中（{step}/{payload.steps}）")
 
-    task = await queue.submit(name=f"mock-{payload.mode}", runner=run_mock_task)
+    task = await queue.submit(
+        name=f"mock-{payload.mode}",
+        runner=run_mock_task,
+        category="background",
+    )
     return {"task": task.to_dict()}
 
 

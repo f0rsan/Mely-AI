@@ -9,12 +9,13 @@ Responsibilities:
 Image handling:
 - Accepts base64-encoded PNG bytes (imageDataB64) for self-contained testing.
 - In production M2-E/M2-G will pass the real bytes from ComfyUI output.
-  If imageDataB64 is None we write a zero-byte placeholder (future engine
-  integration will always supply bytes).
+- Formal archive rejects empty payloads. Placeholder files are not allowed
+  in the official generations history.
 """
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import sqlite3
 from datetime import datetime, timezone
@@ -29,8 +30,28 @@ class GenerationArchiveError(Exception):
     """Raised when archiving fails."""
 
 
+class GenerationArchiveRequestError(GenerationArchiveError):
+    """Raised when archive request payload is invalid."""
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _decode_image_bytes(image_data_b64: str | None) -> bytes:
+    """Decode base64 image payload and validate it is non-empty."""
+    if image_data_b64 is None or not image_data_b64.strip():
+        raise GenerationArchiveRequestError("缺少真实图片数据，无法归档生成结果")
+
+    try:
+        image_bytes = base64.b64decode(image_data_b64, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise GenerationArchiveRequestError("图片数据解码失败，请检查图片格式是否正确") from exc
+
+    if not image_bytes:
+        raise GenerationArchiveRequestError("生成图片数据为空，无法归档生成结果")
+
+    return image_bytes
 
 
 def archive_generation(
@@ -46,19 +67,18 @@ def archive_generation(
     dirs = ensure_character_directories(data_root, request.character_id)
     gen_dir: Path = dirs["generations"]
 
+    image_bytes = _decode_image_bytes(request.image_data_b64)
+
     # Write image file.
     image_filename = f"{generation_id}.png"
     image_path = gen_dir / image_filename
 
-    if request.image_data_b64:
-        try:
-            image_bytes = base64.b64decode(request.image_data_b64)
-        except Exception as exc:
-            raise GenerationArchiveError("图片数据解码失败，请检查图片格式是否正确") from exc
+    try:
         image_path.write_bytes(image_bytes)
-    else:
-        # Placeholder for future real-engine integration.
-        image_path.write_bytes(b"")
+    except OSError as exc:
+        if image_path.exists():
+            image_path.unlink(missing_ok=True)
+        raise GenerationArchiveError("生成结果保存失败，请稍后重试") from exc
 
     output_path = str(image_path)
 
@@ -116,6 +136,46 @@ def archive_generation(
         paramsSnapshot=params_snapshot,
         tags=list(request.tags),
         createdAt=created_at,
+    )
+
+
+def get_generation_archive_by_id(
+    connection: sqlite3.Connection,
+    generation_id: str,
+) -> GenerationArchiveRecord | None:
+    """Return a single archived generation record, or None if not found."""
+    row = connection.execute(
+        """
+        SELECT id, character_id, costume_id, params_snapshot, output_path, created_at
+        FROM generations
+        WHERE id = ?
+        """,
+        (generation_id,),
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    tags = [
+        r["tag"]
+        for r in connection.execute(
+            "SELECT tag FROM generation_tags WHERE generation_id = ? ORDER BY tag",
+            (row["id"],),
+        ).fetchall()
+    ]
+    try:
+        params = json.loads(row["params_snapshot"])
+    except json.JSONDecodeError:
+        params = {}
+
+    return GenerationArchiveRecord(
+        id=row["id"],
+        characterId=row["character_id"],
+        costumeId=row["costume_id"],
+        outputPath=row["output_path"],
+        paramsSnapshot=params,
+        tags=tags,
+        createdAt=row["created_at"],
     )
 
 

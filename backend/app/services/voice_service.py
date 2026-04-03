@@ -9,21 +9,24 @@ Responsibilities:
 from __future__ import annotations
 
 import asyncio
-import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
 if TYPE_CHECKING:
     from app.services.task_queue import TaskQueue
     from app.services.tts_runtime import TTSRuntime
 
-ALLOWED_AUDIO_FORMATS = {"wav", "mp3", "flac", "m4a", "ogg"}
+ALLOWED_AUDIO_FORMATS = {"wav"}
 MIN_DURATION_S = 3.0
 MAX_DURATION_S = 30.0
+
+
+def _looks_like_wav(audio_bytes: bytes) -> bool:
+    # Minimal container check: RIFF....WAVE
+    return len(audio_bytes) >= 12 and audio_bytes[:4] == b"RIFF" and audio_bytes[8:12] == b"WAVE"
 
 
 class VoiceServiceError(Exception):
@@ -47,6 +50,10 @@ class VoiceInvalidFormatError(VoiceServiceError):
 
 
 class VoiceInvalidDurationError(VoiceServiceError):
+    pass
+
+
+class VoiceSynthesisUnavailableError(VoiceServiceError):
     pass
 
 
@@ -166,7 +173,11 @@ class VoiceService:
         ext = audio_format.lower().lstrip(".")
         if ext not in ALLOWED_AUDIO_FORMATS:
             raise VoiceInvalidFormatError(
-                f"不支持的音频格式 {ext!r}，请上传 WAV、MP3、FLAC、M4A 或 OGG 文件。"
+                "当前仅支持 WAV 参考音频上传，其他格式暂未开放，请先转换为 WAV 后重试。"
+            )
+        if not _looks_like_wav(audio_bytes):
+            raise VoiceInvalidFormatError(
+                "上传文件不是有效的 WAV 音频，请先转换为标准 WAV 后重试。"
             )
         if not (MIN_DURATION_S <= duration_seconds <= MAX_DURATION_S):
             raise VoiceInvalidDurationError(
@@ -224,6 +235,7 @@ class VoiceService:
         task = await self.queue.submit(
             name=f"tts-extract-{character_id}",
             runner=_extract,
+            category="background",
             initial_message="声纹提取任务已进入队列",
         )
         return task.id
@@ -236,8 +248,13 @@ class VoiceService:
         speed: float = 1.0,
         output_format: str = "wav",
     ) -> str:
-        """Submit a TTS synthesis task; writes result to generations table when done."""
-        from app.services.gpu_mutex import EngineGpuMutexError, check_gpu_exclusive
+        """Submit a TTS synthesis task.
+
+        NOTE:
+        Real synthesis output is not wired yet in this runtime. We reject the
+        request explicitly to avoid empty placeholder audio and fake successes.
+        """
+        from app.services.gpu_mutex import check_gpu_exclusive
 
         asset = self.get_status(character_id)
         if asset.status != "bound":
@@ -250,65 +267,9 @@ class VoiceService:
         if tts_runtime_status.state != "running":
             raise VoiceServiceError("TTS 引擎未运行，请先启动引擎。")
 
-        # Find default costume for this character.
-        with self._connect() as conn:
-            costume_row = conn.execute(
-                "SELECT id FROM costumes WHERE character_id = ? ORDER BY created_at LIMIT 1",
-                (character_id,),
-            ).fetchone()
-        costume_id = costume_row["id"] if costume_row else "default"
-
-        ref_path = asset.reference_audio_path
-        db_path = self.db_path
-        data_root = self.data_root
-
-        async def _synthesize(progress) -> None:
-            await progress(10, "正在准备 TTS 引擎")
-            await asyncio.sleep(0.05)
-            await progress(50, "正在合成语音")
-            await asyncio.sleep(0.1)
-
-            # Write output file
-            gen_id = uuid4().hex
-            output_dir = data_root / "characters" / character_id / "generations"
-            output_dir.mkdir(parents=True, exist_ok=True)
-            output_path = output_dir / f"{gen_id}.wav"
-            # In real impl this would call F5-TTS HTTP API and write the response.
-            # For now we write an empty placeholder so the file endpoint works.
-            output_path.write_bytes(b"")
-
-            params_snapshot = json.dumps(
-                {
-                    "text": text,
-                    "language": language,
-                    "speed": speed,
-                    "ttsEngine": "f5-tts",
-                    "sampleRate": 24000,
-                    "referenceAudioPath": ref_path,
-                },
-                ensure_ascii=False,
-            )
-
-            from app.db.connection import connect_database
-            conn2 = connect_database(db_path)
-            conn2.row_factory = sqlite3.Row
-            with conn2:
-                conn2.execute(
-                    """
-                    INSERT INTO generations
-                        (id, character_id, costume_id, type, output_path, params_snapshot)
-                    VALUES (?, ?, ?, 'audio', ?, ?)
-                    """,
-                    (gen_id, character_id, costume_id, str(output_path), params_snapshot),
-                )
-            await progress(100, "语音合成完成")
-
-        task = await self.queue.submit(
-            name=f"tts-{character_id}",
-            runner=_synthesize,
-            initial_message="语音合成任务已进入队列",
+        raise VoiceSynthesisUnavailableError(
+            "当前版本暂不支持语音合成，请先完成声音绑定并等待引擎接入。"
         )
-        return task.id
 
 
 def create_voice_service(

@@ -126,6 +126,19 @@ export function LLMTrainingPanel({ characterId }: Props) {
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [streamNotice, setStreamNotice] = useState<string | null>(null);
+  const streamNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showStreamNotice = useCallback((message: string) => {
+    setStreamNotice(message);
+    if (streamNoticeTimerRef.current !== null) {
+      clearTimeout(streamNoticeTimerRef.current);
+    }
+    streamNoticeTimerRef.current = setTimeout(() => {
+      setStreamNotice(null);
+      streamNoticeTimerRef.current = null;
+    }, 4000);
+  }, []);
 
   const loadAll = useCallback(async () => {
     try {
@@ -146,6 +159,14 @@ export function LLMTrainingPanel({ characterId }: Props) {
     loadAll();
   }, [loadAll]);
 
+  useEffect(() => {
+    return () => {
+      if (streamNoticeTimerRef.current !== null) {
+        clearTimeout(streamNoticeTimerRef.current);
+      }
+    };
+  }, []);
+
   // Subscribe to task stream for real-time training progress
   const jobsRef = useRef(jobs);
   useEffect(() => { jobsRef.current = jobs; }, [jobs]);
@@ -161,21 +182,35 @@ export function LLMTrainingPanel({ characterId }: Props) {
         try {
           const full = await getLLMTrainingJob(task.id);
           setJobs((prev) => prev.map((j) => (j.id === full.id ? full : j)));
-        } catch {
-          // silent — stale read is acceptable
+        } catch (err) {
+          showStreamNotice("任务详情刷新失败，状态可能稍有延迟");
+          console.error("[LLMTrainingPanel] Failed to refresh job details", {
+            step: "refresh_job_detail",
+            characterId,
+            jobId: task.id,
+            taskName: task.name,
+            error: err,
+          });
         }
       } else if (task.name === `llm-training-${characterId}`) {
         // A new job for this character appeared (e.g. started elsewhere)
         try {
           const all = await listLLMTrainingJobs(characterId);
           setJobs(all);
-        } catch {
-          // silent
+        } catch (err) {
+          showStreamNotice("训练列表刷新失败，稍后会自动重试");
+          console.error("[LLMTrainingPanel] Failed to refresh job list", {
+            step: "refresh_job_list",
+            characterId,
+            taskId: task.id,
+            taskName: task.name,
+            error: err,
+          });
         }
       }
     });
     return teardown;
-  }, [characterId]);
+  }, [characterId, showStreamNotice]);
 
   const toggleDataset = (id: string) => {
     setSelectedIds((prev) => {
@@ -276,6 +311,15 @@ export function LLMTrainingPanel({ characterId }: Props) {
       {error && (
         <div className="rounded-lg bg-red-950/50 border border-red-800 px-3 py-2 text-xs text-red-300">
           {error}
+        </div>
+      )}
+      {streamNotice && (
+        <div
+          className="rounded-lg bg-amber-950/40 border border-amber-900 px-3 py-2 text-xs text-amber-200"
+          role="status"
+          aria-live="polite"
+        >
+          {streamNotice}
         </div>
       )}
 

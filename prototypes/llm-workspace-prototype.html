@@ -1,0 +1,1221 @@
+<!DOCTYPE html>
+<html lang="zh" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mely AI · LLM 工作台 Prototype</title>
+  <script>
+    tailwind.config = { darkMode: 'class' }
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; overflow: hidden; font-family: 'Inter', system-ui, sans-serif; }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    @keyframes pulse-ring {
+      0% { transform: scale(1); opacity: 0.6; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .blink-cursor { animation: blink 1s step-end infinite; }
+    .spin { animation: spin 1.2s linear infinite; }
+    .fade-in { animation: fadeIn 0.2s ease-out; }
+    .pulse-dot::after {
+      content: '';
+      position: absolute;
+      inset: -3px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.3;
+      animation: pulse-ring 1.8s ease-out infinite;
+    }
+  </style>
+</head>
+<body class="bg-zinc-950">
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const CHARACTERS = [
+  { id: "c1", name: "星野ミカ", initials: "ミ", color: "#FF6B9D", llmStatus: "已训练 v2" },
+  { id: "c2", name: "黑渊",     initials: "渊", color: "#E94560", llmStatus: "未训练" },
+  { id: "c3", name: "小橘猫 Maru", initials: "橘", color: "#FF8C42", llmStatus: "训练中..." },
+  { id: "c4", name: "赛博薇拉", initials: "维", color: "#00C9FF", llmStatus: "未训练" },
+];
+
+const TOP_TABS = ["视觉数据集", "DNA", "LoRA训练", "生成", "声音", "造型", "导出", "LLM 工作台"];
+
+const LLM_TABS = ["文字数据集", "模型训练", "私有模型", "角色对话"];
+
+const SAMPLE_DATASETS = [
+  {
+    id: "ds1",
+    icon: "📄",
+    name: "角色人设.md",
+    format: "人设文档",
+    count: 8,
+    quality: 92,
+    qualityIssue: null,
+  },
+  {
+    id: "ds2",
+    icon: "💬",
+    name: "对话样本.jsonl",
+    format: "对话样本 (JSONL)",
+    count: 156,
+    quality: 87,
+    qualityIssue: "⚠ 建议增加到 50 条以上对话",
+  },
+];
+
+const PREVIEW_ITEMS = [
+  {
+    human: "你好！介绍一下自己吧～",
+    gpt: "哦哦！你好哦～！我是星野ミカ！一个来自虚拟次元的女孩✨ 最近在忙直播的事情呢，有什么想聊的嘛？(○´ω`○)",
+  },
+  {
+    human: "你有什么特别的爱好吗？",
+    gpt: "当然有啦！我超级喜欢打游戏，尤其是那种可以养成角色的 RPG 呢~ 还有就是听音乐、看同人画。欸对了，你有推荐的游戏吗？",
+  },
+  {
+    human: "你是虚拟的还是真实的？",
+    gpt: "嘻嘻～这个问题好哲学哦~ 我的心是真实的！虽然住在次元壁的另一边，但对大家的感情是一点都不假的哦♡",
+  },
+];
+
+const BOT_REPLIES = [
+  "欸嘿嘿～我最喜欢说「加油哦♡」了！还有就是「欸欸欸？！」这个感叹词，每次遇到惊讶的事情就会脱口而出呢。对了，你平时喜欢什么类型的游戏？",
+  "哦哦！这个问题好有趣！(○´ω`○) 我觉得最重要的是做自己喜欢的事情，管别人怎么看！加油哦♡",
+  "嗯嗯！我最近在练习唱新歌呢～希望下次直播能给大家一个惊喜！欸嘿嘿，敬请期待哦～",
+  "欸嘛～这个我还在想呢！不过有你们陪着，什么困难都能克服的！加油哦♡ 一起加油！",
+];
+
+// ─── Icons ────────────────────────────────────────────────────────────────────
+
+function IconSend({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none">
+      <path d="M12 2L6 8M12 2L8.5 12l-2-4.5L2 5.5 12 2z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconStop({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none">
+      <rect x="3" y="3" width="8" height="8" rx="1.5" fill="currentColor" />
+    </svg>
+  );
+}
+
+function IconPlus({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none">
+      <path d="M7 3v8M3 7h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconX({ size = 12 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" fill="none">
+      <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconSpinner({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" className="spin">
+      <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="22" strokeDashoffset="8" />
+    </svg>
+  );
+}
+
+function IconDownload({ size = 13 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 13 13" fill="none">
+      <path d="M6.5 1v8M4 7l2.5 2.5L9 7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M2 11h9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// ─── Small reusable pieces ────────────────────────────────────────────────────
+
+function GreenDot() {
+  return (
+    <span className="relative inline-flex" style={{ width: 8, height: 8 }}>
+      <span className="absolute inset-0 rounded-full bg-green-400 opacity-40 animate-ping" style={{ animationDuration: '2.5s' }} />
+      <span className="relative inline-flex rounded-full bg-green-400" style={{ width: 8, height: 8 }} />
+    </span>
+  );
+}
+
+function LLMStatusBadge({ status }) {
+  if (status === "未训练") {
+    return (
+      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-700 text-zinc-400 font-medium">
+        未训练
+      </span>
+    );
+  }
+  if (status === "训练中...") {
+    return (
+      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-950 text-indigo-400 font-medium flex items-center gap-1">
+        <IconSpinner size={10} />训练中
+      </span>
+    );
+  }
+  return (
+    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-950 text-green-400 font-medium">
+      {status}
+    </span>
+  );
+}
+
+function QualityBadge({ score }) {
+  const color =
+    score >= 80 ? "text-green-400 bg-green-950/50 border-green-800/50" :
+    score >= 50 ? "text-yellow-400 bg-yellow-950/50 border-yellow-800/50" :
+    "text-red-400 bg-red-950/50 border-red-800/50";
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${color}`}>
+      质量 {score}%
+    </span>
+  );
+}
+
+// ─── Ollama Banner ────────────────────────────────────────────────────────────
+
+function OllamaBanner({ running, onToggle }) {
+  if (running) {
+    return (
+      <div className="flex items-center justify-between px-4 py-2 bg-zinc-900 border border-zinc-700/60 rounded-lg">
+        <div className="flex items-center gap-2.5">
+          <GreenDot />
+          <span className="text-xs text-zinc-300">
+            Ollama 已就绪
+          </span>
+          <span className="text-zinc-600 text-xs">·</span>
+          <span className="text-xs font-mono text-zinc-400">qwen2.5:7b-instruct-q4_K_M</span>
+          <span className="text-zinc-600 text-xs">·</span>
+          <span className="text-xs text-zinc-500">本地运行</span>
+        </div>
+        <button
+          onClick={onToggle}
+          className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors px-2 py-1 rounded hover:bg-zinc-800"
+        >
+          模拟断开
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-yellow-950/40 border border-yellow-700/50 rounded-lg px-4 py-3 space-y-2.5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-yellow-400 text-sm">⚠</span>
+          <span className="text-sm font-medium text-yellow-300">Ollama 未运行</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <a
+            href="#"
+            className="text-xs px-3 py-1 rounded-lg bg-yellow-600 hover:bg-yellow-500 text-white font-medium transition-colors"
+            onClick={(e) => e.preventDefault()}
+          >
+            前往下载 Ollama
+          </a>
+          <button
+            onClick={onToggle}
+            className="text-[11px] text-yellow-600 hover:text-yellow-400 transition-colors px-2 py-1 rounded hover:bg-yellow-900/30"
+          >
+            模拟启动
+          </button>
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-3 text-xs text-yellow-500/80">
+        <div className="flex items-center gap-2">
+          <span className="flex items-center justify-center w-4 h-4 rounded-full bg-yellow-700/50 text-yellow-300 font-bold text-[10px]">1</span>
+          <span>下载并安装 Ollama</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="flex items-center justify-center w-4 h-4 rounded-full bg-yellow-700/50 text-yellow-300 font-bold text-[10px]">2</span>
+          <span>运行 <code className="font-mono text-yellow-300 bg-yellow-900/40 px-1 rounded">ollama serve</code></span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="flex items-center justify-center w-4 h-4 rounded-full bg-yellow-700/50 text-yellow-300 font-bold text-[10px]">3</span>
+          <span>返回此界面重试</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Dataset Tab ──────────────────────────────────────────────────────────────
+
+function PreviewModal({ dataset, onClose }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-xl bg-zinc-900 rounded-xl border border-zinc-700 shadow-2xl overflow-hidden fade-in"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-800">
+          <div>
+            <h3 className="text-sm font-medium text-zinc-200">预览：{dataset.name}</h3>
+            <p className="text-xs text-zinc-500 mt-0.5">{dataset.format}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-zinc-500 hover:text-zinc-300 p-1 rounded hover:bg-zinc-800 transition-colors"
+          >
+            <IconX size={14} />
+          </button>
+        </div>
+        <div className="p-5 space-y-3 max-h-96 overflow-y-auto">
+          {PREVIEW_ITEMS.map((item, i) => (
+            <div key={i} className="rounded-lg border border-zinc-700/60 overflow-hidden text-sm">
+              <div className="px-3 py-2.5 bg-zinc-800/60 border-b border-zinc-700/60">
+                <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wide">用户</span>
+                <p className="text-zinc-200 mt-1 text-sm leading-relaxed">{item.human}</p>
+              </div>
+              <div className="px-3 py-2.5 bg-zinc-900/80">
+                <span className="text-[10px] font-medium text-indigo-400 uppercase tracking-wide">角色</span>
+                <p className="text-zinc-300 mt-1 text-sm leading-relaxed">{item.gpt}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="px-5 py-3 border-t border-zinc-800 flex items-center justify-between">
+          <p className="text-xs text-zinc-600">显示前 {PREVIEW_ITEMS.length} 条 / 共 {dataset.count} 条</p>
+          <button
+            onClick={onClose}
+            className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors"
+          >
+            关闭
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DatasetTab() {
+  const [datasets, setDatasets] = useState(SAMPLE_DATASETS);
+  const [uploading, setUploading] = useState(false);
+  const [previewTarget, setPreviewTarget] = useState(null);
+
+  const handleUpload = () => {
+    setUploading(true);
+    setTimeout(() => setUploading(false), 1800);
+  };
+
+  const handleDelete = (id) => {
+    setDatasets((prev) => prev.filter((d) => d.id !== id));
+  };
+
+  const totalCount = datasets.reduce((s, d) => s + d.count, 0);
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-medium text-zinc-200">文字数据集</h2>
+          <p className="text-xs text-zinc-500 mt-0.5">上传人设文档或对话样本，用于微调角色专属 LLM</p>
+        </div>
+        <button
+          onClick={handleUpload}
+          disabled={uploading}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500
+                     disabled:opacity-50 disabled:cursor-wait text-xs font-medium text-white transition-colors"
+        >
+          {uploading ? (
+            <>
+              <IconSpinner size={12} />
+              上传中…
+            </>
+          ) : (
+            <>
+              <IconPlus size={12} />
+              上传文件
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Format guide */}
+      <div className="rounded-lg bg-zinc-800/40 border border-zinc-700/60 px-3.5 py-2.5 grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+        <div className="text-zinc-400">
+          <span className="text-zinc-200 font-medium">.md / .txt</span>
+          {" → "}人设文档
+        </div>
+        <div className="text-zinc-400">
+          <span className="text-zinc-200 font-medium">.jsonl</span>
+          {" → "}对话样本
+        </div>
+        <div className="text-zinc-600 col-span-2 mt-0.5">
+          JSONL 支持 user/assistant、human/gpt、ShareGPT 格式
+        </div>
+      </div>
+
+      {/* Dataset list */}
+      {datasets.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-zinc-700 py-12 text-center">
+          <p className="text-zinc-500 text-sm">还没有数据集</p>
+          <p className="text-zinc-600 text-xs mt-1">上传人设文档或对话样本开始训练</p>
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {datasets.map((d) => (
+            <li
+              key={d.id}
+              className="rounded-lg border border-zinc-700/70 bg-zinc-800/30 px-3.5 py-3 flex items-center gap-3"
+            >
+              <span className="text-xl shrink-0 leading-none">{d.icon}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm text-zinc-200 font-medium truncate">{d.name}</p>
+                </div>
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <span className="text-[11px] text-zinc-500">{d.format}</span>
+                  <span className="text-zinc-700">·</span>
+                  <span className="text-[11px] text-zinc-500">{d.count} 条</span>
+                  <span className="text-zinc-700">·</span>
+                  <QualityBadge score={d.quality} />
+                </div>
+                {d.qualityIssue && (
+                  <p className="text-[11px] text-yellow-500 mt-1">{d.qualityIssue}</p>
+                )}
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => setPreviewTarget(d)}
+                  className="px-2.5 py-1 rounded text-xs text-zinc-400 hover:text-zinc-200
+                             hover:bg-zinc-700 transition-colors"
+                >
+                  预览
+                </button>
+                <button
+                  onClick={() => handleDelete(d.id)}
+                  className="px-2.5 py-1 rounded text-xs text-zinc-500 hover:text-red-400
+                             hover:bg-zinc-700 transition-colors"
+                >
+                  删除
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Footer stats */}
+      {datasets.length > 0 && (
+        <div className="flex items-center gap-4 text-xs text-zinc-500 pt-1">
+          <span>{datasets.length} 个文件</span>
+          <span className="text-zinc-700">·</span>
+          <span>共 {totalCount} 条对话</span>
+        </div>
+      )}
+
+      {previewTarget && (
+        <PreviewModal dataset={previewTarget} onClose={() => setPreviewTarget(null)} />
+      )}
+    </div>
+  );
+}
+
+// ─── Training Tab ─────────────────────────────────────────────────────────────
+
+const TRAINING_MODES = [
+  { id: "light",    label: "轻量",  time: "~15 分钟", steps: "200–400 步",  vramNote: null },
+  { id: "standard", label: "标准",  time: "~35 分钟", steps: "400–800 步",  vramNote: null },
+  { id: "fine",     label: "精细",  time: "~70 分钟", steps: "800–1500 步", vramNote: "⚠ 需 12GB VRAM" },
+];
+
+const PAST_JOBS = [
+  { id: "j1", mode: "标准模式", status: "completed", loss: "0.1892", ago: "3天前", error: null },
+  { id: "j2", mode: "轻量模式", status: "failed",    loss: null,     ago: "1周前",
+    error: "LLM 训练任务已通过预检并入队，但当前环境未接入 Unsloth 训练执行器。" },
+];
+
+function TrainingTab() {
+  const [selectedDatasets, setSelectedDatasets] = useState(new Set(["ds1", "ds2"]));
+  const [mode, setMode] = useState("light");
+  const [training, setTraining] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [step, setStep] = useState(0);
+  const [loss, setLoss] = useState(0.3241);
+  const intervalRef = useRef(null);
+
+  const totalSelected = Array.from(selectedDatasets).reduce((s, id) => {
+    const d = SAMPLE_DATASETS.find((x) => x.id === id);
+    return s + (d ? d.count : 0);
+  }, 0);
+
+  const toggleDataset = (id) => {
+    setSelectedDatasets((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const handleStart = () => {
+    setTraining(true);
+    setProgress(0);
+    setStep(0);
+    setLoss(0.3241);
+  };
+
+  const handleCancel = () => {
+    setTraining(false);
+    setProgress(0);
+    setStep(0);
+    if (intervalRef.current) clearInterval(intervalRef.current);
+  };
+
+  useEffect(() => {
+    if (!training) return;
+    intervalRef.current = setInterval(() => {
+      setProgress((p) => {
+        const next = p + Math.random() * 1.5 + 0.3;
+        if (next >= 100) {
+          clearInterval(intervalRef.current);
+          setTraining(false);
+          return 100;
+        }
+        return next;
+      });
+      setStep((s) => s + Math.floor(Math.random() * 3 + 1));
+      setLoss((l) => Math.max(0.08, l - Math.random() * 0.004));
+    }, 300);
+    return () => clearInterval(intervalRef.current);
+  }, [training]);
+
+  const etaMins = training ? Math.max(1, Math.round((100 - progress) * 0.19)) : 0;
+
+  return (
+    <div className="space-y-5">
+      {training ? (
+        /* ── Training in progress ── */
+        <div className="space-y-5">
+          <div className="rounded-xl border border-indigo-700/60 bg-indigo-950/20 px-4 py-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full bg-indigo-900/60 border border-indigo-700/60 text-indigo-300 font-medium">
+                  <IconSpinner size={10} />
+                  训练中
+                </span>
+                <span className="text-xs text-zinc-400">
+                  {TRAINING_MODES.find((m2) => m2.id === mode)?.label}模式
+                </span>
+              </div>
+              <button
+                onClick={handleCancel}
+                className="text-xs text-zinc-500 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-zinc-800"
+              >
+                取消
+              </button>
+            </div>
+
+            {/* Progress bar */}
+            <div className="w-full h-1.5 bg-zinc-700/60 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-indigo-500 to-indigo-400 rounded-full transition-all duration-300"
+                style={{ width: `${Math.min(100, progress)}%` }}
+              />
+            </div>
+
+            {/* Stats row */}
+            <div className="flex items-center gap-4 text-xs text-zinc-400 font-mono">
+              <span className="text-indigo-300 font-medium">{Math.floor(progress)}%</span>
+              <span className="text-zinc-600">·</span>
+              <span>{step} / 800 steps</span>
+              <span className="text-zinc-600">·</span>
+              <span>loss {loss.toFixed(4)}</span>
+              <span className="text-zinc-600">·</span>
+              <span>约 {etaMins} 分钟</span>
+            </div>
+          </div>
+
+          {/* Past jobs section */}
+          <div className="space-y-2">
+            <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest">训练记录</h3>
+            {PAST_JOBS.map((job) => (
+              <div
+                key={job.id}
+                className="rounded-lg border border-zinc-700/60 bg-zinc-800/20 px-3.5 py-3 space-y-1.5"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[11px] px-1.5 py-0.5 rounded border font-mono ${
+                      job.status === "completed"
+                        ? "text-green-400 bg-green-950/40 border-green-800"
+                        : "text-red-400 bg-red-950/40 border-red-800"
+                    }`}>
+                      {job.status === "completed" ? "已完成" : "已失败"}
+                    </span>
+                    <span className="text-xs text-zinc-400">{job.mode}</span>
+                    {job.loss && (
+                      <span className="text-xs text-zinc-500 font-mono">loss {job.loss}</span>
+                    )}
+                  </div>
+                  <span className="text-[11px] text-zinc-600">{job.ago}</span>
+                </div>
+                {job.error && (
+                  <p className="text-[11px] text-yellow-500/80 leading-relaxed">{job.error}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        /* ── Setup state ── */
+        <div className="space-y-5">
+          {/* Dataset selector */}
+          <div className="space-y-2">
+            <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest">选择训练数据集</h3>
+            <ul className="space-y-1.5">
+              {SAMPLE_DATASETS.map((d) => (
+                <li key={d.id}>
+                  <label className="flex items-center gap-3 rounded-lg border border-zinc-700/60 bg-zinc-800/20 px-3.5 py-2.5 cursor-pointer hover:border-indigo-600/60 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={selectedDatasets.has(d.id)}
+                      onChange={() => toggleDataset(d.id)}
+                      className="w-4 h-4 shrink-0 accent-indigo-500"
+                    />
+                    <span className="text-sm text-zinc-200 flex-1">{d.name}</span>
+                    <span className="text-xs text-zinc-500 font-mono shrink-0">{d.count} 条</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+            {totalSelected > 0 && (
+              <p className="text-xs text-zinc-500 pl-1">已选 <span className="text-indigo-400 font-medium">{totalSelected}</span> 条训练样本</p>
+            )}
+          </div>
+
+          {/* Mode selector */}
+          <div className="space-y-2">
+            <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest">训练模式</h3>
+            <div className="grid grid-cols-3 gap-2">
+              {TRAINING_MODES.map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => setMode(m.id)}
+                  className={`rounded-xl border px-3.5 py-3 text-left transition-all ${
+                    mode === m.id
+                      ? "border-indigo-500 bg-indigo-950/40 ring-1 ring-indigo-500/20"
+                      : "border-zinc-700/60 bg-zinc-800/20 hover:border-zinc-600"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className={`text-sm font-semibold ${mode === m.id ? "text-indigo-200" : "text-zinc-300"}`}>
+                      {m.label}
+                    </span>
+                    {mode === m.id && (
+                      <span className="w-2 h-2 rounded-full bg-indigo-400" />
+                    )}
+                  </div>
+                  <p className="text-[11px] text-zinc-500">{m.time}</p>
+                  <p className="text-[11px] text-zinc-600">{m.steps}</p>
+                  {m.vramNote && (
+                    <p className="text-[11px] text-yellow-500 mt-1">{m.vramNote}</p>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <button
+            onClick={handleStart}
+            disabled={selectedDatasets.size === 0}
+            className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500
+                       disabled:opacity-40 disabled:cursor-not-allowed
+                       text-sm font-semibold text-white transition-colors shadow-lg shadow-indigo-900/30"
+          >
+            开始训练
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Models Tab ───────────────────────────────────────────────────────────────
+
+const INITIAL_MODELS = [
+  {
+    id: "m2",
+    version: 2,
+    name: "mely-abc12345-v2",
+    status: "ready",
+    dataCount: 156,
+    loss: "0.1892",
+    ago: "3天前",
+  },
+  {
+    id: "m1",
+    version: 1,
+    name: "mely-abc12345-v1",
+    status: "ready",
+    dataCount: 42,
+    loss: "0.2341",
+    ago: "1周前",
+  },
+];
+
+function ModelsTab({ selectedModel, setSelectedModel }) {
+  const [models, setModels] = useState(INITIAL_MODELS);
+
+  const handleDelete = (id) => {
+    setModels((prev) => prev.filter((m) => m.id !== id));
+    if (selectedModel === id) setSelectedModel("base");
+  };
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest">私有模型</h3>
+        <p className="text-xs text-zinc-600 mt-1">选择模型后将在对话界面使用该角色专属模型</p>
+      </div>
+
+      <div className="space-y-2">
+        {/* Base model */}
+        <div
+          onClick={() => setSelectedModel("base")}
+          className={`rounded-lg border px-3.5 py-3 cursor-pointer transition-all ${
+            selectedModel === "base"
+              ? "border-zinc-500 bg-zinc-700/30"
+              : "border-zinc-700/60 bg-zinc-800/20 hover:border-zinc-600"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-zinc-300 font-medium">基础模型</span>
+            {selectedModel === "base" && (
+              <span className="text-xs text-indigo-400 font-mono">● 当前选中</span>
+            )}
+          </div>
+          <p className="text-[11px] text-zinc-500 font-mono mt-1">qwen2.5:7b-instruct-q4_K_M</p>
+        </div>
+
+        {models.map((model) => (
+          <div
+            key={model.id}
+            onClick={() => model.status === "ready" && setSelectedModel(model.id)}
+            className={`rounded-lg border px-3.5 py-3 cursor-pointer transition-all ${
+              selectedModel === model.id
+                ? "border-indigo-500 bg-indigo-950/30 ring-1 ring-indigo-500/10"
+                : "border-zinc-700/60 bg-zinc-800/20 hover:border-zinc-600"
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-zinc-200">v{model.version}</span>
+                <span className="text-[11px] px-1.5 py-0.5 rounded border font-mono text-green-400 bg-green-950/40 border-green-800/60">
+                  已就绪
+                </span>
+                {selectedModel === model.id && (
+                  <span className="text-xs text-indigo-400 font-mono">● 当前选中</span>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setSelectedModel(model.id); }}
+                  className="px-2.5 py-1 rounded text-xs text-indigo-400 hover:text-indigo-300 hover:bg-zinc-700 transition-colors"
+                >
+                  使用
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleDelete(model.id); }}
+                  className="px-2.5 py-1 rounded text-xs text-zinc-500 hover:text-red-400 hover:bg-zinc-700 transition-colors"
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+            <p className="text-[11px] text-zinc-500 font-mono mt-1.5 truncate">{model.name}</p>
+            <div className="flex items-center gap-3 text-[11px] text-zinc-600 mt-0.5">
+              <span>{model.dataCount} 条训练数据</span>
+              <span>·</span>
+              <span>loss {model.loss}</span>
+              <span>·</span>
+              <span>{model.ago}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <p className="text-[11px] text-zinc-600 pt-1">切换模型后，下次对话将使用该模型</p>
+    </div>
+  );
+}
+
+// ─── Chat Tab ─────────────────────────────────────────────────────────────────
+
+const INITIAL_MESSAGES = [
+  { role: "user",      content: "你好！介绍一下自己吧～" },
+  { role: "assistant", content: "哦哦！你好哦～！我是星野ミカ！一个来自虚拟次元的女孩✨ 最近在忙直播的事情呢，有什么想聊的嘛？(○´ω`○)" },
+  { role: "user",      content: "你有什么特别的口头禅吗？" },
+];
+
+const CHAT_SESSIONS = [
+  { id: "s1", label: "chat-a1b2c3d4…" },
+  { id: "s2", label: "chat-e5f6a7b8…" },
+  { id: "s3", label: "chat-c9d0e1f2…" },
+];
+
+function ChatTab({ ollamaRunning, selectedModel, setSelectedModel }) {
+  const [sessions, setSessions] = useState(CHAT_SESSIONS);
+  const [activeSession, setActiveSession] = useState("s1");
+  const [messages, setMessages] = useState(INITIAL_MESSAGES);
+  const [streaming, setStreaming] = useState(false);
+  const [streamText, setStreamText] = useState("");
+  const [input, setInput] = useState("");
+  const streamRef = useRef(null);
+  const bottomRef = useRef(null);
+
+  const modelLabel =
+    selectedModel === "base"
+      ? "基础模型"
+      : selectedModel === "m2"
+      ? "私有模型 v2"
+      : selectedModel === "m1"
+      ? "私有模型 v1"
+      : "基础模型";
+
+  const sendMessage = useCallback(() => {
+    const text = input.trim();
+    if (!text || streaming) return;
+    setInput("");
+    setMessages((prev) => [...prev, { role: "user", content: text }]);
+    setStreaming(true);
+    setStreamText("");
+
+    const reply = BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)];
+    let i = 0;
+    setTimeout(() => {
+      streamRef.current = setInterval(() => {
+        i++;
+        setStreamText(reply.slice(0, i));
+        if (i >= reply.length) {
+          clearInterval(streamRef.current);
+          setStreaming(false);
+          setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+          setStreamText("");
+        }
+      }, 38);
+    }, 500);
+  }, [input, streaming]);
+
+  const handleStop = () => {
+    if (streamRef.current) clearInterval(streamRef.current);
+    if (streamText) {
+      setMessages((prev) => [...prev, { role: "assistant", content: streamText }]);
+    }
+    setStreaming(false);
+    setStreamText("");
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  useEffect(() => {
+    if (bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, streamText]);
+
+  const newSession = () => {
+    const id = `s${Date.now()}`;
+    setSessions((prev) => [{ id, label: `chat-${Math.random().toString(36).slice(2, 10)}…` }, ...prev]);
+    setActiveSession(id);
+    setMessages([]);
+  };
+
+  const modelOptions = [
+    { id: "base", label: "基础模型", sub: "qwen2.5:7b", current: selectedModel === "base" },
+    { id: "m2",   label: "v2 私有模型", sub: "156条训练",  current: selectedModel === "m2" },
+    { id: "m1",   label: "v1 私有模型", sub: "42条训练",   current: selectedModel === "m1" },
+  ];
+
+  return (
+    <div className="flex gap-3 h-full" style={{ minHeight: 0 }}>
+      {/* Left: session list */}
+      <div className="w-40 flex flex-col gap-1.5 shrink-0">
+        <button
+          onClick={newSession}
+          className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-lg bg-indigo-600
+                     hover:bg-indigo-500 text-xs font-medium text-white transition-colors"
+        >
+          <IconPlus size={12} />
+          新建对话
+        </button>
+        <div className="space-y-0.5 overflow-y-auto flex-1">
+          {sessions.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => setActiveSession(s.id)}
+              className={`w-full text-left px-2.5 py-2 rounded-lg text-[11px] truncate transition-colors ${
+                activeSession === s.id
+                  ? "bg-zinc-700 text-zinc-200"
+                  : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Middle: chat window */}
+      <div className="flex-1 flex flex-col rounded-xl border border-zinc-700/60 bg-zinc-900/50 overflow-hidden min-w-0">
+        {/* Chat header */}
+        <div className="px-4 py-2.5 border-b border-zinc-800 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-sm font-medium text-zinc-200 truncate">星野ミカ 对话</span>
+            <span className="text-zinc-700">·</span>
+            <span className="text-xs text-zinc-500 truncate">{modelLabel}</span>
+            <span className="text-zinc-700">·</span>
+            <span className="text-xs text-zinc-600">Shift+Enter 换行</span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {ollamaRunning ? (
+              <>
+                <GreenDot />
+                <span className="text-[11px] text-zinc-500">已就绪</span>
+              </>
+            ) : (
+              <>
+                <span className="w-2 h-2 rounded-full bg-yellow-400" />
+                <span className="text-[11px] text-yellow-500">Ollama 离线</span>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              {msg.role === "assistant" && (
+                <div
+                  className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 mr-2 mt-0.5 text-[11px] font-bold text-white"
+                  style={{ background: "#FF6B9D" }}
+                >
+                  ミ
+                </div>
+              )}
+              <div
+                className={`max-w-xs lg:max-w-sm rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed fade-in ${
+                  msg.role === "user"
+                    ? "bg-indigo-600 text-white rounded-tr-sm"
+                    : "bg-zinc-800 text-zinc-200 rounded-tl-sm"
+                }`}
+              >
+                {msg.content}
+              </div>
+              {msg.role === "user" && (
+                <div className="w-7 h-7 rounded-full bg-zinc-600 flex items-center justify-center shrink-0 ml-2 mt-0.5 text-[11px] font-bold text-zinc-200">
+                  U
+                </div>
+              )}
+            </div>
+          ))}
+
+          {/* Streaming message */}
+          {streaming && (
+            <div className="flex justify-start fade-in">
+              <div
+                className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 mr-2 mt-0.5 text-[11px] font-bold text-white"
+                style={{ background: "#FF6B9D" }}
+              >
+                ミ
+              </div>
+              <div className="max-w-xs lg:max-w-sm rounded-2xl rounded-tl-sm px-3.5 py-2.5 text-sm bg-zinc-800 text-zinc-200 leading-relaxed">
+                {streamText || <span className="text-zinc-600">思考中</span>}
+                <span className="blink-cursor inline-block w-0.5 h-4 bg-indigo-400 ml-0.5 align-middle" />
+              </div>
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        {/* Input area */}
+        <div className="px-4 pb-4 pt-2 border-t border-zinc-800 shrink-0">
+          <div className="flex items-end gap-2">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={!ollamaRunning}
+              placeholder={ollamaRunning ? "输入消息… (Enter 发送，Shift+Enter 换行)" : "Ollama 未运行，无法发送消息"}
+              rows={2}
+              className="flex-1 resize-none rounded-xl bg-zinc-800 border border-zinc-700 text-sm text-zinc-200
+                         placeholder-zinc-600 px-3.5 py-2.5 focus:outline-none focus:border-indigo-500/60
+                         transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            />
+            <div className="flex flex-col gap-1.5">
+              {streaming ? (
+                <button
+                  onClick={handleStop}
+                  className="w-9 h-9 rounded-xl bg-zinc-700 hover:bg-zinc-600 text-zinc-300 flex items-center justify-center transition-colors"
+                  title="停止"
+                >
+                  <IconStop size={14} />
+                </button>
+              ) : (
+                <button
+                  onClick={sendMessage}
+                  disabled={!input.trim() || !ollamaRunning}
+                  className="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center
+                             disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title="发送"
+                >
+                  <IconSend size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Right: model switcher */}
+      <div className="w-44 shrink-0 flex flex-col gap-3">
+        <div>
+          <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">使用模型</h4>
+          <div className="space-y-1.5">
+            {modelOptions.map((opt) => (
+              <button
+                key={opt.id}
+                onClick={() => setSelectedModel(opt.id)}
+                className={`w-full text-left rounded-lg border px-2.5 py-2 transition-all ${
+                  opt.current
+                    ? "border-indigo-500/60 bg-indigo-950/30"
+                    : "border-zinc-700/60 bg-zinc-800/20 hover:border-zinc-600"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className={`text-[11px] font-medium ${opt.current ? "text-indigo-300" : "text-zinc-300"}`}>
+                    {opt.label}
+                  </span>
+                  {opt.current && <span className="text-[10px] text-indigo-400">●</span>}
+                </div>
+                <p className="text-[10px] text-zinc-600 mt-0.5">{opt.sub}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-lg bg-zinc-800/30 border border-zinc-700/40 px-2.5 py-2">
+          <p className="text-[10px] text-zinc-500 leading-relaxed">切换模型后下条消息生效</p>
+        </div>
+
+        <button className="flex items-center gap-1.5 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors mt-auto px-1">
+          <IconDownload size={11} />
+          导出对话 TXT
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── LLM Workspace ────────────────────────────────────────────────────────────
+
+function LLMWorkspace({ ollamaRunning, onToggleOllama }) {
+  const [llmTab, setLlmTab] = useState(0);
+  const [selectedModel, setSelectedModel] = useState("m2");
+
+  return (
+    <div className="flex flex-col h-full gap-3">
+      {/* Ollama banner */}
+      <OllamaBanner running={ollamaRunning} onToggle={onToggleOllama} />
+
+      {/* Sub-tab bar */}
+      <div className="flex items-center gap-0 border-b border-zinc-800">
+        {LLM_TABS.map((tab, i) => (
+          <button
+            key={tab}
+            onClick={() => setLlmTab(i)}
+            className={`px-4 py-2.5 text-sm font-medium transition-colors relative ${
+              llmTab === i
+                ? "text-indigo-400"
+                : "text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            {tab}
+            {llmTab === i && (
+              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-t-full" />
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Sub-tab content */}
+      <div className="flex-1 overflow-y-auto min-h-0" style={{ paddingRight: llmTab === 3 ? 0 : undefined }}>
+        {llmTab === 0 && <DatasetTab />}
+        {llmTab === 1 && <TrainingTab />}
+        {llmTab === 2 && <ModelsTab selectedModel={selectedModel} setSelectedModel={setSelectedModel} />}
+        {llmTab === 3 && (
+          <div className="h-full flex flex-col" style={{ height: '100%' }}>
+            <ChatTab ollamaRunning={ollamaRunning} selectedModel={selectedModel} setSelectedModel={setSelectedModel} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── App Shell ────────────────────────────────────────────────────────────────
+
+function App() {
+  const [activeChar, setActiveChar] = useState("c1");
+  const [topTab, setTopTab] = useState(7); // LLM 工作台 = index 7
+  const [ollamaRunning, setOllamaRunning] = useState(true);
+
+  return (
+    <div
+      className="flex h-screen bg-zinc-950 text-zinc-200 overflow-hidden"
+      style={{ fontFamily: "'Inter', system-ui, sans-serif" }}
+    >
+      {/* ── Sidebar ── */}
+      <aside className="w-52 bg-zinc-900 border-r border-zinc-800 flex flex-col shrink-0">
+        {/* App header */}
+        <div className="px-4 py-4 border-b border-zinc-800 flex items-center gap-2.5">
+          <div
+            className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+            style={{ background: "linear-gradient(135deg, #6366f1, #8b5cf6)" }}
+          >
+            <span className="text-white font-bold text-sm">M</span>
+          </div>
+          <div>
+            <h1 className="text-sm font-semibold text-zinc-100 leading-none">Mely AI</h1>
+            <p className="text-[10px] text-zinc-500 mt-0.5">角色创作工作台</p>
+          </div>
+        </div>
+
+        {/* Character list */}
+        <div className="flex-1 overflow-y-auto py-2">
+          <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest px-4 mb-1.5 mt-1">
+            角色
+          </p>
+          {CHARACTERS.map((char) => (
+            <button
+              key={char.id}
+              onClick={() => setActiveChar(char.id)}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${
+                activeChar === char.id
+                  ? "bg-zinc-800"
+                  : "hover:bg-zinc-800/60"
+              }`}
+            >
+              {/* Avatar */}
+              <div
+                className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-sm font-bold text-white shadow"
+                style={{ background: char.color }}
+              >
+                {char.initials}
+              </div>
+              {/* Info */}
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-zinc-200 truncate leading-none mb-1">
+                  {char.name}
+                </p>
+                <LLMStatusBadge status={char.llmStatus} />
+              </div>
+              {/* Active indicator */}
+              {activeChar === char.id && (
+                <div className="w-1 h-6 rounded-full bg-indigo-500 shrink-0" />
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Bottom controls */}
+        <div className="px-4 py-3 border-t border-zinc-800">
+          <button className="flex items-center gap-2 text-xs text-zinc-600 hover:text-zinc-400 transition-colors">
+            <IconPlus size={11} />
+            新建角色
+          </button>
+        </div>
+      </aside>
+
+      {/* ── Main area ── */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Top tab bar */}
+        <div className="border-b border-zinc-800 flex items-end px-2 bg-zinc-900 shrink-0">
+          {TOP_TABS.map((tab, i) => (
+            <button
+              key={tab}
+              onClick={() => setTopTab(i)}
+              className={`relative px-4 py-3 text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                topTab === i
+                  ? "text-zinc-100"
+                  : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              {tab}
+              {tab === "LLM 工作台" && (
+                <span
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ background: "#6366f1" }}
+                />
+              )}
+              {topTab === i && (
+                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-t-full" />
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Content area */}
+        <div className="flex-1 overflow-hidden p-5 min-h-0">
+          {topTab === 7 ? (
+            <LLMWorkspace
+              ollamaRunning={ollamaRunning}
+              onToggleOllama={() => setOllamaRunning((v) => !v)}
+            />
+          ) : (
+            <div className="h-full flex items-center justify-center">
+              <div className="text-center space-y-2">
+                <p className="text-zinc-600 text-sm font-medium">
+                  {TOP_TABS[topTab]}
+                </p>
+                <p className="text-zinc-700 text-xs">该模块在独立原型中</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Mount ────────────────────────────────────────────────────────────────────
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>

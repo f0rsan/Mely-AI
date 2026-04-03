@@ -1,5 +1,9 @@
 import asyncio
+import base64
+import json
 import sqlite3
+import struct
+import zlib
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app.api.tasks import resolve_task_queue_from_request
 from app.db.connection import connect_database
+from app.schemas.archive import GenerationArchiveRequest
 from app.schemas.batch import BatchGenerationAcceptedResponse, BatchGenerationRequest, BatchJobItem
 from app.schemas.generations import (
     GenerationJobAcceptedResponse,
@@ -16,6 +21,7 @@ from app.schemas.generations import (
     GenerationWorkbenchResponse,
 )
 from app.services.characters import CharacterNotFoundError, CharacterServiceError
+from app.services.generation_archive import archive_generation
 from app.services.generation_contract import (
     GenerationContractValidationError,
     build_mock_generation_job,
@@ -24,6 +30,25 @@ from app.services.generation_contract import (
 )
 
 router = APIRouter()
+
+
+def _placeholder_png_b64() -> str:
+    """Generate a 64x64 lavender placeholder PNG using stdlib only, returned as base64."""
+    W, H = 64, 64
+    row = b"\x00" + b"\x99\x88\xcc" * W  # filter byte + RGB lavender pixels
+    idat = zlib.compress(row * H)
+
+    def chunk(name: bytes, data: bytes) -> bytes:
+        c = name + data
+        return struct.pack(">I", len(data)) + c + struct.pack(">I", zlib.crc32(c) & 0xFFFFFFFF)
+
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", idat)
+        + chunk(b"IEND", b"")
+    )
+    return base64.b64encode(png).decode()
 
 
 @dataclass(slots=True)
@@ -82,17 +107,41 @@ async def create_mock_generation(request: Request, payload: GenerationSubmitRequ
     except CharacterServiceError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    db_path = runtime.db_path
+    data_root = runtime.data_root
+
     async def run_mock_generation(progress) -> None:
         await progress(20, "正在校验生成请求")
         await asyncio.sleep(0.05)
-        await progress(55, "正在准备图像引擎")
+        await progress(55, "正在渲染占位图…")
         await asyncio.sleep(0.05)
-        await progress(85, "契约验证完成，等待 M2-C 接入真实引擎")
-        await asyncio.sleep(0.05)
+
+        image_b64 = _placeholder_png_b64()
+        archive_req = GenerationArchiveRequest(
+            character_id=payload.character_id,
+            costume_id=payload.costume_id,
+            assembled_prompt=payload.scene_prompt,
+            negative_prompt=payload.negative_prompt or "",
+            width=payload.width,
+            height=payload.height,
+            steps=payload.steps,
+            sampler=payload.sampler,
+            cfg_scale=payload.cfg_scale,
+            seed=payload.seed,
+            lora_weight=payload.lora_weight,
+            tags=list(payload.tags) if payload.tags else [],
+            image_data_b64=image_b64,
+        )
+        with connect_database(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            record = archive_generation(conn, data_root, archive_req)
+
+        await progress(100, json.dumps({"event": "generation_archived", "archiveId": record.id}))
 
     task = await queue.submit(
         name=f"generation-contract-{payload.character_id}",
         runner=run_mock_generation,
+        category="gpu_exclusive",
         initial_message="生成任务已进入队列",
     )
 
@@ -140,6 +189,7 @@ async def create_batch_generation(request: Request, payload: BatchGenerationRequ
         task = await queue.submit(
             name=f"batch-{batch_id}-{payload.character_id}",
             runner=_make_batch_runner(scene_prompt),
+            category="gpu_exclusive",
             initial_message="批量生成任务已进入队列",
         )
 

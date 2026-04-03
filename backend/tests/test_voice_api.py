@@ -4,7 +4,6 @@ All VoiceService and TTSRuntime interactions are mocked.
 """
 from __future__ import annotations
 
-import io
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -15,10 +14,10 @@ from app.services.tts_runtime import TTSEngineStatus
 from app.services.voice_service import (
     VoiceAssetRow,
     VoiceCharacterNotFoundError,
-    VoiceInvalidDurationError,
     VoiceInvalidFormatError,
     VoiceNotBoundError,
     VoiceReferenceNotFoundError,
+    VoiceSynthesisUnavailableError,
 )
 
 
@@ -217,6 +216,38 @@ def test_upload_reference_unsupported_format_returns_400(temp_data_root):
     assert resp.status_code in (400, 422)
 
 
+def test_upload_reference_mp3_rejected_before_service_call(temp_data_root):
+    app = create_app()
+    with TestClient(app, raise_server_exceptions=False) as client:
+        svc = _make_mock_voice_service()
+        app.state.voice_service = svc
+        resp = client.post(
+            "/api/voice/upload-reference?character_id=char-1&durationSeconds=10.0",
+            files={"file": ("voice.mp3", b"FAKE_MP3", "audio/mpeg")},
+        )
+
+    assert resp.status_code == 400
+    assert "当前仅支持 WAV" in resp.json()["detail"]
+    svc.save_reference_audio.assert_not_called()
+
+
+def test_upload_reference_invalid_wav_payload_returns_400(temp_data_root):
+    app = create_app()
+    with TestClient(app, raise_server_exceptions=False) as client:
+        svc = _make_mock_voice_service()
+        svc.save_reference_audio.side_effect = VoiceInvalidFormatError(
+            "上传文件不是有效的 WAV 音频，请先转换为标准 WAV 后重试。"
+        )
+        app.state.voice_service = svc
+        resp = client.post(
+            "/api/voice/upload-reference?character_id=char-1&durationSeconds=10.0",
+            files={"file": ("voice.wav", b"NOT_WAV", "audio/wav")},
+        )
+
+    assert resp.status_code == 400
+    assert "有效的 WAV" in resp.json()["detail"]
+
+
 def test_upload_reference_missing_duration_returns_422(temp_data_root):
     app = create_app()
     with TestClient(app, raise_server_exceptions=False) as client:
@@ -285,6 +316,23 @@ def test_synthesize_not_bound_returns_400(temp_data_root):
         )
 
     assert resp.status_code == 400
+
+
+def test_synthesize_unavailable_returns_503(temp_data_root):
+    app = create_app()
+    with TestClient(app, raise_server_exceptions=False) as client:
+        svc = _make_mock_voice_service()
+        svc.submit_synthesis.side_effect = VoiceSynthesisUnavailableError(
+            "当前版本暂不支持语音合成，请先完成声音绑定并等待引擎接入。"
+        )
+        app.state.voice_service = svc
+        resp = client.post(
+            "/api/voice/synthesize",
+            json={"characterId": "char-1", "text": "test"},
+        )
+
+    assert resp.status_code == 503
+    assert "当前版本暂不支持语音合成" in resp.json()["detail"]
 
 
 def test_voice_service_endpoints_return_503_when_not_initialized(temp_data_root):

@@ -28,11 +28,12 @@ from app.services.voice_service import (
     VoiceNotBoundError,
     VoiceReferenceNotFoundError,
     VoiceServiceError,
+    VoiceSynthesisUnavailableError,
 )
 
 router = APIRouter()
 
-ALLOWED_EXTENSIONS = {"wav", "mp3", "flac", "m4a", "ogg"}
+ALLOWED_EXTENSIONS = {"wav"}
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB hard cap
 
 
@@ -94,7 +95,7 @@ async def upload_reference_audio(
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"不支持的音频格式，请上传 WAV、MP3、FLAC、M4A 或 OGG 文件。",
+            detail="当前仅支持 WAV 参考音频上传，请先转换为 WAV 后重试。",
         )
 
     audio_bytes = await file.read()
@@ -197,6 +198,8 @@ async def synthesize(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except VoiceNotBoundError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except VoiceSynthesisUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except EngineGpuMutexError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except VoiceServiceError as exc:

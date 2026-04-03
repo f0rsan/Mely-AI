@@ -5,7 +5,7 @@
 ## 项目核心
 
 **产品定位**：本地优先的桌面 AI 创作应用（Windows-first，RTX 30/40 GPU）
-**核心价值**：「你的角色，永远是同一个人。」——让角色在任意场景下保持视觉一致性
+**核心价值**：「你的角色，永远是同一个人。」——让角色在文字、视觉、声音任意场景下保持多模态一致性
 **目标用户**：Indie Vtuber 创作者、IP/漫画创作者、独立游戏开发者
 
 ## 技术栈（不可修改）
@@ -23,6 +23,9 @@
 - **测试**：Pytest
 
 ### AI 引擎
+- **LLM 推理**：Ollama（基础模型 + 自定义微调模型管理）
+- **LLM 微调**：Unsloth + QLoRA（合并导出 GGUF → Ollama 加载）
+- **基础 LLM**：Qwen2.5-7B Q4_K_M（中文优先，~4.5GB）
 - **视觉训练**：AI-Toolkit（Kohya 兼容，FLUX/SDXL LoRA）
 - **图像生成**：ComfyUI API（无头模式）
 - **声音克隆**：F5-TTS / CosyVoice3
@@ -70,11 +73,12 @@ Mely AI/
 │
 ├── specs/                       # 模块任务拆解（只读）
 │   ├── M0_FOUNDATION.md         # 基础层任务
-│   ├── M1_VISUAL_TRAINING.md    # 视觉训练任务
-│   ├── M2_GENERATION.md         # 生成工作台任务
-│   ├── M3_VOICE.md              # 声音绑定任务
+│   ├── M1_LLM_TRAINING.md       # LLM 微调任务（Priority 1）
+│   ├── M2_VISUAL_TRAINING.md    # 视觉训练任务
+│   ├── M3_GENERATION.md         # 生成工作台任务
 │   ├── M4_COSTUME_EXPORT.md     # 造型与导出任务
-│   └── M5_PACKAGING.md          # 打包发布任务
+│   ├── M5_VOICE.md              # 声音绑定任务（增值）
+│   └── M6_PACKAGING.md          # 打包发布任务
 │
 ├── prototypes/                  # UI 交互原型（React JSX）
 │   └── mely-unified.jsx         # 合并原型（4 模块可导航）
@@ -108,14 +112,15 @@ Mely AI/
 - ✅ 首页显示：后端连接状态、本地数据目录、数据库路径、数据库初始化状态
 
 ### 开发计划
-| 模块 | 周数 | 核心交付 |
-|------|------|---------|
-| M0 基础层 | W1–3 | Tauri+FastAPI 骨架，SQLite schema，任务队列 |
-| M1 视觉训练 | W4–7 | 数据集管理，LoRA 训练，进度可视化 |
-| M2 生成工作台 | W8–10 | ComfyUI 接入，Prompt 组装，批量生成 |
-| M3 声音绑定 | W11–12 | F5-TTS 集成，声纹绑定 |
-| M4 造型&导出 | W13–15 | 造型版本树，设定书 PDF 导出 |
-| M5 打包发布 | W16–18 | 安装引导，Windows 打包 |
+| 模块 | 周数 | 核心交付 | 优先级 |
+|------|------|---------|--------|
+| M0 基础层 | W1–3 ✅ | Tauri+FastAPI 骨架，SQLite schema，任务队列 | 完成 |
+| **M1 LLM 训练** | **W4–8** | **Ollama 集成，文字数据集（人设文档+对话样本），Unsloth QLoRA 微调，私有模型，角色对话界面** | **P0 核心** |
+| M2 视觉训练 | W9–12 | 数据集双入口（自有图+文字生图），AI-Toolkit LoRA 训练 | P0 核心 |
+| M3 生成工作台 | W13–15 | ComfyUI 接入，Prompt 组装（含 LLM 人设），批量生成 | P0 核心 |
+| M4 造型&导出 | W16–18 | 造型版本树，设定书 PDF（文字+图像），创作时间戳 | P1 |
+| M5 声音绑定 | W19–20 | F5-TTS 集成，声纹绑定，TTS 生成 | 增值 |
+| M6 打包发布 | W21–23 | 安装引导（LLM+视觉双路径），Windows 打包 | 最后 |
 
 ## 本地开发
 
@@ -159,10 +164,12 @@ npm run tauri:dev
 ### ⚠️ 高风险项
 | 风险 | 缓解策略 | 涉及模块 |
 |------|---------|---------|
-| ComfyUI 无头调用稳定性 | M2 前必须验证，准备 diffusers fallback | M2 |
-| RTX 3070 VRAM 上限 | 精细训练提示需 12GB，默认严格控制 8GB | M1 |
-| 安装体积 | 按需下载框架必须在 M0 建好 | M0 |
-| 训练失败路径 | 所有技术错误翻译成用户语言 | M1 |
+| Unsloth QLoRA VRAM 上限 | 三档预设严格控制在 7GB 以内，训练前检测 VRAM | M1 |
+| Ollama 自定义 GGUF 兼容性 | 导出后验证 Ollama 加载，记录兼容版本 | M1 |
+| LLM 训练数据质量门槛 | 自动格式转换 + 质量检测 + 中文改进建议 | M1 |
+| ComfyUI 无头调用稳定性 | M3 前必须验证，准备 diffusers fallback | M3 |
+| GPU 多任务 VRAM 冲突 | 全局互斥锁，任意时刻只跑一个 AI 任务 | M1/M2/M3 |
+| 安装体积（LLM ~4.5GB + 视觉 ~5GB） | 按需分级下载，用户可选只装其中一个 | M0/M6 |
 
 ### ✅ 推荐工作流
 1. 开始新功能前，先阅读 `docs/` 和 `specs/` 了解上下文
