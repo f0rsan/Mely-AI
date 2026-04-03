@@ -1,0 +1,713 @@
+openapi: 3.0.3
+info:
+  title: Mely AI Backend API
+  version: 0.1.0
+  description: |
+    Mely AI v0.1 P0 baseline APIs.
+servers:
+  - url: http://127.0.0.1:3000
+    description: local dev
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: System
+  - name: Auth
+  - name: Project
+  - name: Model
+  - name: Session
+  - name: Tune
+
+paths:
+  /health:
+    get:
+      security: []
+      tags: [System]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /auth/login:
+    post:
+      security: []
+      tags: [Auth]
+      summary: Login with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Missing credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current user profile
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /projects:
+    get:
+      tags: [Project]
+      summary: List projects
+      responses:
+        '200':
+          description: Projects list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectListResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /models:
+    get:
+      tags: [Model]
+      summary: List models
+      responses:
+        '200':
+          description: Models list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelListResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /sessions:
+    get:
+      tags: [Session]
+      summary: List sessions
+      parameters:
+        - in: query
+          name: projectId
+          required: false
+          schema:
+            type: string
+          description: filter sessions by project id
+      responses:
+        '200':
+          description: Sessions list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionListResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [Session]
+      summary: Create session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /sessions/{sessionId}/messages:
+    get:
+      tags: [Session]
+      summary: List messages in a session (paginated)
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - in: query
+          name: pageSize
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Session messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionMessageListResponse'
+        '400':
+          description: Invalid pagination
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [Session]
+      summary: Create a message in a session
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionMessageRequest'
+      responses:
+        '201':
+          description: Message created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionMessage'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /sessions/{sessionId}/exports:
+    get:
+      tags: [Session]
+      summary: List session export artifacts
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Export list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionExportListResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [Session]
+      summary: Create session export artifact
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionExportRequest'
+      responses:
+        '201':
+          description: Export task created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionExport'
+        '400':
+          description: Invalid format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tune/tasks:
+    get:
+      tags: [Tune]
+      summary: List tune tasks
+      parameters:
+        - in: query
+          name: projectId
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tune tasks list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuneTaskListResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [Tune]
+      summary: Create tune task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTuneTaskRequest'
+      responses:
+        '201':
+          description: Tune task created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuneTask'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: project/model not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tune/tasks/{taskId}:
+    get:
+      tags: [Tune]
+      summary: Get tune task detail
+      parameters:
+        - in: path
+          name: taskId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tune task detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuneTask'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: task not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tune/tasks/{taskId}/logs:
+    get:
+      tags: [Tune]
+      summary: Get tune task logs
+      parameters:
+        - in: path
+          name: taskId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tune task log entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuneTaskLogListResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: task not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, service, timestamp]
+      properties:
+        status:
+          type: string
+          example: ok
+        service:
+          type: string
+          example: mely-ai-backend
+        timestamp:
+          type: string
+          format: date-time
+
+    User:
+      type: object
+      required: [id, name, email, role]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { type: string, enum: [owner, editor, viewer] }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 1 }
+
+    LoginResponse:
+      type: object
+      required: [token, user]
+      properties:
+        token: { type: string }
+        user:
+          $ref: '#/components/schemas/User'
+
+    Project:
+      type: object
+      required: [id, name, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        updatedAt:
+          type: string
+          format: date-time
+
+    Model:
+      type: object
+      required: [id, provider, name, capabilities]
+      properties:
+        id: { type: string }
+        provider: { type: string }
+        name: { type: string }
+        capabilities:
+          type: array
+          items: { type: string }
+
+    Session:
+      type: object
+      required: [id, projectId, title, status, createdAt]
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        title: { type: string }
+        status:
+          type: string
+          enum: [active, archived]
+        createdAt:
+          type: string
+          format: date-time
+
+    SessionExport:
+      type: object
+      required: [id, sessionId, format, fileUri, sampleCount, createdAt]
+      properties:
+        id: { type: string }
+        sessionId: { type: string }
+        format:
+          type: string
+          enum: [jsonl, csv, txt]
+        fileUri: { type: string }
+        sampleCount: { type: integer, minimum: 0 }
+        createdAt:
+          type: string
+          format: date-time
+
+    SessionMessage:
+      type: object
+      required: [id, sessionId, role, content, createdAt]
+      properties:
+        id: { type: string }
+        sessionId: { type: string }
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content: { type: string }
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateSessionMessageRequest:
+      type: object
+      required: [content]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant, system]
+          default: user
+        content:
+          type: string
+          minLength: 1
+
+    CreateSessionExportRequest:
+      type: object
+      properties:
+        format:
+          type: string
+          enum: [jsonl, csv, txt]
+          default: jsonl
+
+    CreateSessionRequest:
+      type: object
+      required: [projectId]
+      properties:
+        projectId: { type: string }
+        title: { type: string }
+
+    TuneTask:
+      type: object
+      required: [id, projectId, modelId, name, status, logs, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        modelId: { type: string }
+        name: { type: string }
+        status:
+          type: string
+          enum: [queued, running, succeeded, failed]
+        logs:
+          type: array
+          items: { type: string }
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateTuneTaskRequest:
+      type: object
+      required: [projectId, modelId]
+      properties:
+        projectId: { type: string }
+        modelId: { type: string }
+        name: { type: string }
+
+    ErrorObject:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, INTERNAL_ERROR]
+        message: { type: string }
+        details:
+          type: object
+          additionalProperties: true
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          oneOf:
+            - $ref: '#/components/schemas/ErrorObject'
+            - type: string
+
+    ProjectListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Project' }
+        total: { type: integer, minimum: 0 }
+
+    ModelListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Model' }
+        total: { type: integer, minimum: 0 }
+
+    SessionListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Session' }
+        total: { type: integer, minimum: 0 }
+
+    SessionExportListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/SessionExport' }
+        total: { type: integer, minimum: 0 }
+
+    SessionMessageListResponse:
+      type: object
+      required: [items, total, page, pageSize]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/SessionMessage' }
+        total: { type: integer, minimum: 0 }
+        page: { type: integer, minimum: 1 }
+        pageSize: { type: integer, minimum: 1 }
+
+    TuneTaskListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TuneTask' }
+        total: { type: integer, minimum: 0 }
+
+    TuneTaskLog:
+      type: object
+      required: [index, message, at]
+      properties:
+        index: { type: integer, minimum: 1 }
+        message: { type: string }
+        at:
+          type: string
+          format: date-time
+
+    TuneTaskLogListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TuneTaskLog' }
+        total: { type: integer, minimum: 0 }
