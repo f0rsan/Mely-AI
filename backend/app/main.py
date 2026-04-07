@@ -19,6 +19,7 @@ from app.api.voice import router as voice_router
 from app.api.costumes import router as costumes_router
 from app.api.exports import router as exports_router
 from app.api.llm import router as llm_router
+from app.api.llm_preferences import router as llm_preferences_router
 from app.api.llm_datasets import router as llm_datasets_router
 from app.api.llm_training import router as llm_training_router
 from app.api.llm_models import router as llm_models_router
@@ -123,6 +124,7 @@ def create_app() -> FastAPI:
     app.include_router(costumes_router, prefix="/api")
     app.include_router(exports_router, prefix="/api")
     app.include_router(llm_router, prefix="/api")
+    app.include_router(llm_preferences_router, prefix="/api")
     app.include_router(llm_datasets_router, prefix="/api")
     app.include_router(llm_training_router, prefix="/api")
     app.include_router(llm_models_router, prefix="/api")

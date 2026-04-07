@@ -194,6 +194,23 @@ function buildDnaSuggestions() {
   };
 }
 
+function buildLLMHealthResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    running: true,
+    version: "0.6.0",
+    models: [
+      {
+        name: "qwen2.5:7b-instruct-q4_K_M",
+        sizeBytes: 4_500_000_000,
+        modifiedAt: "2026-04-07T00:00:00Z",
+        digest: "sha256:demo",
+      },
+    ],
+    hint: null,
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
@@ -245,6 +262,79 @@ test("renders character cards in a grid when the API returns data", async () => 
   await screen.findByRole("button", { name: "打开角色 星野ミカ" });
   expect(screen.getByRole("button", { name: "打开角色 黑渊" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "创建新角色入口" })).toBeInTheDocument();
+});
+
+test("creates character from modal and jumps to LLM chat tab", async () => {
+  const user = userEvent.setup();
+
+  fetchMock
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => buildCharactersResponse([]),
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        id: "char-new",
+        name: "新角色",
+        createdAt: "2026-04-07T10:00:00Z",
+        fingerprint: null,
+        dna: null,
+        visual: null,
+        voice: null,
+      }),
+    })
+    .mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: async () => ({ detail: "训练数据集尚未导入，请先上传图片。" }),
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => buildLLMHealthResponse(),
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => [],
+    });
+
+  render(<App />);
+  await screen.findByText("还没有角色");
+
+  await user.click(screen.getByRole("button", { name: "创建你的第一个角色" }));
+  await screen.findByRole("dialog", { name: "创建角色" });
+  await user.type(screen.getByLabelText("角色名称"), "新角色{enter}");
+
+  await screen.findByRole("heading", { name: "LLM 工作台" });
+  await screen.findByText("角色对话");
+  await screen.findByText("开始一段新对话");
+  expect(screen.queryByRole("dialog", { name: "创建角色" })).not.toBeInTheDocument();
+
+  const createCall = fetchMock.mock.calls.find(
+    ([url, options]) =>
+      url === "http://127.0.0.1:8000/api/characters" &&
+      (options as RequestInit).method === "POST",
+  );
+  expect(createCall).toBeDefined();
+});
+
+test("shows input validation when create modal name is empty", async () => {
+  const user = userEvent.setup();
+
+  fetchMock.mockResolvedValueOnce({
+    ok: true,
+    json: async () => buildCharactersResponse([]),
+  });
+
+  render(<App />);
+  await screen.findByText("还没有角色");
+
+  await user.click(screen.getByRole("button", { name: "创建你的第一个角色" }));
+  await screen.findByRole("dialog", { name: "创建角色" });
+  await user.click(screen.getByRole("button", { name: "创建" }));
+
+  await screen.findByText("请输入角色名称");
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
 test("opens dataset workspace when clicking a character card and allows returning", async () => {

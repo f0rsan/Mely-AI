@@ -19,6 +19,7 @@ from typing import Any, AsyncIterator
 from uuid import uuid4
 
 from app.db.connection import connect_database
+from app.services.llm_catalog import is_catalog_model, is_catalog_vision_model
 from app.services.ollama_service import (
     OllamaModelNotFoundError,
     OllamaNotRunningError,
@@ -49,6 +50,10 @@ class ChatModelNotReadyError(ChatError):
     """Selected LLM model is not in ready status."""
 
 
+class ChatInvalidBaseModelError(ChatError):
+    """Selected base model is invalid for chat."""
+
+
 # ── Domain records ─────────────────────────────────────────────────────────────
 
 @dataclass(slots=True)
@@ -56,6 +61,7 @@ class ChatSession:
     id: str
     character_id: str
     llm_model_id: str | None
+    base_model_name: str | None
     created_at: str
 
     def to_dict(self) -> dict[str, Any]:
@@ -63,6 +69,7 @@ class ChatSession:
             "id": self.id,
             "characterId": self.character_id,
             "llmModelId": self.llm_model_id,
+            "baseModelName": self.base_model_name,
             "createdAt": self.created_at,
         }
 
@@ -74,6 +81,7 @@ class ChatMessage:
     role: str       # "user" | "assistant" | "system"
     content: str
     created_at: str
+    images: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -90,6 +98,7 @@ class ChatStreamContext:
     chat_id: str
     character_id: str | None
     llm_model_id: str | None
+    base_model_name: str | None
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -103,17 +112,35 @@ def _row_to_session(row: sqlite3.Row) -> ChatSession:
         id=row["id"],
         character_id=row["character_id"],
         llm_model_id=row["llm_model_id"],
+        base_model_name=row["base_model_name"],
         created_at=row["created_at"],
     )
 
 
 def _row_to_message(row: sqlite3.Row) -> ChatMessage:
+    images: list[str] | None = None
+    raw_images_json = row["images_json"] if "images_json" in row.keys() else None
+    if isinstance(raw_images_json, str) and raw_images_json.strip():
+        try:
+            decoded_images = json.loads(raw_images_json)
+        except json.JSONDecodeError:
+            decoded_images = None
+        if isinstance(decoded_images, list):
+            normalized_images = [
+                image.strip()
+                for image in decoded_images
+                if isinstance(image, str) and image.strip()
+            ]
+            if normalized_images:
+                images = normalized_images
+
     return ChatMessage(
         id=row["id"],
         chat_id=row["chat_id"],
         role=row["role"],
         content=row["content"],
         created_at=row["created_at"],
+        images=images,
     )
 
 
@@ -141,6 +168,7 @@ class ChatService:
         self,
         character_id: str,
         llm_model_id: str | None = None,
+        base_model_name: str | None = None,
     ) -> dict[str, Any]:
         """Create a new chat session for a character."""
         with self._conn() as conn:
@@ -150,6 +178,11 @@ class ChatService:
                 raise ChatCharacterNotFoundError("角色不存在")
 
             # Validate model if provided
+            normalized_base_model_name = (
+                base_model_name.strip()
+                if isinstance(base_model_name, str) and base_model_name.strip()
+                else None
+            )
             if llm_model_id is not None:
                 model_row = conn.execute(
                     "SELECT character_id, status FROM llm_models WHERE id = ?",
@@ -161,12 +194,19 @@ class ChatService:
                     raise ChatModelNotReadyError("所选私有模型不属于当前角色，请重新选择")
                 if model_row["status"] != "ready":
                     raise ChatModelNotReadyError("模型未就绪，请先完成训练或重试注册")
+                # Private model path has highest priority. Ignore base model input.
+                normalized_base_model_name = None
+            elif normalized_base_model_name is not None and not is_catalog_model(normalized_base_model_name):
+                raise ChatInvalidBaseModelError("基础模型不合法，请从模型库中选择可用模型")
 
             session_id = str(uuid4())
             now = _utc_now()
             conn.execute(
-                "INSERT INTO character_chats (id, character_id, llm_model_id, created_at) VALUES (?, ?, ?, ?)",
-                (session_id, character_id, llm_model_id, now),
+                """
+                INSERT INTO character_chats (id, character_id, llm_model_id, base_model_name, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (session_id, character_id, llm_model_id, normalized_base_model_name, now),
             )
             conn.commit()
 
@@ -186,13 +226,16 @@ class ChatService:
             return [_row_to_session(r).to_dict() for r in rows]
 
     def get_messages(self, chat_id: str) -> list[dict[str, Any]]:
+        return [message.to_dict() for message in self._get_message_history(chat_id)]
+
+    def _get_message_history(self, chat_id: str) -> list[ChatMessage]:
         with self._conn() as conn:
             self._get_session_row(conn, chat_id)  # verify exists
             rows = conn.execute(
                 "SELECT * FROM character_chat_messages WHERE chat_id = ? ORDER BY created_at ASC",
                 (chat_id,),
             ).fetchall()
-            return [_row_to_message(r).to_dict() for r in rows]
+            return [_row_to_message(r) for r in rows]
 
     def delete_session(self, chat_id: str) -> None:
         with self._conn() as conn:
@@ -200,17 +243,40 @@ class ChatService:
             conn.execute("DELETE FROM character_chats WHERE id = ?", (chat_id,))
             conn.commit()
 
-    def _save_message(self, chat_id: str, role: str, content: str) -> dict[str, Any]:
+    def _save_message(
+        self,
+        chat_id: str,
+        role: str,
+        content: str,
+        images: list[str] | None = None,
+    ) -> dict[str, Any]:
         msg_id = str(uuid4())
         now = _utc_now()
+        normalized_images = [
+            image.strip()
+            for image in (images or [])
+            if isinstance(image, str) and image.strip()
+        ]
+        images_json: str | None = None
+        if role == "user" and normalized_images:
+            images_json = json.dumps(normalized_images, ensure_ascii=False)
+
         with self._conn() as conn:
             conn.execute(
-                "INSERT INTO character_chat_messages (id, chat_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
-                (msg_id, chat_id, role, content, now),
+                """
+                INSERT INTO character_chat_messages (id, chat_id, role, content, created_at, images_json)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (msg_id, chat_id, role, content, now, images_json),
             )
             conn.commit()
         return ChatMessage(
-            id=msg_id, chat_id=chat_id, role=role, content=content, created_at=now
+            id=msg_id,
+            chat_id=chat_id,
+            role=role,
+            content=content,
+            created_at=now,
+            images=normalized_images or None,
         ).to_dict()
 
     def _resolve_model_name_and_system_prompt(
@@ -221,6 +287,7 @@ class ChatService:
             row = self._get_session_row(conn, chat_id)
             llm_model_id = row["llm_model_id"]
             character_id = row["character_id"]
+            session_base_model_name = row["base_model_name"]
 
             if llm_model_id:
                 model_row = conn.execute(
@@ -236,7 +303,30 @@ class ChatService:
                 prompt = model_row["system_prompt"] or DEFAULT_SYSTEM_PROMPT
                 return model_row["ollama_model_name"], prompt
 
+            if isinstance(session_base_model_name, str) and session_base_model_name.strip():
+                return session_base_model_name, DEFAULT_SYSTEM_PROMPT
+
+            character_row = conn.execute(
+                "SELECT default_base_model_name FROM characters WHERE id = ?",
+                (character_id,),
+            ).fetchone()
+            character_default_base_model_name = (
+                character_row["default_base_model_name"] if character_row else None
+            )
+            if (
+                isinstance(character_default_base_model_name, str)
+                and character_default_base_model_name.strip()
+                and is_catalog_model(character_default_base_model_name)
+            ):
+                return character_default_base_model_name, DEFAULT_SYSTEM_PROMPT
+
         return DEFAULT_BASE_MODEL, DEFAULT_SYSTEM_PROMPT
+
+    def _model_supports_images(self, context: ChatStreamContext, model_name: str) -> bool:
+        if context.llm_model_id:
+            # This round does not have reliable capability metadata for private models.
+            return False
+        return is_catalog_vision_model(model_name)
 
     def _build_stream_context(self, chat_id: str) -> ChatStreamContext:
         with self._conn() as conn:
@@ -245,6 +335,7 @@ class ChatService:
                 chat_id=chat_id,
                 character_id=row["character_id"],
                 llm_model_id=row["llm_model_id"],
+                base_model_name=row["base_model_name"],
             )
 
     def _log_stream_error(
@@ -255,21 +346,42 @@ class ChatService:
         exc: Exception,
     ) -> None:
         logger.error(
-            "chat.stream.error error_category=%s chat_id=%s character_id=%s llm_model_id=%s",
+            "chat.stream.error error_category=%s chat_id=%s character_id=%s llm_model_id=%s base_model_name=%s",
             error_category,
             context.chat_id,
             context.character_id or "-",
             context.llm_model_id or "-",
+            context.base_model_name or "-",
             exc_info=exc,
         )
 
     def _sse_payload(self, payload: dict[str, Any]) -> str:
         return f"data: {json.dumps(payload)}\n\n"
 
+    def _build_ollama_messages(
+        self,
+        *,
+        system_prompt: str,
+        history: list[ChatMessage],
+    ) -> list[dict[str, Any]]:
+        messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+        for message in history:
+            if message.role not in ("user", "assistant"):
+                continue
+            payload: dict[str, Any] = {
+                "role": message.role,
+                "content": message.content,
+            }
+            if message.role == "user" and message.images:
+                payload["images"] = message.images
+            messages.append(payload)
+        return messages
+
     async def stream_reply(
         self,
         chat_id: str,
         user_content: str,
+        user_images: list[str] | None = None,
     ) -> AsyncIterator[str]:
         """Save user message, stream assistant reply, save final message.
 
@@ -278,7 +390,20 @@ class ChatService:
           data: {"type": "done", "messageId": "..."}\n\n
           data: {"type": "error", "message": "..."}\n\n
         """
-        context = ChatStreamContext(chat_id=chat_id, character_id=None, llm_model_id=None)
+        context = ChatStreamContext(
+            chat_id=chat_id,
+            character_id=None,
+            llm_model_id=None,
+            base_model_name=None,
+        )
+        normalized_images = [
+            image.strip()
+            for image in (user_images or [])
+            if isinstance(image, str) and image.strip()
+        ]
+        if len(normalized_images) > 1:
+            yield self._sse_payload({"type": "error", "message": "当前仅支持上传 1 张图片。"})
+            return
 
         # Load session context first for logs and error stratification.
         try:
@@ -300,9 +425,45 @@ class ChatService:
             yield self._sse_payload({"type": "error", "message": "对话状态异常，请稍后重试"})
             return
 
-        # Persist user message
+        # Resolve model and validate request before persisting messages.
         try:
-            self._save_message(chat_id, "user", user_content)
+            model_name, system_prompt = self._resolve_model_name_and_system_prompt(chat_id)
+            if normalized_images and not self._model_supports_images(context, model_name):
+                yield self._sse_payload(
+                    {
+                        "type": "error",
+                        "message": "当前会话使用的是文本模型，暂不支持图片对话，请切换到多模态模型后重试。",
+                    }
+                )
+                return
+        except ChatModelNotReadyError as exc:
+            self._log_stream_error(
+                error_category="session_or_model_state_error",
+                context=context,
+                exc=exc,
+            )
+            yield self._sse_payload({"type": "error", "message": str(exc)})
+            return
+        except ChatNotFoundError as exc:
+            self._log_stream_error(
+                error_category="session_or_model_state_error",
+                context=context,
+                exc=exc,
+            )
+            yield self._sse_payload({"type": "error", "message": str(exc)})
+            return
+        except Exception as exc:
+            self._log_stream_error(
+                error_category="context_build_error",
+                context=context,
+                exc=exc,
+            )
+            yield self._sse_payload({"type": "error", "message": "对话上下文准备失败，请稍后重试"})
+            return
+
+        # Persist user message after request validation passes.
+        try:
+            self._save_message(chat_id, "user", user_content, normalized_images)
         except Exception as exc:
             self._log_stream_error(
                 error_category="persistence_error",
@@ -312,22 +473,10 @@ class ChatService:
             yield self._sse_payload({"type": "error", "message": "消息保存失败，请稍后重试"})
             return
 
-        # Build message history for context
+        # Build message history for context.
         try:
-            history = self.get_messages(chat_id)
-            model_name, system_prompt = self._resolve_model_name_and_system_prompt(chat_id)
-            messages = [{"role": "system", "content": system_prompt}]
-            for msg in history:
-                if msg["role"] in ("user", "assistant"):
-                    messages.append({"role": msg["role"], "content": msg["content"]})
-        except ChatModelNotReadyError as exc:
-            self._log_stream_error(
-                error_category="session_or_model_state_error",
-                context=context,
-                exc=exc,
-            )
-            yield self._sse_payload({"type": "error", "message": str(exc)})
-            return
+            history = self._get_message_history(chat_id)
+            messages = self._build_ollama_messages(system_prompt=system_prompt, history=history)
         except ChatNotFoundError as exc:
             self._log_stream_error(
                 error_category="session_or_model_state_error",

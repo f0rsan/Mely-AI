@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+import platform
+from pathlib import Path
+from shutil import which
 import json
 from dataclasses import dataclass
-from typing import AsyncIterator
+from typing import AsyncIterator, NotRequired, TypedDict
 
 import httpx
+
+from app.services.llm_catalog import MIN_OLLAMA_VERSION
 
 
 OLLAMA_BASE_URL = "http://localhost:11434"
@@ -44,6 +51,115 @@ class OllamaStatus:
     running: bool
     version: str | None
     models: list[OllamaModelInfo]
+
+
+@dataclass(slots=True)
+class OllamaRuntimeStatus:
+    installed: bool
+    running: bool
+    version: str | None
+    minimum_version: str
+    platform: str
+    models: list[OllamaModelInfo]
+    hint: str | None
+
+
+class OllamaChatMessage(TypedDict):
+    role: str
+    content: str
+    images: NotRequired[list[str]]
+
+
+def _normalize_arch(machine: str) -> str:
+    lowered = machine.lower()
+    if lowered in {"x86_64", "amd64"}:
+        return "amd64"
+    if lowered in {"aarch64", "arm64"}:
+        return "arm64"
+    return lowered or "unknown"
+
+
+def current_platform() -> str:
+    return f"{sys.platform}-{_normalize_arch(platform.machine())}"
+
+
+def is_ollama_installed() -> bool:
+    if which("ollama"):
+        return True
+
+    if sys.platform == "darwin":
+        return any(
+            app.exists()
+            for app in (
+                Path("/Applications/Ollama.app"),
+                Path.home() / "Applications" / "Ollama.app",
+            )
+        )
+
+    if sys.platform.startswith("win"):
+        local_app_data = Path.home() / "AppData" / "Local" / "Programs" / "Ollama" / "ollama.exe"
+        return local_app_data.exists()
+
+    return False
+
+
+def _build_runtime_hint(installed: bool, running: bool) -> str | None:
+    if not installed:
+        return "未检测到语言引擎，请先安装 Ollama。"
+    if not running:
+        return "语言引擎未启动，请点击启动按钮后重试。"
+    return None
+
+
+async def check_ollama_runtime() -> OllamaRuntimeStatus:
+    status = await check_ollama_status()
+    installed = is_ollama_installed() or status.running
+    return OllamaRuntimeStatus(
+        installed=installed,
+        running=status.running,
+        version=status.version,
+        minimum_version=MIN_OLLAMA_VERSION,
+        platform=current_platform(),
+        models=status.models,
+        hint=_build_runtime_hint(installed, status.running),
+    )
+
+
+async def open_ollama_runtime() -> None:
+    runtime = await check_ollama_runtime()
+    if runtime.running:
+        return
+    if not runtime.installed:
+        raise OllamaAPIError("未检测到语言引擎，请先安装 Ollama。")
+
+    try:
+        if sys.platform == "darwin":
+            subprocess.run(
+                ["open", "-a", "Ollama"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return
+
+        if sys.platform.startswith("win"):
+            subprocess.Popen(
+                ["cmd", "/c", "start", "", "ollama"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return
+
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except FileNotFoundError as exc:
+        raise OllamaAPIError("启动语言引擎失败，请确认 Ollama 已正确安装。") from exc
+    except subprocess.CalledProcessError as exc:
+        raise OllamaAPIError("启动语言引擎失败，请稍后重试。") from exc
 
 
 async def check_ollama_status() -> OllamaStatus:
@@ -142,7 +258,7 @@ async def delete_model(model_name: str) -> None:
 
 async def chat_stream(
     model_name: str,
-    messages: list[dict],
+    messages: list[OllamaChatMessage],
 ) -> AsyncIterator[str]:
     """Stream chat completion tokens. Yields text chunks."""
     async with httpx.AsyncClient(

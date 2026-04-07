@@ -9,8 +9,10 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 from app.services.ollama_service import (
     OllamaModelInfo,
+    OllamaRuntimeStatus,
     OllamaNotRunningError,
     OllamaModelNotFoundError,
+    OllamaAPIError,
     OllamaStatus,
 )
 
@@ -34,6 +36,25 @@ def _running_status(models: list[OllamaModelInfo] | None = None) -> OllamaStatus
 
 def _stopped_status() -> OllamaStatus:
     return OllamaStatus(running=False, version=None, models=[])
+
+
+def _runtime_status(
+    *,
+    installed: bool = True,
+    running: bool = False,
+    version: str | None = None,
+    models: list[OllamaModelInfo] | None = None,
+    hint: str | None = None,
+) -> OllamaRuntimeStatus:
+    return OllamaRuntimeStatus(
+        installed=installed,
+        running=running,
+        version=version,
+        minimum_version="0.3.10",
+        platform="darwin-arm64",
+        models=models or [],
+        hint=hint,
+    )
 
 
 # ── GET /api/llm/health ───────────────────────────────────────────────────────
@@ -168,6 +189,204 @@ class TestDeleteLLMModel:
         assert resp.status_code == 503
 
 
+# ── GET /api/llm/runtime ──────────────────────────────────────────────────────
+
+class TestLLMRuntime:
+    def test_returns_not_installed_state(self, client):
+        with patch(
+            "app.api.llm.check_ollama_runtime",
+            new_callable=AsyncMock,
+            return_value=_runtime_status(
+                installed=False,
+                running=False,
+                version=None,
+                hint="未检测到语言引擎，请先安装 Ollama。",
+            ),
+        ):
+            resp = client.get("/api/llm/runtime")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["installed"] is False
+        assert body["running"] is False
+        assert body["version"] is None
+        assert body["minimumVersion"] == "0.3.10"
+        assert "安装" in (body["hint"] or "")
+
+    def test_returns_installed_not_running_state(self, client):
+        with patch(
+            "app.api.llm.check_ollama_runtime",
+            new_callable=AsyncMock,
+            return_value=_runtime_status(
+                installed=True,
+                running=False,
+                version=None,
+                hint="语言引擎未启动，请点击启动按钮后重试。",
+            ),
+        ):
+            resp = client.get("/api/llm/runtime")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["installed"] is True
+        assert body["running"] is False
+        assert "未启动" in (body["hint"] or "")
+
+    def test_returns_running_runtime_with_models(self, client):
+        models = [
+            OllamaModelInfo(
+                name="qwen2.5:7b-instruct-q4_K_M",
+                size_bytes=4_500_000_000,
+                modified_at="2026-04-07T00:00:00Z",
+                digest="sha256:demo",
+            )
+        ]
+        with patch(
+            "app.api.llm.check_ollama_runtime",
+            new_callable=AsyncMock,
+            return_value=_runtime_status(
+                installed=True,
+                running=True,
+                version="0.3.10",
+                models=models,
+            ),
+        ):
+            resp = client.get("/api/llm/runtime")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["installed"] is True
+        assert body["running"] is True
+        assert body["version"] == "0.3.10"
+        assert len(body["models"]) == 1
+        assert body["models"][0]["name"] == "qwen2.5:7b-instruct-q4_K_M"
+
+
+# ── POST /api/llm/runtime/open ────────────────────────────────────────────────
+
+class TestOpenLLMRuntime:
+    def test_open_runtime_success(self, client):
+        with patch(
+            "app.api.llm.open_ollama_runtime",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            resp = client.post("/api/llm/runtime/open")
+
+        assert resp.status_code == 204
+
+    def test_open_runtime_failure_returns_chinese_error(self, client):
+        with patch(
+            "app.api.llm.open_ollama_runtime",
+            new_callable=AsyncMock,
+            side_effect=OllamaAPIError("启动语言引擎失败，请稍后重试"),
+        ):
+            resp = client.post("/api/llm/runtime/open")
+
+        assert resp.status_code == 502
+        assert "启动语言引擎失败" in resp.json()["detail"]
+
+
+# ── GET /api/llm/catalog ──────────────────────────────────────────────────────
+
+class TestLLMCatalog:
+    def test_returns_fixed_catalog(self, client):
+        resp = client.get("/api/llm/catalog")
+        assert resp.status_code == 200
+
+        body = resp.json()
+        assert "items" in body
+        assert len(body["items"]) == 3
+        names = {item["modelName"] for item in body["items"]}
+        assert "qwen2.5:7b-instruct-q4_K_M" in names
+        assert "qwen2.5:3b" in names or "qwen2.5:1.5b" in names
+        assert "minicpm-v:8b" in names
+
+
+# ── POST /api/llm/pull ────────────────────────────────────────────────────────
+
+class TestLLMPull:
+    def test_streams_pull_events_as_sse(self, client):
+        async def _fake_pull(_model_name: str):
+            yield {"status": "pulling manifest"}
+            yield {"status": "downloading", "total": 100, "completed": 25}
+            yield {"status": "done"}
+
+        with patch(
+            "app.api.llm.check_ollama_runtime",
+            new_callable=AsyncMock,
+            return_value=_runtime_status(installed=True, running=True, version="0.3.10"),
+        ), patch(
+            "app.api.llm.pull_model",
+            _fake_pull,
+        ):
+            with client.stream("POST", "/api/llm/pull", json={"modelName": "qwen2.5:3b"}) as resp:
+                assert resp.status_code == 200
+                assert resp.headers["content-type"].startswith("text/event-stream")
+                body = "".join(resp.iter_text())
+
+        assert '"status": "pulling manifest"' in body
+        assert '"status": "downloading"' in body
+        assert '"status": "done"' in body
+        assert '"percent": 25.0' in body
+
+    def test_returns_chinese_error_when_ollama_unavailable(self, client):
+        with patch(
+            "app.api.llm.check_ollama_runtime",
+            new_callable=AsyncMock,
+            return_value=_runtime_status(
+                installed=True,
+                running=False,
+                hint="语言引擎未启动，请先启动后再下载模型。",
+            ),
+        ):
+            resp = client.post("/api/llm/pull", json={"modelName": "qwen2.5:3b"})
+
+        assert resp.status_code == 503
+        assert "启动" in resp.json()["detail"]
+
+
+# ── Character LLM preferences ─────────────────────────────────────────────────
+
+class TestCharacterLLMPreferences:
+    def test_get_preferences_returns_default_base_model_name(self, client):
+        created = client.post("/api/characters", json={"name": "角色A"}).json()
+        character_id = created["id"]
+
+        resp = client.get(f"/api/characters/{character_id}/llm-preferences")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["characterId"] == character_id
+        assert body["defaultBaseModelName"] is None
+
+    def test_update_preferences_saves_default_base_model_name(self, client):
+        created = client.post("/api/characters", json={"name": "角色B"}).json()
+        character_id = created["id"]
+
+        update_resp = client.put(
+            f"/api/characters/{character_id}/llm-preferences",
+            json={"defaultBaseModelName": "qwen2.5:7b-instruct-q4_K_M"},
+        )
+        assert update_resp.status_code == 200
+        assert update_resp.json()["defaultBaseModelName"] == "qwen2.5:7b-instruct-q4_K_M"
+
+        get_resp = client.get(f"/api/characters/{character_id}/llm-preferences")
+        assert get_resp.status_code == 200
+        assert get_resp.json()["defaultBaseModelName"] == "qwen2.5:7b-instruct-q4_K_M"
+
+    def test_update_preferences_rejects_model_not_in_catalog(self, client):
+        created = client.post("/api/characters", json={"name": "角色C"}).json()
+        character_id = created["id"]
+
+        resp = client.put(
+            f"/api/characters/{character_id}/llm-preferences",
+            json={"defaultBaseModelName": "unknown:model"},
+        )
+        assert resp.status_code == 400
+        assert "模型目录" in resp.json()["detail"]
+
+
 # ── DB migration ──────────────────────────────────────────────────────────────
 
 class TestLLMMigration:
@@ -176,6 +395,10 @@ class TestLLMMigration:
         assert resp.status_code == 200
         applied = resp.json()["database"]["appliedMigrations"]
         assert "0008_llm_tables.sql" in applied
+        assert "0010_character_default_base_model.sql" in applied
+        assert "0011_chat_base_model_name.sql" in applied
+        assert "0012_chat_message_images_json.sql" in applied
+        assert "0013_backfill_legacy_chat_base_models.sql" in applied
 
     def test_llm_tables_exist_after_migration(self, temp_data_root):
         """Verify all four LLM tables were created by migration 0008."""
@@ -200,6 +423,177 @@ class TestLLMMigration:
         assert "llm_models" in tables
         assert "character_chats" in tables
         assert "character_chat_messages" in tables
+
+    def test_migration_0010_adds_default_base_model_column(self, temp_data_root):
+        import sqlite3
+        from pathlib import Path
+        from app.db.connection import connect_database
+        from app.db.migrations import apply_migrations
+
+        db_path = temp_data_root / "db" / "mely.db"
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        migration_dir = Path(__file__).resolve().parents[1] / "migrations"
+
+        with connect_database(db_path) as conn:
+            apply_migrations(conn, migration_dir)
+            cursor = conn.execute("PRAGMA table_info(characters)")
+            columns = {row[1] for row in cursor.fetchall()}
+
+        assert "default_base_model_name" in columns
+
+    def test_migration_0011_adds_chat_base_model_name_column(self, temp_data_root):
+        from pathlib import Path
+        from app.db.connection import connect_database
+        from app.db.migrations import apply_migrations
+
+        db_path = temp_data_root / "db" / "mely.db"
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        migration_dir = Path(__file__).resolve().parents[1] / "migrations"
+
+        with connect_database(db_path) as conn:
+            apply_migrations(conn, migration_dir)
+            cursor = conn.execute("PRAGMA table_info(character_chats)")
+            columns = {row[1] for row in cursor.fetchall()}
+
+        assert "base_model_name" in columns
+
+    def test_migration_0012_adds_chat_message_images_json_column(self, temp_data_root):
+        from pathlib import Path
+        from app.db.connection import connect_database
+        from app.db.migrations import apply_migrations
+
+        db_path = temp_data_root / "db" / "mely.db"
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        migration_dir = Path(__file__).resolve().parents[1] / "migrations"
+
+        with connect_database(db_path) as conn:
+            apply_migrations(conn, migration_dir)
+            cursor = conn.execute("PRAGMA table_info(character_chat_messages)")
+            columns = {row[1] for row in cursor.fetchall()}
+
+        assert "images_json" in columns
+
+    def test_migration_0013_backfills_legacy_chat_base_model_and_prevents_drift(self, temp_data_root):
+        from pathlib import Path
+
+        from app.db.connection import connect_database
+        from app.db.migrations import ensure_schema_migrations_table
+        from app.services.chat_service import ChatService
+
+        db_path = temp_data_root / "db" / "mely.db"
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        migration_dir = Path(__file__).resolve().parents[1] / "migrations"
+        migration_0013_path = migration_dir / "0013_backfill_legacy_chat_base_models.sql"
+        now = "2026-04-07T00:00:00Z"
+
+        with connect_database(db_path) as conn:
+            ensure_schema_migrations_table(conn)
+            for migration_path in sorted(migration_dir.glob("*.sql")):
+                if migration_path.name == "0013_backfill_legacy_chat_base_models.sql":
+                    continue
+                version = migration_path.stem.split("_", maxsplit=1)[0]
+                conn.executescript(migration_path.read_text(encoding="utf-8"))
+                conn.execute(
+                    "INSERT INTO schema_migrations(version, name) VALUES (?, ?)",
+                    (version, migration_path.name),
+                )
+            conn.commit()
+
+            conn.execute(
+                """
+                INSERT INTO characters (id, name, created_at, default_base_model_name)
+                VALUES (?, ?, ?, ?)
+                """,
+                ("char-legacy", "角色", now, "qwen2.5:3b"),
+            )
+            conn.execute(
+                """
+                INSERT INTO characters (id, name, created_at, default_base_model_name)
+                VALUES (?, ?, ?, ?)
+                """,
+                ("char-empty", "角色空模型", now, "   "),
+            )
+            conn.execute(
+                """
+                INSERT INTO llm_models (
+                    id, character_id, version, base_model, ollama_model_name, gguf_path, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "private-model-1",
+                    "char-legacy",
+                    1,
+                    "qwen2.5:7b-instruct-q4_K_M",
+                    "character_char-legacy_v1",
+                    "/tmp/fake.gguf",
+                    "ready",
+                    now,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO character_chats (id, character_id, llm_model_id, base_model_name, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("chat-legacy", "char-legacy", None, None, now),
+            )
+            conn.execute(
+                """
+                INSERT INTO character_chats (id, character_id, llm_model_id, base_model_name, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("chat-fixed", "char-legacy", None, "qwen2.5:7b-instruct-q4_K_M", now),
+            )
+            conn.execute(
+                """
+                INSERT INTO character_chats (id, character_id, llm_model_id, base_model_name, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("chat-private", "char-legacy", "private-model-1", None, now),
+            )
+            conn.execute(
+                """
+                INSERT INTO character_chats (id, character_id, llm_model_id, base_model_name, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("chat-empty-default", "char-empty", None, None, now),
+            )
+            conn.commit()
+
+            conn.executescript(migration_0013_path.read_text(encoding="utf-8"))
+            conn.commit()
+
+            legacy_base_model = conn.execute(
+                "SELECT base_model_name FROM character_chats WHERE id = ?",
+                ("chat-legacy",),
+            ).fetchone()[0]
+            fixed_base_model = conn.execute(
+                "SELECT base_model_name FROM character_chats WHERE id = ?",
+                ("chat-fixed",),
+            ).fetchone()[0]
+            private_base_model = conn.execute(
+                "SELECT base_model_name FROM character_chats WHERE id = ?",
+                ("chat-private",),
+            ).fetchone()[0]
+            empty_character_base_model = conn.execute(
+                "SELECT base_model_name FROM character_chats WHERE id = ?",
+                ("chat-empty-default",),
+            ).fetchone()[0]
+
+            assert legacy_base_model == "qwen2.5:3b"
+            assert fixed_base_model == "qwen2.5:7b-instruct-q4_K_M"
+            assert private_base_model is None
+            assert empty_character_base_model == "qwen2.5:7b-instruct-q4_K_M"
+
+            conn.execute(
+                "UPDATE characters SET default_base_model_name = ? WHERE id = ?",
+                ("minicpm-v:8b", "char-legacy"),
+            )
+            conn.commit()
+
+        service = ChatService(db_path=db_path)
+        model_name, _ = service._resolve_model_name_and_system_prompt("chat-legacy")
+        assert model_name == "qwen2.5:3b"
 
 
 # ── OllamaService unit tests ──────────────────────────────────────────────────

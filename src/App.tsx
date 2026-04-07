@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { fetchCharacterList, type CharacterListItem } from "./api/characters";
+import { createCharacter, fetchCharacterList, type CharacterListItem } from "./api/characters";
 import {
   CharacterDetailApiError,
   fetchCharacterDetail,
@@ -54,6 +54,7 @@ type DatasetPreviewItem = {
 };
 
 type DetailTab = "dataset" | "textToCharacter" | "dna" | "training" | "generation" | "voice" | "costume" | "export" | "llm" | "visual";
+type LLMInitialSubTab = "chat" | null;
 
 type DnaFormState = Record<DnaFieldKey, string>;
 
@@ -372,6 +373,7 @@ type DatasetWorkspaceProps = {
   onSelectFiles: (files: FileList | null) => void;
   onStartImport: () => void;
   onBack: () => void;
+  llmInitialSubTab: LLMInitialSubTab;
 };
 
 type DnaWorkspaceProps = {
@@ -665,6 +667,7 @@ function DatasetWorkspace({
   onSelectFiles,
   onStartImport,
   onBack,
+  llmInitialSubTab,
 }: DatasetWorkspaceProps) {
   const title =
     activeTab === "dataset"
@@ -974,7 +977,11 @@ function DatasetWorkspace({
       ) : activeTab === "export" ? (
         <ExportWorkspace characterId={character.id} />
       ) : activeTab === "llm" ? (
-        <LLMWorkspace characterId={character.id} characterName={character.name} />
+        <LLMWorkspace
+          characterId={character.id}
+          characterName={character.name}
+          initialSubTab={llmInitialSubTab ?? undefined}
+        />
       ) : activeTab === "visual" ? (
         <VisualWorkspace characterId={character.id} />
       ) : (
@@ -1006,7 +1013,10 @@ function DatasetWorkspace({
 export default function App() {
   const [viewState, setViewState] = useState<ViewState>({ kind: "loading" });
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterListItem | null>(null);
-  const [createHint, setCreateHint] = useState("");
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [createModalName, setCreateModalName] = useState("");
+  const [createModalError, setCreateModalError] = useState<string | null>(null);
+  const [createModalBusy, setCreateModalBusy] = useState(false);
   const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
   const [taskConnection, setTaskConnection] = useState<TaskConnectionState>("disconnected");
   const [taskActionError, setTaskActionError] = useState<string | null>(null);
@@ -1030,6 +1040,7 @@ export default function App() {
   const [textCandidates, setTextCandidates] = useState<TextToCharacterCandidate[]>([]);
   const [textSelectedCandidateIds, setTextSelectedCandidateIds] = useState<string[]>([]);
   const [textAddingToDataset, setTextAddingToDataset] = useState(false);
+  const [llmInitialSubTab, setLlmInitialSubTab] = useState<LLMInitialSubTab>(null);
 
   const canRunMockTask = viewState.kind === "ready";
   const dnaPromptPreview = useMemo(
@@ -1049,7 +1060,9 @@ export default function App() {
   }, []);
 
   const handleCreateEntry = useCallback(() => {
-    setCreateHint("创建角色流程将在后续模块接入。");
+    setCreateModalOpen(true);
+    setCreateModalName("");
+    setCreateModalError(null);
   }, []);
 
   const startMockTask = useCallback(async (mode: "success" | "failure") => {
@@ -1086,6 +1099,7 @@ export default function App() {
   const handleBackToLibrary = useCallback(() => {
     setSelectedCharacter(null);
     setDetailTab("dataset");
+    setLlmInitialSubTab(null);
     setDatasetMessage(null);
     setDatasetReport(null);
     setDatasetLoadingReport(false);
@@ -1099,9 +1113,14 @@ export default function App() {
     resetTextToCharacterState();
   }, [clearDatasetSelection, resetTextToCharacterState]);
 
-  const handleOpenCharacter = useCallback((character: CharacterListItem) => {
+  const handleOpenCharacter = useCallback((
+    character: CharacterListItem,
+    tab: DetailTab = "dataset",
+    initialSubTab: LLMInitialSubTab = null,
+  ) => {
     setSelectedCharacter(character);
-    setDetailTab("dataset");
+    setDetailTab(tab);
+    setLlmInitialSubTab(initialSubTab);
     setDatasetMessage(null);
     setDnaSuggestions(null);
     setDnaForm(createEmptyDnaForm());
@@ -1111,6 +1130,44 @@ export default function App() {
     setDnaLoadedCharacterId(null);
     resetTextToCharacterState();
   }, [resetTextToCharacterState]);
+
+  const handleConfirmCreate = useCallback(async () => {
+    if (createModalBusy) {
+      return;
+    }
+
+    const normalizedName = createModalName.trim();
+    if (normalizedName.length === 0) {
+      setCreateModalError("请输入角色名称");
+      return;
+    }
+
+    setCreateModalBusy(true);
+    setCreateModalError(null);
+    try {
+      const created = await createCharacter(normalizedName);
+      setViewState((current) => {
+        if (current.kind !== "ready") {
+          return current;
+        }
+        return {
+          kind: "ready",
+          items: [created, ...current.items.filter((item) => item.id !== created.id)],
+        };
+      });
+      setCreateModalOpen(false);
+      setCreateModalName("");
+      handleOpenCharacter(created, "llm", "chat");
+    } catch (error) {
+      if (error instanceof Error && error.message.trim().length > 0) {
+        setCreateModalError(error.message);
+      } else {
+        setCreateModalError("创建失败，请重试");
+      }
+    } finally {
+      setCreateModalBusy(false);
+    }
+  }, [createModalBusy, createModalName, handleOpenCharacter]);
 
   const handleSelectDatasetFiles = useCallback(
     (files: FileList | null) => {
@@ -1431,6 +1488,7 @@ export default function App() {
           onSelectFiles={handleSelectDatasetFiles}
           onStartImport={handleStartDatasetImport}
           onBack={handleBackToLibrary}
+          llmInitialSubTab={llmInitialSubTab}
         />
       </main>
     );
@@ -1449,8 +1507,6 @@ export default function App() {
             创建角色
           </button>
         </header>
-
-        {createHint ? <p className="create-hint">{createHint}</p> : null}
 
         {viewState.kind === "loading" ? (
           <div className="status-block" role="status" aria-live="polite">
@@ -1490,6 +1546,68 @@ export default function App() {
           />
         ) : null}
       </section>
+
+      {createModalOpen ? (
+        <div
+          className="create-modal-overlay"
+          onClick={() => {
+            if (createModalBusy) {
+              return;
+            }
+            setCreateModalOpen(false);
+            setCreateModalError(null);
+          }}
+        >
+          <section
+            className="create-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="create-modal-title">创建角色</h2>
+            <p className="create-modal-subtitle">创建后会自动进入角色详情页的 LLM 工作台。</p>
+            <form
+              className="create-modal-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleConfirmCreate();
+              }}
+            >
+              <label htmlFor="create-modal-name">角色名称</label>
+              <input
+                id="create-modal-name"
+                type="text"
+                value={createModalName}
+                onChange={(event) => setCreateModalName(event.target.value)}
+                placeholder="例如：星野ミカ"
+                disabled={createModalBusy}
+                autoFocus
+              />
+              {createModalError ? <p className="create-modal-error">{createModalError}</p> : null}
+              <div className="create-modal-actions">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => {
+                    if (createModalBusy) {
+                      return;
+                    }
+                    setCreateModalOpen(false);
+                    setCreateModalError(null);
+                  }}
+                  disabled={createModalBusy}
+                >
+                  取消
+                </button>
+                <button className="primary-button" type="submit" disabled={createModalBusy}>
+                  {createModalBusy ? "创建中..." : "创建"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

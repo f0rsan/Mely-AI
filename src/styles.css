@@ -153,10 +153,82 @@ body {
   box-shadow: none;
 }
 
-.create-hint {
-  margin: 16px 0 0;
-  color: rgba(243, 239, 232, 0.68);
+.create-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 4, 4, 0.68);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  z-index: 30;
+}
+
+.create-modal-card {
+  width: min(460px, 100%);
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    linear-gradient(180deg, rgba(22, 18, 18, 0.98), rgba(22, 18, 18, 0.92)),
+    rgba(22, 18, 18, 0.95);
+  box-shadow: 0 26px 60px rgba(0, 0, 0, 0.42);
+  padding: 22px;
+}
+
+.create-modal-card h2 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.create-modal-subtitle {
+  margin: 10px 0 0;
+  color: rgba(243, 239, 232, 0.72);
   font-size: 14px;
+  line-height: 1.6;
+}
+
+.create-modal-form {
+  margin-top: 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.create-modal-form label {
+  font-size: 13px;
+  color: rgba(243, 239, 232, 0.84);
+}
+
+.create-modal-form input {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.24);
+  color: rgba(243, 239, 232, 0.95);
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.create-modal-form input:focus {
+  outline: none;
+  border-color: rgba(239, 185, 135, 0.72);
+  box-shadow: 0 0 0 2px rgba(239, 185, 135, 0.18);
+}
+
+.create-modal-form input:disabled {
+  opacity: 0.72;
+}
+
+.create-modal-error {
+  margin: 2px 0 0;
+  color: #ffb29b;
+  font-size: 13px;
+}
+
+.create-modal-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .character-grid {

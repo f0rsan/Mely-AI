@@ -16,6 +16,18 @@ function resolveCharactersUrl(): string {
   return `${DEFAULT_API_BASE_URL}/api/characters`;
 }
 
+function extractDetail(payload: unknown): string | null {
+  if (payload && typeof payload === "object") {
+    const detailValue = (payload as { detail?: unknown }).detail;
+    if (typeof detailValue !== "string") {
+      return null;
+    }
+    const detail = detailValue.trim();
+    return detail.length > 0 ? detail : null;
+  }
+  return null;
+}
+
 function isCharacterListItem(value: unknown): value is CharacterListItem {
   if (typeof value !== "object" || value === null) {
     return false;
@@ -75,4 +87,35 @@ export async function fetchCharacterList(signal?: AbortSignal): Promise<Characte
   }
 
   return payload;
+}
+
+export async function createCharacter(name: string): Promise<CharacterListItem> {
+  const response = await fetch(resolveCharactersUrl(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+
+  let payload: unknown = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const detail = extractDetail(payload);
+    throw new Error(detail ?? "创建角色失败，请重试");
+  }
+
+  if (!isCharacterListItem(payload)) {
+    throw new Error("创建角色失败，请重试");
+  }
+
+  return {
+    id: payload.id,
+    name: payload.name,
+    createdAt: payload.createdAt,
+    fingerprint: payload.fingerprint ?? null,
+  };
 }

@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.services.chat_service import (
     ChatCharacterNotFoundError,
+    ChatInvalidBaseModelError,
     ChatModelNotReadyError,
     ChatNotFoundError,
 )
@@ -17,12 +18,14 @@ router = APIRouter(tags=["chat"])
 
 class CreateSessionRequest(BaseModel):
     llmModelId: str | None = None
+    baseModelName: str | None = None
 
 
 class ChatSessionPayload(BaseModel):
     id: str
     characterId: str
     llmModelId: str | None
+    baseModelName: str | None
     createdAt: str
 
 
@@ -36,6 +39,7 @@ class ChatMessagePayload(BaseModel):
 
 class SendMessageRequest(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
+    images: list[str] | None = None
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -68,10 +72,13 @@ def create_chat_session(
         session = svc.create_session(
             character_id=character_id,
             llm_model_id=body.llmModelId,
+            base_model_name=body.baseModelName,
         )
     except ChatCharacterNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ChatModelNotReadyError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except ChatInvalidBaseModelError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return ChatSessionPayload(**session)
 
@@ -138,9 +145,14 @@ async def stream_chat_message(
         svc.get_session(chat_id)  # fast 404 check before streaming
     except ChatNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    if body.images is not None and len(body.images) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="当前仅支持上传 1 张图片。",
+        )
 
     return StreamingResponse(
-        svc.stream_reply(chat_id, body.content),
+        svc.stream_reply(chat_id, body.content, body.images),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

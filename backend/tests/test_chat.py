@@ -54,6 +54,14 @@ def _fake_stream(*chunks: str):
     return _gen
 
 
+def _extract_sse_events(raw_text: str) -> list[dict[str, object]]:
+    return [
+        json.loads(line[6:])
+        for line in raw_text.splitlines()
+        if line.startswith("data: ")
+    ]
+
+
 # ── Session CRUD ──────────────────────────────────────────────────────────────
 
 class TestChatSessionCRUD:
@@ -63,7 +71,61 @@ class TestChatSessionCRUD:
         body = resp.json()
         assert body["characterId"] == character_id
         assert body["llmModelId"] is None
+        assert body["baseModelName"] is None
         assert body["id"] is not None
+
+    def test_create_session_with_base_model_name(self, client, character_id):
+        resp = client.post(
+            f"/api/characters/{character_id}/chats",
+            json={"baseModelName": "qwen2.5:3b"},
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["llmModelId"] is None
+        assert body["baseModelName"] == "qwen2.5:3b"
+
+        list_resp = client.get(f"/api/characters/{character_id}/chats")
+        assert list_resp.status_code == 200
+        assert list_resp.json()[0]["baseModelName"] == "qwen2.5:3b"
+
+    def test_create_session_with_private_model_ignores_base_model_name(self, client, character_id):
+        from unittest.mock import AsyncMock, patch as _patch
+
+        with _patch(
+            "app.services.llm_model_service.ollama_create_model",
+            new_callable=AsyncMock,
+        ):
+            model_resp = client.post(
+                f"/api/characters/{character_id}/llm-models",
+                json={"ggufPath": "/tmp/fake.gguf"},
+            )
+        assert model_resp.status_code == 201
+        model_id = model_resp.json()["id"]
+
+        resp = client.post(
+            f"/api/characters/{character_id}/chats",
+            json={"llmModelId": model_id, "baseModelName": "qwen2.5:3b"},
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["llmModelId"] == model_id
+        assert body["baseModelName"] is None
+
+    def test_create_session_accepts_vision_base_model(self, client, character_id):
+        resp = client.post(
+            f"/api/characters/{character_id}/chats",
+            json={"baseModelName": "minicpm-v:8b"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["baseModelName"] == "minicpm-v:8b"
+
+    def test_create_session_rejects_unknown_base_model(self, client, character_id):
+        resp = client.post(
+            f"/api/characters/{character_id}/chats",
+            json={"baseModelName": "unknown:model"},
+        )
+        assert resp.status_code == 400
+        assert "可用模型" in resp.json()["detail"]
 
     def test_create_session_nonexistent_character_returns_404(self, client):
         resp = client.post("/api/characters/ghost-id/chats", json={})
@@ -274,7 +336,7 @@ class TestStreamEndpoint:
 
     def test_stream_emits_internal_error_event_and_logs_category(self, client, chat_id, caplog):
         with (
-            patch("app.services.chat_service.ChatService.get_messages", side_effect=RuntimeError("db exploded")),
+            patch("app.services.chat_service.ChatService._get_message_history", side_effect=RuntimeError("db exploded")),
             caplog.at_level(logging.ERROR, logger="app.services.chat_service"),
         ):
             resp = client.post(
@@ -305,6 +367,115 @@ class TestStreamEndpoint:
     def test_stream_empty_content_returns_422(self, client, chat_id):
         resp = client.post(f"/api/chats/{chat_id}/stream", json={"content": ""})
         assert resp.status_code == 422
+
+    def test_stream_rejects_more_than_one_image(self, client, chat_id):
+        resp = client.post(
+            f"/api/chats/{chat_id}/stream",
+            json={"content": "请描述图片", "images": ["img-a", "img-b"]},
+        )
+        assert resp.status_code == 400
+        assert "1 张图片" in resp.json()["detail"]
+
+    def test_stream_rejects_images_for_text_model_session(self, client, chat_id):
+        with patch("app.services.chat_service.ollama_chat_stream") as mock_stream:
+            resp = client.post(
+                f"/api/chats/{chat_id}/stream",
+                json={"content": "请描述图片", "images": ["base64-image"]},
+            )
+        assert resp.status_code == 200
+        events = _extract_sse_events(resp.text)
+        error_events = [e for e in events if e["type"] == "error"]
+        assert len(error_events) == 1
+        assert "文本模型" in error_events[0]["message"]
+        assert not mock_stream.called
+        persisted = client.get(f"/api/chats/{chat_id}/messages")
+        assert persisted.status_code == 200
+        assert persisted.json() == []
+
+    def test_stream_passes_single_image_to_vision_model(self, client, character_id):
+        chat_resp = client.post(
+            f"/api/characters/{character_id}/chats",
+            json={"baseModelName": "minicpm-v:8b"},
+        )
+        assert chat_resp.status_code == 201
+        current_chat_id = chat_resp.json()["id"]
+
+        captured: dict[str, object] = {}
+
+        async def _capture(model_name: str, messages):
+            captured["model"] = model_name
+            captured["messages"] = messages
+            yield "好的"
+
+        with patch("app.services.chat_service.ollama_chat_stream", side_effect=_capture):
+            resp = client.post(
+                f"/api/chats/{current_chat_id}/stream",
+                json={"content": "请描述图片中的角色", "images": ["base64-image"]},
+            )
+        assert resp.status_code == 200
+        assert captured["model"] == "minicpm-v:8b"
+        user_messages = [m for m in captured["messages"] if m["role"] == "user"]
+        assert user_messages[-1]["content"] == "请描述图片中的角色"
+        assert user_messages[-1]["images"] == ["base64-image"]
+
+        persisted = client.get(f"/api/chats/{current_chat_id}/messages")
+        assert persisted.status_code == 200
+        assert persisted.json()[0]["content"] == "请描述图片中的角色"
+
+    def test_stream_keeps_image_context_across_turns_and_reopen(self, client, character_id):
+        chat_resp = client.post(
+            f"/api/characters/{character_id}/chats",
+            json={"baseModelName": "minicpm-v:8b"},
+        )
+        assert chat_resp.status_code == 201
+        current_chat_id = chat_resp.json()["id"]
+
+        captured_calls: list[list[dict[str, object]]] = []
+
+        async def _capture(_model_name: str, messages):
+            captured_calls.append(messages)
+            yield "收到"
+
+        with patch("app.services.chat_service.ollama_chat_stream", side_effect=_capture):
+            first = client.post(
+                f"/api/chats/{current_chat_id}/stream",
+                json={"content": "看一下这张图", "images": ["base64-image"]},
+            )
+        assert first.status_code == 200
+
+        with patch("app.services.chat_service.ollama_chat_stream", side_effect=_capture):
+            second = client.post(
+                f"/api/chats/{current_chat_id}/stream",
+                json={"content": "继续描述服装细节"},
+            )
+        assert second.status_code == 200
+
+        history_resp = client.get(f"/api/chats/{current_chat_id}/messages")
+        assert history_resp.status_code == 200
+        assert len(history_resp.json()) == 4
+
+        with patch("app.services.chat_service.ollama_chat_stream", side_effect=_capture):
+            third = client.post(
+                f"/api/chats/{current_chat_id}/stream",
+                json={"content": "再补充一下背景元素"},
+            )
+        assert third.status_code == 200
+        assert len(captured_calls) == 3
+
+        first_call_users = [m for m in captured_calls[0] if m["role"] == "user"]
+        assert first_call_users[0]["content"] == "看一下这张图"
+        assert first_call_users[0]["images"] == ["base64-image"]
+
+        second_call_users = [m for m in captured_calls[1] if m["role"] == "user"]
+        assert second_call_users[0]["content"] == "看一下这张图"
+        assert second_call_users[0]["images"] == ["base64-image"]
+        assert second_call_users[-1]["content"] == "继续描述服装细节"
+        assert "images" not in second_call_users[-1]
+
+        third_call_users = [m for m in captured_calls[2] if m["role"] == "user"]
+        assert third_call_users[0]["content"] == "看一下这张图"
+        assert third_call_users[0]["images"] == ["base64-image"]
+        assert third_call_users[-1]["content"] == "再补充一下背景元素"
 
     def test_stream_context_includes_history(self, client, chat_id):
         captured_messages: list = []
@@ -368,6 +539,107 @@ class TestStreamEndpoint:
         assert "私有模型" in error_events[0]["message"]
         assert "不可用" in error_events[0]["message"]
         assert not mock_stream.called
+
+    def test_stream_prefers_private_model_over_session_base_model(self, client, character_id):
+        with patch(
+            "app.services.llm_model_service.ollama_create_model",
+            new_callable=AsyncMock,
+        ):
+            model_resp = client.post(
+                f"/api/characters/{character_id}/llm-models",
+                json={"ggufPath": "/tmp/fake.gguf"},
+            )
+        assert model_resp.status_code == 201
+        model_id = model_resp.json()["id"]
+        private_ollama_model_name = model_resp.json()["ollamaModelName"]
+
+        chat_resp = client.post(
+            f"/api/characters/{character_id}/chats",
+            json={"llmModelId": model_id, "baseModelName": "qwen2.5:3b"},
+        )
+        assert chat_resp.status_code == 201
+        current_chat_id = chat_resp.json()["id"]
+
+        captured: dict[str, str] = {}
+
+        async def _capture(model_name: str, messages):
+            captured["model"] = model_name
+            yield "ok"
+
+        with patch("app.services.chat_service.ollama_chat_stream", side_effect=_capture):
+            resp = client.post(
+                f"/api/chats/{current_chat_id}/stream",
+                json={"content": "你好"},
+            )
+        assert resp.status_code == 200
+        assert captured["model"] == private_ollama_model_name
+
+    def test_stream_uses_session_base_model_when_private_model_not_selected(self, client, character_id):
+        chat_resp = client.post(
+            f"/api/characters/{character_id}/chats",
+            json={"baseModelName": "qwen2.5:3b"},
+        )
+        assert chat_resp.status_code == 201
+        current_chat_id = chat_resp.json()["id"]
+
+        captured: dict[str, str] = {}
+
+        async def _capture(model_name: str, messages):
+            captured["model"] = model_name
+            yield "ok"
+
+        with patch("app.services.chat_service.ollama_chat_stream", side_effect=_capture):
+            resp = client.post(
+                f"/api/chats/{current_chat_id}/stream",
+                json={"content": "你好"},
+            )
+        assert resp.status_code == 200
+        assert captured["model"] == "qwen2.5:3b"
+
+    def test_stream_falls_back_to_character_default_base_model(self, client, character_id):
+        update_resp = client.put(
+            f"/api/characters/{character_id}/llm-preferences",
+            json={"defaultBaseModelName": "qwen2.5:3b"},
+        )
+        assert update_resp.status_code == 200
+
+        chat_resp = client.post(f"/api/characters/{character_id}/chats", json={})
+        assert chat_resp.status_code == 201
+        current_chat_id = chat_resp.json()["id"]
+        assert chat_resp.json()["baseModelName"] is None
+
+        captured: dict[str, str] = {}
+
+        async def _capture(model_name: str, messages):
+            captured["model"] = model_name
+            yield "ok"
+
+        with patch("app.services.chat_service.ollama_chat_stream", side_effect=_capture):
+            resp = client.post(
+                f"/api/chats/{current_chat_id}/stream",
+                json={"content": "你好"},
+            )
+        assert resp.status_code == 200
+        assert captured["model"] == "qwen2.5:3b"
+
+    def test_stream_falls_back_to_system_default_base_model(self, client, character_id):
+        chat_resp = client.post(f"/api/characters/{character_id}/chats", json={})
+        assert chat_resp.status_code == 201
+        current_chat_id = chat_resp.json()["id"]
+
+        captured: dict[str, str] = {}
+
+        async def _capture(model_name: str, messages):
+            captured["model"] = model_name
+            yield "ok"
+
+        with patch("app.services.chat_service.ollama_chat_stream", side_effect=_capture):
+            resp = client.post(
+                f"/api/chats/{current_chat_id}/stream",
+                json={"content": "你好"},
+            )
+        assert resp.status_code == 200
+        assert captured["model"] == "qwen2.5:7b-instruct-q4_K_M"
 
     def test_multiple_turns_preserve_history(self, client, chat_id):
         with patch(

@@ -35,20 +35,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": {
-      "../backend/dist/mely-backend": "resources/mely-backend"
-    },
-    "windows": {
-      "nsis": {
-        "installMode": "perMachine",
-        "displayLanguageSelector": false,
-        "languages": ["SimpChinese"],
-        "shortcutName": "Mely AI",
-        "license": null,
-        "headerImage": null,
-        "sidebarImage": null
-      }
-    }
+    "resources": {}
   },
   "plugins": {
     "shell": {

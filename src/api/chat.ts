@@ -4,6 +4,7 @@ export type ChatSession = {
   id: string;
   characterId: string;
   llmModelId: string | null;
+  baseModelName: string | null;
   createdAt: string;
 };
 
@@ -35,6 +36,7 @@ function extractDetail(body: unknown): string {
 export async function createChatSession(
   characterId: string,
   llmModelId?: string | null,
+  baseModelName?: string | null,
   signal?: AbortSignal,
 ): Promise<ChatSession> {
   const resp = await fetch(
@@ -42,7 +44,10 @@ export async function createChatSession(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ llmModelId: llmModelId ?? null }),
+      body: JSON.stringify({
+        llmModelId: llmModelId ?? null,
+        baseModelName: baseModelName ?? null,
+      }),
       signal,
     },
   );
@@ -98,13 +103,18 @@ export async function streamChatMessage(
   content: string,
   onChunk: (text: string) => void,
   signal?: AbortSignal,
+  images?: string[],
 ): Promise<string | null> {
+  const payload: { content: string; images?: string[] } = { content };
+  if (Array.isArray(images) && images.length > 0) {
+    payload.images = images;
+  }
   const resp = await fetch(
     `${API_BASE}/api/chats/${encodeURIComponent(chatId)}/stream`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(payload),
       signal,
     },
   );
