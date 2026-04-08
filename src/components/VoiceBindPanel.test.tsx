@@ -79,8 +79,22 @@ test("shows format/duration hint in upload area", async () => {
 
   render(<VoiceBindPanel characterId="char-1" />);
 
-  await screen.findByText(/WAV、MP3、FLAC/);
-  expect(screen.getByText(/3–30 秒/)).toBeInTheDocument();
+  await screen.findByText("当前仅支持 WAV · 时长 3–30 秒");
+});
+
+test("shows Chinese error when uploading non-WAV file", async () => {
+  const user = userEvent.setup({ applyAccept: false });
+  mockFetchVoiceStatus.mockResolvedValueOnce(buildStatus());
+
+  const { container } = render(<VoiceBindPanel characterId="char-1" />);
+  await screen.findByText("拖拽或点击上传参考音频");
+
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+  const file = new File([new Uint8Array(100)], "voice.mp3", { type: "audio/mpeg" });
+  await user.upload(input, file);
+
+  await screen.findByText("当前仅支持 WAV 参考音频，请先转换后再上传");
+  expect(mockUploadReferenceAudio).not.toHaveBeenCalled();
 });
 
 test("clicking retry after error resets to unbound", async () => {

@@ -78,6 +78,7 @@ type CharacterItem = {
   name: string;
   createdAt: string;
   fingerprint?: string | null;
+  isVisualTraining?: boolean;
 };
 
 class MockWebSocket {
@@ -116,7 +117,10 @@ class MockWebSocket {
 
 function buildCharactersResponse(items: CharacterItem[]) {
   return {
-    items,
+    items: items.map((item) => ({
+      ...item,
+      isVisualTraining: item.isVisualTraining ?? false,
+    })),
     total: items.length,
   };
 }
@@ -346,6 +350,43 @@ test("renders character cards in a grid when the API returns data", async () => 
   await screen.findByRole("button", { name: T.openChar(T.charName) });
   expect(screen.getByRole("button", { name: T.openChar(T.charName2) })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: T.createNewEntry })).toBeInTheDocument();
+});
+
+test("filters character list when clicking 训练中", async () => {
+  const user = userEvent.setup();
+
+  fetchMock.mockResolvedValueOnce({
+    ok: true,
+    json: async () =>
+      buildCharactersResponse([
+        {
+          id: "char-training",
+          name: "训练角色",
+          createdAt: "2026-03-27T09:00:00Z",
+          fingerprint: null,
+          isVisualTraining: true,
+        },
+        {
+          id: "char-ready",
+          name: "完成角色",
+          createdAt: "2026-03-26T09:00:00Z",
+          fingerprint: null,
+          isVisualTraining: false,
+        },
+      ]),
+  });
+
+  render(<App />);
+
+  await screen.findByRole("button", { name: "打开角色 训练角色" });
+  expect(screen.getByRole("button", { name: "打开角色 完成角色" })).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "训练中" }));
+  expect(screen.getByRole("button", { name: "打开角色 训练角色" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "打开角色 完成角色" })).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "全部" }));
+  expect(screen.getByRole("button", { name: "打开角色 完成角色" })).toBeInTheDocument();
 });
 
 test("creates character from modal and jumps to LLM workspace", async () => {

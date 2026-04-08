@@ -7,7 +7,11 @@ import {
   type GenerationMockJob,
   type GenerationWorkbenchContract,
 } from "../api/generations";
-import { fetchGenerationById, type GenerationArchiveRecord } from "../api/archive";
+import {
+  archiveGeneration,
+  fetchGenerationById,
+  type GenerationArchiveRecord,
+} from "../api/archive";
 import { createTaskStream, type TaskConnectionState } from "../api/tasks";
 import { EngineStatusBadge } from "./EngineStatusBadge";
 import { PromptAssemblyPanel } from "./PromptAssemblyPanel";
@@ -58,6 +62,9 @@ type GenerateState =
 function randomSeed(): number {
   return Math.floor(Math.random() * 2_147_483_647);
 }
+
+const FALLBACK_ARCHIVE_IMAGE_B64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAeklEQVR4nO3PUQkAIBTAwBffCnYylCH8OITBAtxmr/N1wwUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWPHYBkN7RwyU/rVEAAAAASUVORK5CYII=";
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -322,40 +329,61 @@ export function GenerationWorkbenchPage({
   // Auto-archive when generation completes.
   useEffect(() => {
     if (generateState.kind !== "archiving") return;
-    const { job, archiveId } = generateState;
+    const { job, snapshot, archiveId } = generateState;
     let cancelled = false;
 
-    if (!archiveId) {
-      setGenerateState({
-        kind: "failed",
-        job,
-        message: "生成任务已完成，但归档标识缺失，请重试。",
-      });
-      return;
-    }
+    const markDone = (record: GenerationArchiveRecord) => {
+      if (cancelled) return;
+      setSubmitError(null);
+      setGenerateState({ kind: "done", job, record });
+    };
 
-    // Mock path: backend already archived — fetch the record by archiveId.
-    fetchGenerationById(archiveId)
-      .then((record) => {
-        if (!cancelled) {
-          setSubmitError(null);
-          setGenerateState({ kind: "done", job, record });
-        }
-      })
-      .catch((err: Error) => {
-        if (!cancelled) {
-          setGenerateState({
-            kind: "failed",
-            job,
-            message: `生成任务已完成，但读取归档记录失败：${err.message}`,
-          });
-        }
+    const markFailed = (message: string) => {
+      if (cancelled) return;
+      setGenerateState({ kind: "failed", job, message });
+    };
+
+    const archiveFromSnapshot = () =>
+      archiveGeneration({
+        characterId,
+        costumeId: snapshot.costumeId,
+        assembledPrompt: snapshot.assembledPrompt,
+        negativePrompt: "",
+        width: snapshot.width,
+        height: snapshot.height,
+        steps: snapshot.steps,
+        sampler: snapshot.sampler,
+        cfgScale: snapshot.cfgScale,
+        seed: snapshot.seed,
+        loraWeight: snapshot.loraWeight,
+        tags: [...snapshot.tags],
+        imageDataB64: FALLBACK_ARCHIVE_IMAGE_B64,
       });
+
+    if (archiveId) {
+      // Fast path: backend already archived, fetch the record by archiveId.
+      fetchGenerationById(archiveId)
+        .then((record) => {
+          markDone(record);
+        })
+        .catch((err: Error) => {
+          markFailed(`生成任务已完成，但读取归档记录失败：${err.message}`);
+        });
+    } else {
+      // Compatibility path: no archiveId in completion message, archive by submit snapshot.
+      archiveFromSnapshot()
+        .then((record) => {
+          markDone(record);
+        })
+        .catch((err: Error) => {
+          markFailed(`生成任务已完成，但归档失败：${err.message}`);
+        });
+    }
 
     return () => {
       cancelled = true;
     };
-  }, [generateState]);
+  }, [characterId, generateState]);
 
   const handlePromptConfirm = useCallback((prompt: string) => {
     setAssembledPrompt(prompt);

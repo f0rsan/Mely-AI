@@ -89,6 +89,7 @@ def test_list_and_detail_return_expected_shapes(temp_data_root: Path) -> None:
         assert item["name"]
         assert item["createdAt"]
         assert "fingerprint" in item
+        assert isinstance(item["isVisualTraining"], bool)
 
     assert detail_response.status_code == 200
     detail = detail_response.json()

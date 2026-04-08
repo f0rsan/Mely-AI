@@ -27,6 +27,17 @@ class CharacterValidationError(CharacterServiceError):
     """Raised when request data is valid JSON but invalid business input."""
 
 
+VISUAL_TRAINING_ACTIVE_STATUSES = {
+    "pending",
+    "running",
+    "queued",
+    "preparing",
+    "training",
+    "sampling",
+    "validating",
+}
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -290,9 +301,10 @@ def create_character(
 def list_characters(connection: sqlite3.Connection) -> list[CharacterListItemResponse]:
     rows = connection.execute(
         """
-        SELECT id, name, created_at, fingerprint
-        FROM characters
-        ORDER BY created_at DESC, id DESC
+        SELECT c.id, c.name, c.created_at, c.fingerprint, v.training_status
+        FROM characters AS c
+        LEFT JOIN visual_assets AS v ON v.character_id = c.id
+        ORDER BY c.created_at DESC, c.id DESC
         """
     ).fetchall()
 
@@ -302,6 +314,7 @@ def list_characters(connection: sqlite3.Connection) -> list[CharacterListItemRes
             name=row["name"],
             createdAt=row["created_at"],
             fingerprint=row["fingerprint"],
+            isVisualTraining=row["training_status"] in VISUAL_TRAINING_ACTIVE_STATUSES,
         )
         for row in rows
     ]

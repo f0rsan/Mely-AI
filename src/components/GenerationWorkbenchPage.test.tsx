@@ -277,6 +277,58 @@ test("shows 再来一张 button after generation completes and archives", async 
   expect(screen.getByRole("button", { name: "再来一张" })).toBeInTheDocument();
 });
 
+test("uses archiveId fast path when completion message includes archiveId", async () => {
+  const user = userEvent.setup();
+
+  fetchMock.mockImplementation((url: string, opts?: RequestInit) => {
+    if (url.includes("/generations/mock") && opts?.method === "POST") {
+      return Promise.resolve({ ok: true, json: async () => ({ job: buildJob() }) });
+    }
+    if (url.includes("/generations/gen-1") && (!opts?.method || opts.method === "GET")) {
+      return Promise.resolve({ ok: true, json: async () => buildArchiveRecord() });
+    }
+    if (url.includes("/engine/status")) {
+      return Promise.resolve({ ok: true, json: async () => buildEngineStatus("running") });
+    }
+    if (url.includes("/generation-workbench")) {
+      return Promise.resolve({ ok: true, json: async () => buildContract() });
+    }
+    return Promise.resolve({ ok: true, json: async () => buildAssembled() });
+  });
+
+  render(<GenerationWorkbenchPage characterId="char-1" characterName="星野ミカ" />);
+
+  await screen.findByText("基础造型");
+  await user.type(screen.getByPlaceholderText(/在直播封面/), "在咖啡馆");
+  await screen.findByText(/组装结果/);
+  await user.click(screen.getByRole("button", { name: "使用此 Prompt" }));
+
+  const ws = MockWebSocket.instances[0];
+  ws.emitOpen();
+  await user.click(screen.getByRole("button", { name: "开始生成" }));
+
+  ws.emitMessage({
+    event: "task_updated",
+    task: {
+      id: "task-1",
+      name: "gen",
+      status: "completed",
+      progress: 100,
+      message: JSON.stringify({ event: "generation_archived", archiveId: "gen-1" }),
+      error: null,
+      createdAt: "2026-03-31T00:00:00Z",
+      updatedAt: "2026-03-31T00:00:02Z",
+    },
+  });
+
+  await screen.findByText("生成完成，已保存至角色历史");
+  expect(
+    fetchMock.mock.calls.some(
+      ([url, options]) => url.includes("/generations/archive") && (options as RequestInit)?.method === "POST",
+    ),
+  ).toBe(false);
+});
+
 test("archives submitted snapshot even if prompt and params change while running", async () => {
   const user = userEvent.setup();
   const archiveRequests: Record<string, unknown>[] = [];

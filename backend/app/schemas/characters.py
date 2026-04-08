@@ -172,6 +172,7 @@ class CharacterListItemResponse(BaseModel):
     name: str
     created_at: str = Field(alias="createdAt")
     fingerprint: str | None = None
+    is_visual_training: bool = Field(default=False, alias="isVisualTraining")
 
 
 class CharacterListResponse(BaseModel):

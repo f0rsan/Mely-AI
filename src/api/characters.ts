@@ -3,6 +3,7 @@ export type CharacterListItem = {
   name: string;
   createdAt: string;
   fingerprint?: string | null;
+  isVisualTraining: boolean;
 };
 
 export type CharacterListResponse = {
@@ -34,6 +35,33 @@ function isCharacterListItem(value: unknown): value is CharacterListItem {
   }
 
   const candidate = value as Partial<CharacterListItem>;
+  const fingerprint =
+    candidate.fingerprint === undefined ||
+    candidate.fingerprint === null ||
+    typeof candidate.fingerprint === "string";
+
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.name === "string" &&
+    typeof candidate.createdAt === "string" &&
+    fingerprint &&
+    typeof candidate.isVisualTraining === "boolean"
+  );
+}
+
+type CharacterCreateResponse = {
+  id: string;
+  name: string;
+  createdAt: string;
+  fingerprint?: string | null;
+};
+
+function isCharacterCreateResponse(value: unknown): value is CharacterCreateResponse {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const candidate = value as Partial<CharacterCreateResponse>;
   const fingerprint =
     candidate.fingerprint === undefined ||
     candidate.fingerprint === null ||
@@ -108,7 +136,7 @@ export async function createCharacter(name: string): Promise<CharacterListItem> 
     throw new Error(detail ?? "创建角色失败，请重试");
   }
 
-  if (!isCharacterListItem(payload)) {
+  if (!isCharacterCreateResponse(payload)) {
     throw new Error("创建角色失败，请重试");
   }
 
@@ -117,5 +145,6 @@ export async function createCharacter(name: string): Promise<CharacterListItem> 
     name: payload.name,
     createdAt: payload.createdAt,
     fingerprint: payload.fingerprint ?? null,
+    isVisualTraining: false,
   };
 }

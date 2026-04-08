@@ -39,6 +39,7 @@ test("createCharacter calls create endpoint and maps returned detail into list i
     name: "新角色",
     createdAt: "2026-04-07T10:00:00Z",
     fingerprint: null,
+    isVisualTraining: false,
   });
 });
 

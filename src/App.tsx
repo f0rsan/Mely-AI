@@ -1441,9 +1441,11 @@ export default function App() {
       const q = search.trim().toLowerCase();
       items = items.filter((c) => c.name.toLowerCase().includes(q));
     }
-    // "训练中" filter — no loraStatus in CharacterListItem yet, skip for now
+    if (activeFilter === "训练中") {
+      items = items.filter((c) => c.isVisualTraining);
+    }
     return items;
-  }, [viewState, search]);
+  }, [viewState, search, activeFilter]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
