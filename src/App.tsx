@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createCharacter, fetchCharacterList, type CharacterListItem } from "./api/characters";
 import {
@@ -36,11 +36,16 @@ import { CostumeWorkspace } from "./components/CostumeWorkspace";
 import { ExportWorkspace } from "./components/ExportWorkspace";
 import { LLMWorkspace } from "./components/LLMWorkspace";
 import { VisualWorkspace } from "./components/VisualWorkspace";
+import { CoverArt } from "./components/CoverArt";
+import { NavSidebar, type NavPage } from "./components/NavSidebar";
+import { getCharAccent } from "./utils/charAccent";
 import {
   createDatasetFilesFromMockCandidates,
   generateTextToCharacterCandidatesMock,
   type TextToCharacterCandidate,
 } from "./mocks/textToCharacter";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 type ViewState =
   | { kind: "loading" }
@@ -53,14 +58,18 @@ type DatasetPreviewItem = {
   previewUrl: string;
 };
 
-type DetailTab = "dataset" | "textToCharacter" | "dna" | "training" | "generation" | "voice" | "costume" | "export" | "llm" | "visual";
+type DetailTab = "dna" | "visual" | "llm" | "generation" | "voice";
 type LLMInitialSubTab = "chat" | null;
 
 type DnaFormState = Record<DnaFieldKey, string>;
 
 type TextToCharacterStatus = "idle" | "loading" | "success" | "empty" | "error";
 
+// ── Constants ─────────────────────────────────────────────────────────────────
+
 const DNA_FIELD_KEYS: DnaFieldKey[] = ["hairColor", "eyeColor", "skinTone", "bodyType", "style"];
+
+// ── Pure helpers ──────────────────────────────────────────────────────────────
 
 function createEmptyDnaForm(): DnaFormState {
   return {
@@ -87,7 +96,6 @@ function pickDnaValue(fieldKey: DnaFieldKey, detail: CharacterDetail | null): st
   if (detail?.dna === null || detail?.dna === undefined) {
     return "";
   }
-
   const value = detail.dna[fieldKey];
   if (typeof value === "string") {
     return value;
@@ -97,25 +105,17 @@ function pickDnaValue(fieldKey: DnaFieldKey, detail: CharacterDetail | null): st
 
 function buildDnaForm(detail: CharacterDetail | null, suggestions: CharacterDnaSuggestions): DnaFormState {
   const next = createEmptyDnaForm();
-
   for (const key of DNA_FIELD_KEYS) {
     const fromDetail = pickDnaValue(key, detail);
     next[key] = fromDetail || suggestions.fields[key].recommended;
   }
-
   return next;
 }
 
 function resolvePromptToken(field: DnaSuggestionField | undefined, selectedValue: string): string {
   const normalized = selectedValue.trim();
-  if (!normalized) {
-    return "";
-  }
-
-  if (!field) {
-    return normalized;
-  }
-
+  if (!normalized) return "";
+  if (!field) return normalized;
   const matched = field.options.find((option) => option.value === normalized);
   return matched?.prompt ?? normalized;
 }
@@ -132,10 +132,7 @@ function buildDnaPromptPreview(
 
 function formatCreatedAt(value: string): string {
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return "创建时间未知";
-  }
-
+  if (Number.isNaN(parsed.getTime())) return "创建时间未知";
   return parsed.toLocaleDateString("zh-CN", {
     year: "numeric",
     month: "2-digit",
@@ -144,12 +141,8 @@ function formatCreatedAt(value: string): string {
 }
 
 function formatFileSize(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
@@ -180,15 +173,9 @@ function resolveAngleLabel(value: string): string {
 }
 
 function resolveModeLabel(value: string): string {
-  if (value === "light") {
-    return "轻量";
-  }
-  if (value === "standard") {
-    return "标准";
-  }
-  if (value === "fine") {
-    return "精细";
-  }
+  if (value === "light") return "轻量";
+  if (value === "standard") return "标准";
+  if (value === "fine") return "精细";
   return value;
 }
 
@@ -197,27 +184,18 @@ function upsertTask(tasks: TaskSnapshot[], nextTask: TaskSnapshot): TaskSnapshot
   const merged = exists
     ? tasks.map((task) => (task.id === nextTask.id ? nextTask : task))
     : [nextTask, ...tasks];
-
   return [...merged].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 function resolveConnectionLabel(state: TaskConnectionState): string {
-  if (state === "connected") {
-    return "实时推送已连接";
-  }
-  if (state === "connecting") {
-    return "实时推送连接中";
-  }
+  if (state === "connected") return "实时推送已连接";
+  if (state === "connecting") return "实时推送连接中";
   return "实时推送未连接";
 }
 
 function extractDatasetErrorMessage(error: unknown): string {
-  if (error instanceof DatasetApiError) {
-    return error.message;
-  }
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
+  if (error instanceof DatasetApiError) return error.message;
+  if (error instanceof Error && error.message.trim().length > 0) return error.message;
   return "数据集评估失败，请稍后重试。";
 }
 
@@ -225,157 +203,18 @@ function extractDnaErrorMessage(error: unknown): string {
   if (error instanceof CharacterDnaApiError || error instanceof CharacterDetailApiError) {
     return error.message;
   }
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
+  if (error instanceof Error && error.message.trim().length > 0) return error.message;
   return "DNA 加载失败，请稍后重试。";
 }
 
 function extractTextToCharacterErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
+  if (error instanceof Error && error.message.trim().length > 0) return error.message;
   return "候选图生成失败，这是 Mock 通道错误，请稍后重试。";
 }
 
-function CharacterGrid({
-  items,
-  onOpenDetail,
-  onCreate,
-}: {
-  items: CharacterListItem[];
-  onOpenDetail: (character: CharacterListItem) => void;
-  onCreate: () => void;
-}) {
-  return (
-    <div className="character-grid">
-      {items.map((character) => (
-        <button
-          key={character.id}
-          className="character-card"
-          type="button"
-          onClick={() => onOpenDetail(character)}
-          aria-label={`打开角色 ${character.name}`}
-        >
-          <p className="character-name">{character.name}</p>
-          <p className="character-meta">ID: {character.id}</p>
-          <p className="character-meta">创建于 {formatCreatedAt(character.createdAt)}</p>
-          <p className="character-link">进入数据集导入与评估</p>
-        </button>
-      ))}
-      <button
-        className="create-entry-card"
-        type="button"
-        aria-label="创建新角色入口"
-        onClick={onCreate}
-      >
-        <span className="create-plus" aria-hidden="true">
-          +
-        </span>
-        <span className="create-title">创建新角色</span>
-        <span className="create-subtitle">上传参考图或文字描述</span>
-      </button>
-    </div>
-  );
-}
+// ── Sub-components ────────────────────────────────────────────────────────────
 
-function EmptyState({ onCreate }: { onCreate: () => void }) {
-  return (
-    <section className="empty-state" aria-live="polite">
-      <div className="empty-icon" aria-hidden="true">
-        ✨
-      </div>
-      <h2>还没有角色</h2>
-      <p>创建你的第一个角色，后续就能在同一角色档案下持续创作。</p>
-      <button className="primary-button" type="button" onClick={onCreate}>
-        创建你的第一个角色
-      </button>
-    </section>
-  );
-}
-
-function TaskPanel({
-  canRunMockTask,
-  creatingMode,
-  taskActionError,
-  taskConnection,
-  tasks,
-  onStartMockTask,
-}: {
-  canRunMockTask: boolean;
-  creatingMode: "success" | "failure" | null;
-  taskActionError: string | null;
-  taskConnection: TaskConnectionState;
-  tasks: TaskSnapshot[];
-  onStartMockTask: (mode: "success" | "failure") => void;
-}) {
-  const connectionLabel = useMemo(() => resolveConnectionLabel(taskConnection), [taskConnection]);
-
-  return (
-    <section className="task-panel" aria-labelledby="task-title">
-      <div className="task-panel-top">
-        <h2 id="task-title">任务队列验证</h2>
-        <span className={`task-connection task-connection-${taskConnection}`}>{connectionLabel}</span>
-      </div>
-      <p className="task-lead">用于验证任务状态流转、进度推送和失败处理，后续下载器可直接复用。</p>
-      <div className="task-actions">
-        <button
-          className="primary-button"
-          type="button"
-          disabled={!canRunMockTask || creatingMode !== null}
-          onClick={() => onStartMockTask("success")}
-        >
-          启动成功模拟任务
-        </button>
-        <button
-          className="secondary-button"
-          type="button"
-          disabled={!canRunMockTask || creatingMode !== null}
-          onClick={() => onStartMockTask("failure")}
-        >
-          启动失败模拟任务
-        </button>
-      </div>
-      {taskActionError ? <p className="task-action-error">{taskActionError}</p> : null}
-      <TaskProgressList tasks={tasks} />
-    </section>
-  );
-}
-
-type DatasetWorkspaceProps = {
-  character: CharacterListItem;
-  activeTab: DetailTab;
-  onSwitchTab: (tab: DetailTab) => void;
-  previews: DatasetPreviewItem[];
-  report: DatasetReport | null;
-  loadingReport: boolean;
-  importing: boolean;
-  message: string | null;
-  dnaSuggestions: CharacterDnaSuggestions | null;
-  dnaLoading: boolean;
-  dnaSaving: boolean;
-  dnaMessage: string | null;
-  dnaForm: DnaFormState;
-  dnaPromptPreview: string;
-  textPrompt: string;
-  textStatus: TextToCharacterStatus;
-  textStatusMessage: string | null;
-  textCandidates: TextToCharacterCandidate[];
-  textSelectedCandidateIds: string[];
-  textAddingToDataset: boolean;
-  onDnaFieldChange: (field: DnaFieldKey, value: string) => void;
-  onApplyDnaSuggestions: () => void;
-  onSaveDna: () => void;
-  onTextPromptChange: (value: string) => void;
-  onGenerateTextCandidates: () => void;
-  onToggleTextCandidate: (candidateId: string) => void;
-  onAddTextCandidatesToDataset: () => void;
-  onSelectFiles: (files: FileList | null) => void;
-  onStartImport: () => void;
-  onBack: () => void;
-  llmInitialSubTab: LLMInitialSubTab;
-};
-
+// DNA workspace (unchanged from original)
 type DnaWorkspaceProps = {
   suggestions: CharacterDnaSuggestions | null;
   loading: boolean;
@@ -418,10 +257,10 @@ function DnaWorkspace({
       {showForm ? (
         <>
           <div className="dna-actions">
-            <button className="secondary-button" type="button" onClick={onApplySuggestions} disabled={saving}>
+            <button className="btn btn-secondary" type="button" onClick={onApplySuggestions} disabled={saving}>
               使用建议值
             </button>
-            <button className="primary-button" type="button" onClick={onSave} disabled={saving}>
+            <button className="btn btn-primary" type="button" onClick={onSave} disabled={saving}>
               {saving ? "保存中..." : "保存 DNA 配置"}
             </button>
           </div>
@@ -460,6 +299,7 @@ function DnaWorkspace({
   );
 }
 
+// Text-to-character workspace (unchanged from original)
 type TextToCharacterWorkspaceProps = {
   prompt: string;
   status: TextToCharacterStatus;
@@ -510,7 +350,7 @@ function TextToCharacterWorkspace({
 
       <div className="text-to-character-actions">
         <button
-          className="primary-button"
+          className="btn btn-primary"
           type="button"
           onClick={onGenerate}
           disabled={status === "loading" || addingToDataset}
@@ -541,7 +381,7 @@ function TextToCharacterWorkspace({
       ) : null}
 
       {!hasCandidates && status === "idle" ? (
-        <p className="dataset-empty-note">还没有候选图，先输入描述并点击“生成候选图（Mock）”。</p>
+        <p className="dataset-empty-note">还没有候选图，先输入描述并点击"生成候选图（Mock）"。</p>
       ) : null}
 
       {hasCandidates ? (
@@ -562,7 +402,7 @@ function TextToCharacterWorkspace({
                       <span>mock 合同版本：{candidate.contractVersion}</span>
                     </div>
                     <button
-                      className="secondary-button"
+                      className="btn btn-secondary"
                       type="button"
                       aria-pressed={selected}
                       aria-label={`选择候选图 ${index + 1}`}
@@ -579,10 +419,10 @@ function TextToCharacterWorkspace({
 
           <div className="text-to-character-footer">
             <p>
-              已选择 <strong>{selectedCount}</strong> 张候选图。确认后会回到“数据集评估”并复用 M1C 导入流程。
+              已选择 <strong>{selectedCount}</strong> 张候选图。确认后会回到"数据集评估"并复用 M1C 导入流程。
             </p>
             <button
-              className="primary-button"
+              className="btn btn-primary"
               type="button"
               onClick={onAddToDataset}
               disabled={selectedCount === 0 || addingToDataset}
@@ -596,10 +436,7 @@ function TextToCharacterWorkspace({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Voice sub-tab workspace
-// ---------------------------------------------------------------------------
-
+// Voice workspace with sub-tabs
 type VoiceSubTab = "bind" | "generate" | "history";
 
 function VoiceWorkspace({ characterId }: { characterId: string }) {
@@ -636,21 +473,251 @@ function VoiceWorkspace({ characterId }: { characterId: string }) {
   );
 }
 
-function DatasetWorkspace({
-  character,
-  activeTab,
-  onSwitchTab,
+// Voice + Costume + Export combined tab
+function VoiceAndExportTab({ characterId }: { characterId: string }) {
+  const [subTab, setSubTab] = useState<"voice" | "costume" | "export">("voice");
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
+        {(["voice", "costume", "export"] as const).map((t) => (
+          <button
+            key={t}
+            className={`filter-chip ${subTab === t ? "active" : ""}`}
+            onClick={() => setSubTab(t)}
+            type="button"
+          >
+            {t === "voice" ? "声音绑定" : t === "costume" ? "造型管理" : "导出设定书"}
+          </button>
+        ))}
+      </div>
+      {subTab === "voice" && <VoiceWorkspace characterId={characterId} />}
+      {subTab === "costume" && <CostumeWorkspace characterId={characterId} />}
+      {subTab === "export" && <ExportWorkspace characterId={characterId} />}
+    </div>
+  );
+}
+
+// Dataset upload section used inside DnaTabContent
+type DatasetUploadSectionProps = {
+  previews: DatasetPreviewItem[];
+  report: DatasetReport | null;
+  loadingReport: boolean;
+  importing: boolean;
+  message: string | null;
+  onSelectFiles: (files: FileList | null) => void;
+  onStartImport: () => void;
+};
+
+function DatasetUploadSection({
   previews,
   report,
   loadingReport,
   importing,
   message,
-  dnaSuggestions,
+  onSelectFiles,
+  onStartImport,
+}: DatasetUploadSectionProps) {
+  return (
+    <>
+      <p className="detail-placeholder">
+        批量导入训练图片后，系统会生成质量评分、角度覆盖分析和改进建议，可直接供下游模块复用。
+      </p>
+
+      <div className="dataset-upload-panel">
+        <label className="btn btn-secondary" htmlFor="dataset-file-input">
+          选择训练图片
+        </label>
+        <input
+          id="dataset-file-input"
+          className="dataset-file-input"
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          multiple
+          aria-label="选择训练图片"
+          onChange={(event) => onSelectFiles(event.target.files)}
+        />
+        <button
+          className="btn btn-primary"
+          type="button"
+          onClick={onStartImport}
+          disabled={previews.length === 0 || importing}
+        >
+          {importing ? "评估中..." : "开始评估"}
+        </button>
+      </div>
+
+      <p className="dataset-upload-meta">
+        {previews.length > 0
+          ? `已选择 ${previews.length} 张图片，支持批量导入。`
+          : "支持 PNG / JPG / WebP，建议导入清晰的多角度图片。"}
+      </p>
+
+      {loadingReport ? (
+        <div className="status-block">
+          <span className="status-chip">正在加载历史评估结果...</span>
+        </div>
+      ) : null}
+
+      {message ? <p className="dataset-message">{message}</p> : null}
+
+      {previews.length > 0 ? (
+        <section className="dataset-preview-section" aria-label="图片预览网格">
+          <h2>图片预览</h2>
+          <div className="dataset-preview-grid">
+            {previews.map((preview) => (
+              <article key={preview.previewUrl} className="dataset-preview-card">
+                <img src={preview.previewUrl} alt={`预览 ${preview.name}`} />
+                <div className="dataset-preview-meta">
+                  <p>{preview.name}</p>
+                  <span>{preview.sizeLabel}</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {report ? (
+        <section className="dataset-report" aria-label="数据集评估结果">
+          <h2>数据集质量评分</h2>
+          <div className="dataset-summary-grid">
+            <article className="dataset-summary-card">
+              <span>质量分</span>
+              <strong>{report.qualityScore} 分</strong>
+            </article>
+            <article className="dataset-summary-card">
+              <span>图片总数</span>
+              <strong>{report.totalImages} 张</strong>
+            </article>
+            <article className="dataset-summary-card">
+              <span>合格图片</span>
+              <strong>{report.qualifiedImages} 张</strong>
+            </article>
+            <article className="dataset-summary-card">
+              <span>问题图片</span>
+              <strong>{report.problemImages} 张</strong>
+            </article>
+          </div>
+
+          <div className="dataset-section-block">
+            <h3>角度覆盖度</h3>
+            <ul className="dataset-angle-list">
+              {Object.entries(report.angleDistribution)
+                .filter(([, count]) => count > 0)
+                .map(([bucket, count]) => (
+                  <li key={bucket}>
+                    <span>{resolveAngleLabel(bucket)}</span>
+                    <strong>{count} 张</strong>
+                  </li>
+                ))}
+            </ul>
+          </div>
+
+          <div className="dataset-section-block">
+            <h3>问题项识别</h3>
+            {report.problemItems.length > 0 ? (
+              <ul className="dataset-problem-list">
+                {report.problemItems.map((item) => (
+                  <li key={item.imageId}>
+                    <p>
+                      {item.name}（{resolveAngleLabel(item.angleBucket)}）
+                    </p>
+                    <span>{item.issues.join("；")}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="dataset-empty-note">未检测到问题图片。</p>
+            )}
+          </div>
+
+          <div className="dataset-section-block">
+            <h3>改进建议</h3>
+            <ul className="dataset-tip-list">
+              {report.recommendations.map((tip, index) => (
+                <li key={`${tip}-${index}`}>{tip}</li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="dataset-section-block">
+            <h3>推荐训练模式</h3>
+            <p className="dataset-mode-line">
+              推荐使用 <strong>{resolveModeLabel(report.recommendedTrainingMode.mode)}</strong> 模式
+              （{report.recommendedTrainingMode.suggestedSteps} steps / rank{" "}
+              {report.recommendedTrainingMode.suggestedRank}）
+            </p>
+            <p className="dataset-mode-reason">{report.recommendedTrainingMode.reason}</p>
+          </div>
+
+          <div className="dataset-section-block">
+            <h3>下游复用元信息</h3>
+            <pre className="dataset-json">
+              {JSON.stringify(
+                {
+                  totalImages: report.totalImages,
+                  qualifiedImages: report.qualifiedImages,
+                  problemImages: report.problemImages,
+                  angleDistribution: report.angleDistribution,
+                  problemItems: report.problemItems,
+                  recommendedTrainingMode: report.recommendedTrainingMode,
+                },
+                null,
+                2,
+              )}
+            </pre>
+          </div>
+        </section>
+      ) : (
+        <p className="dataset-empty-note">还没有导入训练图片，先选择图片后点击"开始评估"。</p>
+      )}
+    </>
+  );
+}
+
+// DNA tab — merges DNA form + dataset evaluation + text-to-character
+type DnaTabContentProps = {
+  suggestions: CharacterDnaSuggestions | null;
+  dnaLoading: boolean;
+  dnaSaving: boolean;
+  dnaMessage: string | null;
+  dnaForm: DnaFormState;
+  dnaPromptPreview: string;
+  previews: DatasetPreviewItem[];
+  report: DatasetReport | null;
+  loadingReport: boolean;
+  importing: boolean;
+  datasetMessage: string | null;
+  textPrompt: string;
+  textStatus: TextToCharacterStatus;
+  textStatusMessage: string | null;
+  textCandidates: TextToCharacterCandidate[];
+  textSelectedCandidateIds: string[];
+  textAddingToDataset: boolean;
+  onDnaFieldChange: (field: DnaFieldKey, value: string) => void;
+  onApplyDnaSuggestions: () => void;
+  onSaveDna: () => void;
+  onSelectFiles: (files: FileList | null) => void;
+  onStartImport: () => void;
+  onTextPromptChange: (value: string) => void;
+  onGenerateTextCandidates: () => void;
+  onToggleTextCandidate: (candidateId: string) => void;
+  onAddTextCandidatesToDataset: () => void;
+};
+
+function DnaTabContent({
+  suggestions,
   dnaLoading,
   dnaSaving,
   dnaMessage,
   dnaForm,
   dnaPromptPreview,
+  previews,
+  report,
+  loadingReport,
+  importing,
+  datasetMessage,
   textPrompt,
   textStatus,
   textStatusMessage,
@@ -660,299 +727,67 @@ function DatasetWorkspace({
   onDnaFieldChange,
   onApplyDnaSuggestions,
   onSaveDna,
+  onSelectFiles,
+  onStartImport,
   onTextPromptChange,
   onGenerateTextCandidates,
   onToggleTextCandidate,
   onAddTextCandidatesToDataset,
-  onSelectFiles,
-  onStartImport,
-  onBack,
-  llmInitialSubTab,
-}: DatasetWorkspaceProps) {
-  const title =
-    activeTab === "dataset"
-      ? "数据集导入与评估"
-      : activeTab === "textToCharacter"
-        ? "文字创角（Mock）"
-      : activeTab === "dna"
-        ? "角色 DNA 配置"
-      : activeTab === "generation"
-        ? "生成工作台"
-      : activeTab === "voice"
-        ? "声音绑定"
-      : activeTab === "costume"
-        ? "造型版本树"
-      : activeTab === "export"
-        ? "导出设定书"
-      : activeTab === "llm"
-        ? "LLM 工作台"
-      : activeTab === "visual"
-        ? "视觉工作台"
-        : "训练进度与验证";
-
+}: DnaTabContentProps) {
   return (
-    <section className="library-card detail-shell dataset-shell" aria-labelledby="detail-title">
-      <button className="back-button" type="button" onClick={onBack}>
-        返回角色库
-      </button>
-      <h1 id="detail-title">{title}</h1>
-      <p className="lead">
-        {character.name}
-        <span className="detail-note">（ID: {character.id}）</span>
-      </p>
-      <div className="detail-tab-row" role="tablist" aria-label="角色详情标签">
-        <button
-          className={`detail-tab-button ${activeTab === "dataset" ? "detail-tab-active" : ""}`}
-          type="button"
-          onClick={() => onSwitchTab("dataset")}
+    <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+      {/* DNA form */}
+      <DnaWorkspace
+        suggestions={suggestions}
+        loading={dnaLoading}
+        saving={dnaSaving}
+        message={dnaMessage}
+        form={dnaForm}
+        promptPreview={dnaPromptPreview}
+        onFieldChange={onDnaFieldChange}
+        onApplySuggestions={onApplyDnaSuggestions}
+        onSave={onSaveDna}
+      />
+
+      {/* Dataset section */}
+      <div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 16,
+            paddingTop: 16,
+            borderTop: "1px solid var(--border-subtle)",
+          }}
         >
-          数据集评估
-        </button>
-        <button
-          className={`detail-tab-button ${activeTab === "textToCharacter" ? "detail-tab-active" : ""}`}
-          type="button"
-          onClick={() => onSwitchTab("textToCharacter")}
-        >
-          文字创角（Mock）
-        </button>
-        <button
-          className={`detail-tab-button ${activeTab === "dna" ? "detail-tab-active" : ""}`}
-          type="button"
-          onClick={() => onSwitchTab("dna")}
-        >
-          角色 DNA
-        </button>
-        <button
-          className={`detail-tab-button ${activeTab === "training" ? "detail-tab-active" : ""}`}
-          type="button"
-          onClick={() => onSwitchTab("training")}
-        >
-          训练进度与验证
-        </button>
-        <button
-          className={`detail-tab-button ${activeTab === "generation" ? "detail-tab-active" : ""}`}
-          type="button"
-          onClick={() => onSwitchTab("generation")}
-        >
-          生成工作台
-        </button>
-        <button
-          className={`detail-tab-button ${activeTab === "voice" ? "detail-tab-active" : ""}`}
-          type="button"
-          onClick={() => onSwitchTab("voice")}
-        >
-          声音绑定
-        </button>
-        <button
-          className={`detail-tab-button ${activeTab === "costume" ? "detail-tab-active" : ""}`}
-          type="button"
-          onClick={() => onSwitchTab("costume")}
-        >
-          造型管理
-        </button>
-        <button
-          className={`detail-tab-button ${activeTab === "export" ? "detail-tab-active" : ""}`}
-          type="button"
-          onClick={() => onSwitchTab("export")}
-        >
-          导出设定书
-        </button>
-        <button
-          className={`detail-tab-button ${activeTab === "llm" ? "detail-tab-active" : ""}`}
-          type="button"
-          onClick={() => onSwitchTab("llm")}
-        >
-          LLM 工作台
-          <span
-            aria-hidden="true"
-            style={{
-              display: "inline-block",
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: "#6366f1",
-              marginLeft: 5,
-              verticalAlign: "middle",
-            }}
-          />
-        </button>
-        <button
-          className={`detail-tab-button ${activeTab === "visual" ? "detail-tab-active" : ""}`}
-          type="button"
-          onClick={() => onSwitchTab("visual")}
-        >
-          视觉工作台
-          <span
-            aria-hidden="true"
-            style={{
-              display: "inline-block",
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: "#10b981",
-              marginLeft: 5,
-              verticalAlign: "middle",
-            }}
-          />
-        </button>
+          <span className="section-label">数据来源 · 训练图片</span>
+        </div>
+        <DatasetUploadSection
+          previews={previews}
+          report={report}
+          loadingReport={loadingReport}
+          importing={importing}
+          message={datasetMessage}
+          onSelectFiles={onSelectFiles}
+          onStartImport={onStartImport}
+        />
       </div>
 
-      {activeTab === "dataset" ? (
-        <>
-          <p className="detail-placeholder">
-            批量导入训练图片后，系统会生成质量评分、角度覆盖分析和改进建议，可直接供下游模块复用。
-          </p>
-
-          <div className="dataset-upload-panel">
-            <label className="secondary-button" htmlFor="dataset-file-input">
-              选择训练图片
-            </label>
-            <input
-              id="dataset-file-input"
-              className="dataset-file-input"
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              multiple
-              aria-label="选择训练图片"
-              onChange={(event) => onSelectFiles(event.target.files)}
-            />
-            <button
-              className="primary-button"
-              type="button"
-              onClick={onStartImport}
-              disabled={previews.length === 0 || importing}
-            >
-              {importing ? "评估中..." : "开始评估"}
-            </button>
-          </div>
-
-          <p className="dataset-upload-meta">
-            {previews.length > 0
-              ? `已选择 ${previews.length} 张图片，支持批量导入。`
-              : "支持 PNG / JPG / WebP，建议导入清晰的多角度图片。"}
-          </p>
-
-          {loadingReport ? (
-            <div className="status-block">
-              <span className="status-chip">正在加载历史评估结果...</span>
-            </div>
-          ) : null}
-
-          {message ? <p className="dataset-message">{message}</p> : null}
-
-          {previews.length > 0 ? (
-            <section className="dataset-preview-section" aria-label="图片预览网格">
-              <h2>图片预览</h2>
-              <div className="dataset-preview-grid">
-                {previews.map((preview) => (
-                  <article key={preview.previewUrl} className="dataset-preview-card">
-                    <img src={preview.previewUrl} alt={`预览 ${preview.name}`} />
-                    <div className="dataset-preview-meta">
-                      <p>{preview.name}</p>
-                      <span>{preview.sizeLabel}</span>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
-          ) : null}
-
-          {report ? (
-            <section className="dataset-report" aria-label="数据集评估结果">
-              <h2>数据集质量评分</h2>
-              <div className="dataset-summary-grid">
-                <article className="dataset-summary-card">
-                  <span>质量分</span>
-                  <strong>{report.qualityScore} 分</strong>
-                </article>
-                <article className="dataset-summary-card">
-                  <span>图片总数</span>
-                  <strong>{report.totalImages} 张</strong>
-                </article>
-                <article className="dataset-summary-card">
-                  <span>合格图片</span>
-                  <strong>{report.qualifiedImages} 张</strong>
-                </article>
-                <article className="dataset-summary-card">
-                  <span>问题图片</span>
-                  <strong>{report.problemImages} 张</strong>
-                </article>
-              </div>
-
-              <div className="dataset-section-block">
-                <h3>角度覆盖度</h3>
-                <ul className="dataset-angle-list">
-                  {Object.entries(report.angleDistribution)
-                    .filter(([, count]) => count > 0)
-                    .map(([bucket, count]) => (
-                      <li key={bucket}>
-                        <span>{resolveAngleLabel(bucket)}</span>
-                        <strong>{count} 张</strong>
-                      </li>
-                    ))}
-                </ul>
-              </div>
-
-              <div className="dataset-section-block">
-                <h3>问题项识别</h3>
-                {report.problemItems.length > 0 ? (
-                  <ul className="dataset-problem-list">
-                    {report.problemItems.map((item) => (
-                      <li key={item.imageId}>
-                        <p>
-                          {item.name}（{resolveAngleLabel(item.angleBucket)}）
-                        </p>
-                        <span>{item.issues.join("；")}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="dataset-empty-note">未检测到问题图片。</p>
-                )}
-              </div>
-
-              <div className="dataset-section-block">
-                <h3>改进建议</h3>
-                <ul className="dataset-tip-list">
-                  {report.recommendations.map((tip, index) => (
-                    <li key={`${tip}-${index}`}>{tip}</li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="dataset-section-block">
-                <h3>推荐训练模式</h3>
-                <p className="dataset-mode-line">
-                  推荐使用 <strong>{resolveModeLabel(report.recommendedTrainingMode.mode)}</strong> 模式
-                  （{report.recommendedTrainingMode.suggestedSteps} steps / rank{" "}
-                  {report.recommendedTrainingMode.suggestedRank}）
-                </p>
-                <p className="dataset-mode-reason">{report.recommendedTrainingMode.reason}</p>
-              </div>
-
-              <div className="dataset-section-block">
-                <h3>下游复用元信息</h3>
-                <pre className="dataset-json">
-                  {JSON.stringify(
-                    {
-                      totalImages: report.totalImages,
-                      qualifiedImages: report.qualifiedImages,
-                      problemImages: report.problemImages,
-                      angleDistribution: report.angleDistribution,
-                      problemItems: report.problemItems,
-                      recommendedTrainingMode: report.recommendedTrainingMode,
-                    },
-                    null,
-                    2,
-                  )}
-                </pre>
-              </div>
-            </section>
-          ) : (
-            <p className="dataset-empty-note">还没有导入训练图片，先选择图片后点击“开始评估”。</p>
-          )}
-        </>
-      ) : activeTab === "textToCharacter" ? (
+      {/* Text-to-character section */}
+      <div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 16,
+            paddingTop: 16,
+            borderTop: "1px solid var(--border-subtle)",
+          }}
+        >
+          <span className="section-label">数据来源 · 文字创角</span>
+        </div>
         <TextToCharacterWorkspace
           prompt={textPrompt}
           status={textStatus}
@@ -965,52 +800,200 @@ function DatasetWorkspace({
           onToggleCandidate={onToggleTextCandidate}
           onAddToDataset={onAddTextCandidatesToDataset}
         />
-      ) : activeTab === "generation" ? (
-        <GenerationWorkbenchPage
-          characterId={character.id}
-          characterName={character.name}
-        />
-      ) : activeTab === "voice" ? (
-        <VoiceWorkspace characterId={character.id} />
-      ) : activeTab === "costume" ? (
-        <CostumeWorkspace characterId={character.id} />
-      ) : activeTab === "export" ? (
-        <ExportWorkspace characterId={character.id} />
-      ) : activeTab === "llm" ? (
-        <LLMWorkspace
-          characterId={character.id}
-          characterName={character.name}
-          initialSubTab={llmInitialSubTab ?? undefined}
-        />
-      ) : activeTab === "visual" ? (
-        <VisualWorkspace characterId={character.id} />
-      ) : (
-        <>
-          {activeTab === "dna" ? (
-            <DnaWorkspace
-              suggestions={dnaSuggestions}
-              loading={dnaLoading}
-              saving={dnaSaving}
-              message={dnaMessage}
-              form={dnaForm}
-              promptPreview={dnaPromptPreview}
-              onFieldChange={onDnaFieldChange}
-              onApplySuggestions={onApplyDnaSuggestions}
-              onSave={onSaveDna}
-            />
-          ) : (
-            <TrainingProgressPanel
-              character={character}
-              onOpenDataset={() => onSwitchTab("dataset")}
-            />
-          )}
-        </>
-      )}
+      </div>
+    </div>
+  );
+}
+
+// Task panel — kept for state compatibility but not rendered in home page
+// Intentionally unused in main render; state/handlers are still wired
+function TaskPanel({
+  canRunMockTask,
+  creatingMode,
+  taskActionError,
+  taskConnection,
+  tasks,
+  onStartMockTask,
+}: {
+  canRunMockTask: boolean;
+  creatingMode: "success" | "failure" | null;
+  taskActionError: string | null;
+  taskConnection: TaskConnectionState;
+  tasks: TaskSnapshot[];
+  onStartMockTask: (mode: "success" | "failure") => void;
+}) {
+  const connectionLabel = useMemo(() => resolveConnectionLabel(taskConnection), [taskConnection]);
+
+  return (
+    <section className="task-panel" aria-labelledby="task-title">
+      <div className="task-panel-top">
+        <h2 id="task-title">任务队列验证</h2>
+        <span className={`task-connection task-connection-${taskConnection}`}>{connectionLabel}</span>
+      </div>
+      <p className="task-lead">用于验证任务状态流转、进度推送和失败处理，后续下载器可直接复用。</p>
+      <div className="task-actions">
+        <button
+          className="btn btn-primary"
+          type="button"
+          disabled={!canRunMockTask || creatingMode !== null}
+          onClick={() => onStartMockTask("success")}
+        >
+          启动成功模拟任务
+        </button>
+        <button
+          className="btn btn-secondary"
+          type="button"
+          disabled={!canRunMockTask || creatingMode !== null}
+          onClick={() => onStartMockTask("failure")}
+        >
+          启动失败模拟任务
+        </button>
+      </div>
+      {taskActionError ? <p className="task-action-error">{taskActionError}</p> : null}
+      <TaskProgressList tasks={tasks} />
     </section>
   );
 }
 
+// Character grid with new design classes
+function CharacterGrid({
+  items,
+  onOpenDetail,
+  onCreate,
+}: {
+  items: CharacterListItem[];
+  onOpenDetail: (character: CharacterListItem) => void;
+  onCreate: () => void;
+}) {
+  return (
+    <div className="character-grid">
+      {items.map((character, idx) => (
+        <button
+          key={character.id}
+          className="character-card"
+          style={{
+            "--char-accent": getCharAccent(character.id),
+            animation: `cardIn 0.6s ${idx * 0.07}s both cubic-bezier(0.16,1,0.3,1)`,
+          } as React.CSSProperties}
+          onClick={() => onOpenDetail(character)}
+          type="button"
+          aria-label={`打开角色 ${character.name}`}
+        >
+          {/* Cover art placeholder */}
+          <CoverArt accent={getCharAccent(character.id)} size="full" />
+
+          <div className="char-body">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <div className="char-name">{character.name}</div>
+                <div className="char-name-en">ID: {character.id.slice(0, 8)}</div>
+              </div>
+            </div>
+            <div className="char-footer">
+              <span className="char-time">
+                {/* Clock icon */}
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                  <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" strokeWidth="1" />
+                  <path d="M5.5 3v2.5l1.8 1.2" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                {formatCreatedAt(character.createdAt)}
+              </span>
+              <span className="char-open-hint">
+                打开
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path d="M4.5 2.5l4 3.5-4 3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
+            </div>
+          </div>
+        </button>
+      ))}
+
+      {/* Create new character card */}
+      <button className="create-card" type="button" onClick={onCreate} aria-label="创建新角色入口">
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: 30 }}>
+          <div className="create-plus-icon">
+            <svg width="18" height="18" viewBox="0 0 14 14" fill="none">
+              <path d="M7 3v8M3 7h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div className="create-label">创建新角色</div>
+            <div className="create-sub">上传参考图或文字描述</div>
+          </div>
+        </div>
+      </button>
+    </div>
+  );
+}
+
+// Empty state with new classes
+function EmptyState({ onCreate }: { onCreate: () => void }) {
+  return (
+    <section className="empty-state" aria-live="polite">
+      <div className="empty-icon" aria-hidden="true">
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+          <path d="M16 6l2.5 7.5L26 16l-7.5 2.5L16 26l-2.5-7.5L6 16l7.5-2.5L16 6z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+        </svg>
+      </div>
+      <h2>还没有角色</h2>
+      <p>创建你的第一个角色，后续就能在同一角色档案下持续创作。</p>
+      <button className="btn btn-primary" type="button" onClick={onCreate}>
+        创建你的第一个角色
+      </button>
+    </section>
+  );
+}
+
+// ── Tab icons for detail sidebar ──────────────────────────────────────────────
+
+function BoltIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <path d="M8 1.5L4 8h3.5L7 12.5 10.5 5.5H7L8 1.5z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function DnaIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <path d="M5 1.5v11M9 1.5v11M5 4.5h4M5 7h4M5 9.5h4" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ImageIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <rect x="1.5" y="1.5" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="1.1" />
+      <circle cx="5" cy="5.5" r="1" stroke="currentColor" strokeWidth="0.9" />
+      <path d="M1.5 10l3.5-3.5 2.5 2.5 2.5-3.5 2 2.5" stroke="currentColor" strokeWidth="0.9" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function GenerateIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <rect x="1.5" y="1.5" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="1.1" />
+      <path d="M5 5l2.5 2.5L10 5M5 7.5l2.5 2.5L10 7.5" stroke="currentColor" strokeWidth="0.9" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function VoiceIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <path d="M3.5 5.5v3M6 3.5v7M8.5 5v4M11 4v6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
+
 export default function App() {
+  // ── State — preserve all original state variables ──
   const [viewState, setViewState] = useState<ViewState>({ kind: "loading" });
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterListItem | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -1027,7 +1010,7 @@ export default function App() {
   const [datasetLoadingReport, setDatasetLoadingReport] = useState(false);
   const [datasetImporting, setDatasetImporting] = useState(false);
   const [datasetMessage, setDatasetMessage] = useState<string | null>(null);
-  const [detailTab, setDetailTab] = useState<DetailTab>("dataset");
+  const [detailTab, setDetailTab] = useState<DetailTab>("llm");
   const [dnaSuggestions, setDnaSuggestions] = useState<CharacterDnaSuggestions | null>(null);
   const [dnaLoading, setDnaLoading] = useState(false);
   const [dnaSaving, setDnaSaving] = useState(false);
@@ -1042,15 +1025,23 @@ export default function App() {
   const [textAddingToDataset, setTextAddingToDataset] = useState(false);
   const [llmInitialSubTab, setLlmInitialSubTab] = useState<LLMInitialSubTab>(null);
 
+  // New state for home page UI
+  const [search, setSearch] = useState("");
+  const [activeFilter, setActiveFilter] = useState("全部");
+
+  // Ref for injecting --char-accent on detail page
+  const detailRef = useRef<HTMLDivElement>(null);
+
   const canRunMockTask = viewState.kind === "ready";
   const dnaPromptPreview = useMemo(
     () => buildDnaPromptPreview(dnaForm, dnaSuggestions),
     [dnaForm, dnaSuggestions],
   );
 
+  // ── Callbacks — all original logic preserved ───────────────────────────────
+
   const loadCharacters = useCallback(async () => {
     setViewState({ kind: "loading" });
-
     try {
       const data = await fetchCharacterList();
       setViewState({ kind: "ready", items: data.items });
@@ -1068,7 +1059,6 @@ export default function App() {
   const startMockTask = useCallback(async (mode: "success" | "failure") => {
     setTaskActionError(null);
     setCreatingMode(mode);
-
     try {
       const created = await createMockTask(mode);
       setTasks((current) => upsertTask(current, created));
@@ -1098,7 +1088,7 @@ export default function App() {
 
   const handleBackToLibrary = useCallback(() => {
     setSelectedCharacter(null);
-    setDetailTab("dataset");
+    setDetailTab("llm");
     setLlmInitialSubTab(null);
     setDatasetMessage(null);
     setDatasetReport(null);
@@ -1115,7 +1105,7 @@ export default function App() {
 
   const handleOpenCharacter = useCallback((
     character: CharacterListItem,
-    tab: DetailTab = "dataset",
+    tab: DetailTab = "llm",
     initialSubTab: LLMInitialSubTab = null,
   ) => {
     setSelectedCharacter(character);
@@ -1132,9 +1122,7 @@ export default function App() {
   }, [resetTextToCharacterState]);
 
   const handleConfirmCreate = useCallback(async () => {
-    if (createModalBusy) {
-      return;
-    }
+    if (createModalBusy) return;
 
     const normalizedName = createModalName.trim();
     if (normalizedName.length === 0) {
@@ -1147,9 +1135,7 @@ export default function App() {
     try {
       const created = await createCharacter(normalizedName);
       setViewState((current) => {
-        if (current.kind !== "ready") {
-          return current;
-        }
+        if (current.kind !== "ready") return current;
         return {
           kind: "ready",
           items: [created, ...current.items.filter((item) => item.id !== created.id)],
@@ -1174,9 +1160,7 @@ export default function App() {
       setDatasetMessage(null);
       clearDatasetSelection();
 
-      if (files === null || files.length === 0) {
-        return;
-      }
+      if (files === null || files.length === 0) return;
 
       const nextFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
       if (nextFiles.length === 0) {
@@ -1197,9 +1181,7 @@ export default function App() {
   );
 
   const handleStartDatasetImport = useCallback(async () => {
-    if (selectedCharacter === null || datasetFiles.length === 0) {
-      return;
-    }
+    if (selectedCharacter === null || datasetFiles.length === 0) return;
 
     setDatasetImporting(true);
     setDatasetMessage(null);
@@ -1216,18 +1198,12 @@ export default function App() {
   }, [datasetFiles, selectedCharacter]);
 
   const handleDnaFieldChange = useCallback((field: DnaFieldKey, value: string) => {
-    setDnaForm((current) => ({
-      ...current,
-      [field]: value,
-    }));
+    setDnaForm((current) => ({ ...current, [field]: value }));
     setDnaMessage(null);
   }, []);
 
   const handleApplyDnaSuggestions = useCallback(() => {
-    if (dnaSuggestions === null) {
-      return;
-    }
-
+    if (dnaSuggestions === null) return;
     setDnaForm((current) => {
       const next = { ...current };
       for (const fieldKey of DNA_FIELD_KEYS) {
@@ -1239,9 +1215,7 @@ export default function App() {
   }, [dnaSuggestions]);
 
   const handleSaveDna = useCallback(async () => {
-    if (selectedCharacter === null) {
-      return;
-    }
+    if (selectedCharacter === null) return;
 
     setDnaSaving(true);
     setDnaMessage(null);
@@ -1327,16 +1301,12 @@ export default function App() {
   }, []);
 
   const handleAddTextCandidatesToDataset = useCallback(() => {
-    if (selectedCharacter === null || textSelectedCandidateIds.length === 0) {
-      return;
-    }
+    if (selectedCharacter === null || textSelectedCandidateIds.length === 0) return;
 
     const selectedCandidates = textCandidates.filter((candidate) =>
       textSelectedCandidateIds.includes(candidate.id),
     );
-    if (selectedCandidates.length === 0) {
-      return;
-    }
+    if (selectedCandidates.length === 0) return;
 
     setTextAddingToDataset(true);
     clearDatasetSelection();
@@ -1352,9 +1322,9 @@ export default function App() {
     );
     setDatasetReport(null);
     setDatasetMessage(
-      `已将 ${selectedCandidates.length} 张 Mock 候选图加入数据集，请继续点击“开始评估”进入 M1C 流程。`,
+      `已将 ${selectedCandidates.length} 张 Mock 候选图加入数据集，请继续点击"开始评估"进入 M1C 流程。`,
     );
-    setDetailTab("dataset");
+    setDetailTab("dna");
 
     setTextStatus("success");
     setTextStatusMessage("候选图已加入数据集，可在数据集页继续评估。");
@@ -1365,6 +1335,17 @@ export default function App() {
     textCandidates,
     textSelectedCandidateIds,
   ]);
+
+  // Nav handler for NavSidebar
+  const handleNav = useCallback((page: NavPage) => {
+    if (page === "home") {
+      handleBackToLibrary();
+    } else {
+      setDetailTab(page as DetailTab);
+    }
+  }, [handleBackToLibrary]);
+
+  // ── Effects — all original effects preserved ───────────────────────────────
 
   useEffect(() => {
     void loadCharacters();
@@ -1389,9 +1370,7 @@ export default function App() {
   }, [canRunMockTask]);
 
   useEffect(() => {
-    if (selectedCharacter === null) {
-      return;
-    }
+    if (selectedCharacter === null) return;
 
     setDatasetLoadingReport(true);
     setDatasetMessage(null);
@@ -1403,9 +1382,7 @@ export default function App() {
         setDatasetReport(report);
       })
       .catch((error) => {
-        if (error instanceof DatasetApiError && error.status === 404) {
-          return;
-        }
+        if (error instanceof DatasetApiError && error.status === 404) return;
         setDatasetMessage(extractDatasetErrorMessage(error));
       })
       .finally(() => {
@@ -1418,13 +1395,9 @@ export default function App() {
   }, [selectedCharacter]);
 
   useEffect(() => {
-    if (selectedCharacter === null || detailTab !== "dna") {
-      return;
-    }
+    if (selectedCharacter === null || detailTab !== "dna") return;
 
-    if (dnaLoadedCharacterId === selectedCharacter.id && dnaSuggestions !== null) {
-      return;
-    }
+    if (dnaLoadedCharacterId === selectedCharacter.id && dnaSuggestions !== null) return;
 
     setDnaLoading(true);
     setDnaMessage(null);
@@ -1440,9 +1413,7 @@ export default function App() {
         setDnaLoadedCharacterId(selectedCharacter.id);
       })
       .catch((error) => {
-        if (error instanceof Error && error.name === "AbortError") {
-          return;
-        }
+        if (error instanceof Error && error.name === "AbortError") return;
         setDnaMessage(extractDnaErrorMessage(error));
       })
       .finally(() => {
@@ -1454,121 +1425,291 @@ export default function App() {
     };
   }, [detailTab, dnaLoadedCharacterId, dnaSuggestions, selectedCharacter]);
 
-  if (selectedCharacter) {
-    return (
-      <main className="app-shell">
-        <DatasetWorkspace
-          character={selectedCharacter}
-          activeTab={detailTab}
-          onSwitchTab={setDetailTab}
-          previews={datasetPreviews}
-          report={datasetReport}
-          loadingReport={datasetLoadingReport}
-          importing={datasetImporting}
-          message={datasetMessage}
-          dnaSuggestions={dnaSuggestions}
-          dnaLoading={dnaLoading}
-          dnaSaving={dnaSaving}
-          dnaMessage={dnaMessage}
-          dnaForm={dnaForm}
-          dnaPromptPreview={dnaPromptPreview}
-          textPrompt={textPrompt}
-          textStatus={textStatus}
-          textStatusMessage={textStatusMessage}
-          textCandidates={textCandidates}
-          textSelectedCandidateIds={textSelectedCandidateIds}
-          textAddingToDataset={textAddingToDataset}
-          onDnaFieldChange={handleDnaFieldChange}
-          onApplyDnaSuggestions={handleApplyDnaSuggestions}
-          onSaveDna={handleSaveDna}
-          onTextPromptChange={handleTextPromptChange}
-          onGenerateTextCandidates={handleGenerateTextCandidates}
-          onToggleTextCandidate={handleToggleTextCandidate}
-          onAddTextCandidatesToDataset={handleAddTextCandidatesToDataset}
-          onSelectFiles={handleSelectDatasetFiles}
-          onStartImport={handleStartDatasetImport}
-          onBack={handleBackToLibrary}
-          llmInitialSubTab={llmInitialSubTab}
-        />
-      </main>
-    );
-  }
+  // Inject --char-accent CSS variable on detail page container
+  useEffect(() => {
+    if (selectedCharacter && detailRef.current) {
+      detailRef.current.style.setProperty("--char-accent", getCharAccent(selectedCharacter.id));
+    }
+  }, [selectedCharacter]);
+
+  // ── Derived values ─────────────────────────────────────────────────────────
+
+  // Filter character list by search + active filter
+  const filteredItems = useMemo(() => {
+    if (viewState.kind !== "ready") return [];
+    let items = viewState.items;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      items = items.filter((c) => c.name.toLowerCase().includes(q));
+    }
+    // "训练中" filter — no loraStatus in CharacterListItem yet, skip for now
+    return items;
+  }, [viewState, search]);
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  const currentPage: NavPage = selectedCharacter ? detailTab : "home";
+  const charAccent = selectedCharacter ? getCharAccent(selectedCharacter.id) : undefined;
 
   return (
-    <main className="app-shell">
-      <section className="library-card" aria-labelledby="app-title">
-        <header className="library-header">
-          <div>
-            <p className="eyebrow">Mely AI</p>
-            <h1 id="app-title">角色库</h1>
-            <p className="lead">以角色为中心管理创作资产，保持跨场景一致性。</p>
-          </div>
-          <button className="primary-button" type="button" onClick={handleCreateEntry}>
-            创建角色
-          </button>
-        </header>
+    <div className="app-shell">
+      {/* Left nav rail */}
+      <NavSidebar
+        page={currentPage}
+        onNav={handleNav}
+        charName={selectedCharacter?.name ?? null}
+        charAccent={charAccent}
+      />
 
-        {viewState.kind === "loading" ? (
-          <div className="status-block" role="status" aria-live="polite">
-            <span className="status-chip">正在加载角色库...</span>
-          </div>
-        ) : null}
+      {/* Main content area */}
+      <div className="app-content">
+        <div
+          key={selectedCharacter ? detailTab : "home"}
+          style={{ height: "100%", animation: "pageIn 0.35s cubic-bezier(0.16,1,0.3,1)" }}
+        >
+          {selectedCharacter ? (
+            // ── Detail page ──────────────────────────────────────────────────
+            <div
+              className="page-detail"
+              ref={detailRef}
+            >
+              {/* Left detail sidebar */}
+              <div className="detail-sidebar">
+                {/* Character card at top */}
+                <div className="detail-char-card">
+                  <div className="detail-char-cover">
+                    <CoverArt accent={getCharAccent(selectedCharacter.id)} size="md" />
+                  </div>
+                  <div className="detail-char-info">
+                    <div className="detail-char-name">{selectedCharacter.name}</div>
+                    <div className="detail-char-name-en">ID: {selectedCharacter.id.slice(0, 8)}</div>
+                  </div>
+                </div>
 
-        {viewState.kind === "error" ? (
-          <div className="status-block" role="status" aria-live="polite">
-            <span className="status-message">角色列表加载失败，请重试</span>
-            <button className="secondary-button" type="button" onClick={loadCharacters}>
-              重试加载
-            </button>
-          </div>
-        ) : null}
+                {/* Vertical tab buttons */}
+                <div className="detail-tabs">
+                  {(
+                    [
+                      { id: "llm",        label: "LLM 工作台",  icon: <BoltIcon /> },
+                      { id: "dna",        label: "角色 DNA",     icon: <DnaIcon /> },
+                      { id: "visual",     label: "视觉工作台",   icon: <ImageIcon /> },
+                      { id: "generation", label: "生成工作台",   icon: <GenerateIcon /> },
+                      { id: "voice",      label: "声音 & 导出",  icon: <VoiceIcon /> },
+                    ] as { id: DetailTab; label: string; icon: React.ReactNode }[]
+                  ).map((tab, i) => (
+                    <button
+                      key={tab.id}
+                      className={`detail-tab-btn ${detailTab === tab.id ? "active" : ""}`}
+                      style={{
+                        animationDelay: `${i * 0.04}s`,
+                        animation: "slideRight 0.3s both ease-out",
+                      }}
+                      onClick={() => setDetailTab(tab.id)}
+                      type="button"
+                    >
+                      {tab.icon}
+                      <span>{tab.label}</span>
+                      {detailTab === tab.id && <span className="detail-tab-dot" />}
+                    </button>
+                  ))}
+                </div>
 
-        {viewState.kind === "ready" && viewState.items.length === 0 ? (
-          <EmptyState onCreate={handleCreateEntry} />
-        ) : null}
+                {/* Back button */}
+                <div
+                  style={{
+                    padding: "10px 14px",
+                    borderTop: "1px solid var(--border-subtle)",
+                    marginTop: "auto",
+                  }}
+                >
+                  <button
+                    className="btn btn-secondary"
+                    style={{ width: "100%", fontSize: 11 }}
+                    onClick={handleBackToLibrary}
+                    type="button"
+                  >
+                    ← 返回角色库
+                  </button>
+                </div>
+              </div>
 
-        {viewState.kind === "ready" && viewState.items.length > 0 ? (
-          <CharacterGrid
-            items={viewState.items}
-            onOpenDetail={handleOpenCharacter}
-            onCreate={handleCreateEntry}
-          />
-        ) : null}
+              {/* Right content panel */}
+              <div className="detail-content">
+                <div key={detailTab} style={{ animation: "pageIn 0.35s ease-out" }}>
+                  {detailTab === "llm" ? (
+                    <LLMWorkspace
+                      characterId={selectedCharacter.id}
+                      characterName={selectedCharacter.name}
+                      initialSubTab={llmInitialSubTab ?? undefined}
+                    />
+                  ) : detailTab === "dna" ? (
+                    <DnaTabContent
+                      suggestions={dnaSuggestions}
+                      dnaLoading={dnaLoading}
+                      dnaSaving={dnaSaving}
+                      dnaMessage={dnaMessage}
+                      dnaForm={dnaForm}
+                      dnaPromptPreview={dnaPromptPreview}
+                      previews={datasetPreviews}
+                      report={datasetReport}
+                      loadingReport={datasetLoadingReport}
+                      importing={datasetImporting}
+                      datasetMessage={datasetMessage}
+                      textPrompt={textPrompt}
+                      textStatus={textStatus}
+                      textStatusMessage={textStatusMessage}
+                      textCandidates={textCandidates}
+                      textSelectedCandidateIds={textSelectedCandidateIds}
+                      textAddingToDataset={textAddingToDataset}
+                      onDnaFieldChange={handleDnaFieldChange}
+                      onApplyDnaSuggestions={handleApplyDnaSuggestions}
+                      onSaveDna={handleSaveDna}
+                      onSelectFiles={handleSelectDatasetFiles}
+                      onStartImport={handleStartDatasetImport}
+                      onTextPromptChange={handleTextPromptChange}
+                      onGenerateTextCandidates={handleGenerateTextCandidates}
+                      onToggleTextCandidate={handleToggleTextCandidate}
+                      onAddTextCandidatesToDataset={handleAddTextCandidatesToDataset}
+                    />
+                  ) : detailTab === "visual" ? (
+                    <VisualWorkspace characterId={selectedCharacter.id} />
+                  ) : detailTab === "generation" ? (
+                    <GenerationWorkbenchPage
+                      characterId={selectedCharacter.id}
+                      characterName={selectedCharacter.name}
+                    />
+                  ) : detailTab === "voice" ? (
+                    <VoiceAndExportTab characterId={selectedCharacter.id} />
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : (
+            // ── Home page ─────────────────────────────────────────────────────
+            <div className="page-home">
+              {/* Hero section */}
+              <div style={{ marginBottom: 28, animation: "fadeIn 0.4s ease-out" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: 24,
+                    flexWrap: "wrap",
+                    gap: 12,
+                  }}
+                >
+                  <div>
+                    <h1 className="hero-title">
+                      <span>你的角色，</span>
+                      <br />
+                      <span className="hero-title-gradient">永远是同一个人。</span>
+                    </h1>
+                    <p className="hero-lead">
+                      绑定 LoRA、声音指纹与外貌参数，一切创作自动保持跨场景一致性。
+                    </p>
+                  </div>
 
-        {viewState.kind === "ready" ? (
-          <TaskPanel
-            canRunMockTask={canRunMockTask}
-            creatingMode={creatingMode}
-            taskActionError={taskActionError}
-            taskConnection={taskConnection}
-            tasks={tasks}
-            onStartMockTask={startMockTask}
-          />
-        ) : null}
-      </section>
+                  {/* GPU status badge */}
+                  <div className="gpu-badge">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                      <path d="M6.5 1L3 7h3l-.5 4L9 5H6l.5-4z" stroke="currentColor" strokeWidth="1" strokeLinejoin="round" />
+                    </svg>
+                    <span>本地 GPU</span>
+                    <span className="gpu-badge-value">运行中</span>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                      <path d="M6 1L2 3v3c0 2.5 1.7 4.2 4 5 2.3-.8 4-2.5 4-5V3L6 1z" stroke="currentColor" strokeWidth="1" strokeLinejoin="round" />
+                    </svg>
+                    <span>本地加密</span>
+                  </div>
+                </div>
 
+                {/* Toolbar — search + filter chips */}
+                <div className="toolbar">
+                  <div className="search-input-wrap">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.3" />
+                      <path d="M9.5 9.5l3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                    </svg>
+                    <input
+                      className="search-input"
+                      placeholder="搜索角色…"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      aria-label="搜索角色"
+                    />
+                  </div>
+
+                  {["全部", "训练中"].map((f) => (
+                    <button
+                      key={f}
+                      className={`filter-chip ${activeFilter === f ? "active" : ""}`}
+                      onClick={() => setActiveFilter(f)}
+                      type="button"
+                    >
+                      {f === "训练中" && <span className="filter-dot" />}
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Loading state */}
+              {viewState.kind === "loading" ? (
+                <div className="status-block" role="status" aria-live="polite">
+                  <span className="status-chip">正在加载角色库...</span>
+                </div>
+              ) : null}
+
+              {/* Error state */}
+              {viewState.kind === "error" ? (
+                <div className="status-block" role="status" aria-live="polite">
+                  <span className="status-message">角色列表加载失败，请重试</span>
+                  <button className="btn btn-secondary" type="button" onClick={loadCharacters}>
+                    重试加载
+                  </button>
+                </div>
+              ) : null}
+
+              {/* Empty state */}
+              {viewState.kind === "ready" && viewState.items.length === 0 ? (
+                <EmptyState onCreate={handleCreateEntry} />
+              ) : null}
+
+              {/* Character grid */}
+              {viewState.kind === "ready" && viewState.items.length > 0 ? (
+                <CharacterGrid
+                  items={filteredItems}
+                  onOpenDetail={handleOpenCharacter}
+                  onCreate={handleCreateEntry}
+                />
+              ) : null}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Create character modal */}
       {createModalOpen ? (
         <div
-          className="create-modal-overlay"
+          className="modal-overlay"
           onClick={() => {
-            if (createModalBusy) {
-              return;
-            }
+            if (createModalBusy) return;
             setCreateModalOpen(false);
             setCreateModalError(null);
           }}
         >
           <section
-            className="create-modal-card"
+            className="modal-card"
             role="dialog"
             aria-modal="true"
             aria-labelledby="create-modal-title"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 id="create-modal-title">创建角色</h2>
-            <p className="create-modal-subtitle">创建后会自动进入角色详情页的 LLM 工作台。</p>
+            <h2 id="create-modal-title" className="modal-title">创建角色</h2>
+            <p className="modal-subtitle">创建后会自动进入 LLM 工作台。</p>
             <form
-              className="create-modal-form"
+              className="modal-form"
               onSubmit={(event) => {
                 event.preventDefault();
                 void handleConfirmCreate();
@@ -1576,6 +1717,7 @@ export default function App() {
             >
               <label htmlFor="create-modal-name">角色名称</label>
               <input
+                className="modal-input"
                 id="create-modal-name"
                 type="text"
                 value={createModalName}
@@ -1584,15 +1726,13 @@ export default function App() {
                 disabled={createModalBusy}
                 autoFocus
               />
-              {createModalError ? <p className="create-modal-error">{createModalError}</p> : null}
-              <div className="create-modal-actions">
+              {createModalError ? <p className="modal-error">{createModalError}</p> : null}
+              <div className="modal-actions">
                 <button
-                  className="secondary-button"
+                  className="btn btn-secondary"
                   type="button"
                   onClick={() => {
-                    if (createModalBusy) {
-                      return;
-                    }
+                    if (createModalBusy) return;
                     setCreateModalOpen(false);
                     setCreateModalError(null);
                   }}
@@ -1600,7 +1740,7 @@ export default function App() {
                 >
                   取消
                 </button>
-                <button className="primary-button" type="submit" disabled={createModalBusy}>
+                <button className="btn btn-primary" type="submit" disabled={createModalBusy}>
                   {createModalBusy ? "创建中..." : "创建"}
                 </button>
               </div>
@@ -1608,6 +1748,6 @@ export default function App() {
           </section>
         </div>
       ) : null}
-    </main>
+    </div>
   );
 }

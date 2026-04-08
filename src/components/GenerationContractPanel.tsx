@@ -205,7 +205,7 @@ export function GenerationContractPanel({
 
       <div className="generation-contract-actions">
         <button
-          className="primary-button"
+          className="btn btn-primary"
           type="button"
           onClick={handleSubmitMockJob}
           disabled={!contract.canGenerate || submitting}

@@ -341,10 +341,10 @@ export function TrainingProgressPanel({ character, onOpenDataset }: TrainingProg
               ))}
             </select>
           </label>
-          <button type="button" className="secondary-button" onClick={handleResetMock}>
+          <button type="button" className="btn btn-secondary" onClick={handleResetMock}>
             重置场景
           </button>
-          <button type="button" className="secondary-button" onClick={handleNextMockFrame}>
+          <button type="button" className="btn btn-secondary" onClick={handleNextMockFrame}>
             下一帧
           </button>
           <span className="training-frame-meta">
@@ -353,7 +353,7 @@ export function TrainingProgressPanel({ character, onOpenDataset }: TrainingProg
         </div>
       ) : (
         <div className="training-controls">
-          <button type="button" className="secondary-button" onClick={() => void loadApiTasks()}>
+          <button type="button" className="btn btn-secondary" onClick={() => void loadApiTasks()}>
             刷新任务
           </button>
           {apiTasks.length > 0 ? (
@@ -481,7 +481,7 @@ export function TrainingProgressPanel({ character, onOpenDataset }: TrainingProg
                     </p>
                     <div className="training-advice-actions">
                       <button
-                        className="secondary-button"
+                        className="btn btn-secondary"
                         type="button"
                         onClick={() => void handleRetrainWithMoreSteps()}
                         disabled={isRetraining || !retrainEnabled}
@@ -489,7 +489,7 @@ export function TrainingProgressPanel({ character, onOpenDataset }: TrainingProg
                         增加训练步数后重训
                       </button>
                       <button
-                        className="secondary-button"
+                        className="btn btn-secondary"
                         type="button"
                         onClick={() => {
                           onOpenDataset?.();
@@ -511,7 +511,7 @@ export function TrainingProgressPanel({ character, onOpenDataset }: TrainingProg
 
       <div className="training-retrain-row">
         <button
-          className="primary-button"
+          className="btn btn-primary"
           type="button"
           onClick={() => void handleRetrain()}
           disabled={isRetraining || !retrainEnabled}
