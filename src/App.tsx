@@ -1337,11 +1337,10 @@ export default function App() {
   ]);
 
   // Nav handler for NavSidebar
+  // NavSidebar only emits "home" or "detail"; "detail" is a no-op (already on detail page)
   const handleNav = useCallback((page: NavPage) => {
     if (page === "home") {
       handleBackToLibrary();
-    } else {
-      setDetailTab(page as DetailTab);
     }
   }, [handleBackToLibrary]);
 
@@ -1448,7 +1447,7 @@ export default function App() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
-  const currentPage: NavPage = selectedCharacter ? detailTab : "home";
+  const currentPage: NavPage = selectedCharacter ? "detail" : "home";
   const charAccent = selectedCharacter ? getCharAccent(selectedCharacter.id) : undefined;
 
   return (
