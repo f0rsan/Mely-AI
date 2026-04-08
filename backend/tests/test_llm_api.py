@@ -592,7 +592,7 @@ class TestLLMMigration:
             conn.commit()
 
         service = ChatService(db_path=db_path)
-        model_name, _ = service._resolve_model_name_and_system_prompt("chat-legacy")
+        model_name, _, _used_ids = service._resolve_model_name_and_system_prompt("chat-legacy")
         assert model_name == "qwen2.5:3b"
 
 
