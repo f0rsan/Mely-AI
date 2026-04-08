@@ -36,6 +36,7 @@ import { CostumeWorkspace } from "./components/CostumeWorkspace";
 import { ExportWorkspace } from "./components/ExportWorkspace";
 import { LLMWorkspace } from "./components/LLMWorkspace";
 import { VisualWorkspace } from "./components/VisualWorkspace";
+import { CharacterProfileWorkspace } from "./components/CharacterProfileWorkspace";
 import { CoverArt } from "./components/CoverArt";
 import { NavSidebar, type NavPage } from "./components/NavSidebar";
 import { getCharAccent } from "./utils/charAccent";
@@ -58,7 +59,7 @@ type DatasetPreviewItem = {
   previewUrl: string;
 };
 
-type DetailTab = "dna" | "visual" | "llm" | "generation" | "voice";
+type DetailTab = "dna" | "visual" | "llm" | "generation" | "voice" | "profile";
 type LLMInitialSubTab = "chat" | null;
 
 type DnaFormState = Record<DnaFieldKey, string>;
@@ -990,6 +991,15 @@ function VoiceIcon() {
   );
 }
 
+function ProfileIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <circle cx="7" cy="4.5" r="2.5" stroke="currentColor" strokeWidth="1.1" />
+      <path d="M2 12c0-2.76 2.24-5 5-5s5 2.24 5 5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 // ── Main App ──────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -1491,6 +1501,7 @@ export default function App() {
                 <div className="detail-tabs">
                   {(
                     [
+                      { id: "profile",    label: "角色设定",     icon: <ProfileIcon /> },
                       { id: "llm",        label: "LLM 工作台",  icon: <BoltIcon /> },
                       { id: "dna",        label: "角色 DNA",     icon: <DnaIcon /> },
                       { id: "visual",     label: "视觉工作台",   icon: <ImageIcon /> },
@@ -1537,7 +1548,9 @@ export default function App() {
               {/* Right content panel */}
               <div className="detail-content">
                 <div key={detailTab} style={{ animation: "pageIn 0.35s ease-out" }}>
-                  {detailTab === "llm" ? (
+                  {detailTab === "profile" ? (
+                    <CharacterProfileWorkspace characterId={selectedCharacter.id} />
+                  ) : detailTab === "llm" ? (
                     <LLMWorkspace
                       characterId={selectedCharacter.id}
                       characterName={selectedCharacter.name}

@@ -20,6 +20,12 @@ from uuid import uuid4
 
 from app.db.connection import connect_database
 from app.services.llm_catalog import is_catalog_model, is_catalog_vision_model
+from app.services.persona_assembler import (
+    DEFAULT_SYSTEM_PROMPT,
+    build_memory_block_with_metadata,
+    build_system_prompt_with_metadata,
+    record_memory_hits,
+)
 from app.services.ollama_service import (
     OllamaModelNotFoundError,
     OllamaNotRunningError,
@@ -27,7 +33,6 @@ from app.services.ollama_service import (
 )
 
 DEFAULT_BASE_MODEL = "qwen2.5:7b-instruct-q4_K_M"
-DEFAULT_SYSTEM_PROMPT = "你是一个 AI 角色助手，请保持友好和帮助的态度与用户对话。"
 
 logger = logging.getLogger(__name__)
 
@@ -280,9 +285,15 @@ class ChatService:
         ).to_dict()
 
     def _resolve_model_name_and_system_prompt(
-        self, chat_id: str
-    ) -> tuple[str, str]:
-        """Return (ollama_model_name, system_prompt) for a chat session."""
+        self, chat_id: str, recent_user_message: str | None = None
+    ) -> tuple[str, str, list[str]]:
+        """Return (ollama_model_name, system_prompt, used_memory_ids) for a chat session.
+
+        When no private model is selected, the system prompt is dynamically assembled
+        from the character's profile and memories via persona_assembler.
+        When a private (fine-tuned) model is used, the frozen training snapshot is kept
+        as the base, and only the memory block is appended dynamically.
+        """
         with self._conn() as conn:
             row = self._get_session_row(conn, chat_id)
             llm_model_id = row["llm_model_id"]
@@ -300,27 +311,47 @@ class ChatService:
                     raise ChatModelNotReadyError("会话绑定的私有模型与当前角色不匹配，请重新选择模型后重试")
                 if model_row["status"] != "ready":
                     raise ChatModelNotReadyError("会话绑定的私有模型当前不可用，请重新选择模型后重试")
-                prompt = model_row["system_prompt"] or DEFAULT_SYSTEM_PROMPT
-                return model_row["ollama_model_name"], prompt
+                # Use training snapshot as base; append live memory block
+                snapshot = model_row["system_prompt"] or DEFAULT_SYSTEM_PROMPT
+                memory_section = build_memory_block_with_metadata(
+                    self._db_path,
+                    character_id,
+                    recent_user_message,
+                )
+                prompt = f"{snapshot}\n\n{memory_section.text}" if memory_section.text else snapshot
+                return (
+                    model_row["ollama_model_name"],
+                    prompt,
+                    memory_section.used_ids,
+                )
 
+            # No private model — build system prompt dynamically from profile
+            model_name: str
             if isinstance(session_base_model_name, str) and session_base_model_name.strip():
-                return session_base_model_name, DEFAULT_SYSTEM_PROMPT
+                model_name = session_base_model_name
+            else:
+                character_row = conn.execute(
+                    "SELECT default_base_model_name FROM characters WHERE id = ?",
+                    (character_id,),
+                ).fetchone()
+                character_default = (
+                    character_row["default_base_model_name"] if character_row else None
+                )
+                if (
+                    isinstance(character_default, str)
+                    and character_default.strip()
+                    and is_catalog_model(character_default)
+                ):
+                    model_name = character_default
+                else:
+                    model_name = DEFAULT_BASE_MODEL
 
-            character_row = conn.execute(
-                "SELECT default_base_model_name FROM characters WHERE id = ?",
-                (character_id,),
-            ).fetchone()
-            character_default_base_model_name = (
-                character_row["default_base_model_name"] if character_row else None
-            )
-            if (
-                isinstance(character_default_base_model_name, str)
-                and character_default_base_model_name.strip()
-                and is_catalog_model(character_default_base_model_name)
-            ):
-                return character_default_base_model_name, DEFAULT_SYSTEM_PROMPT
-
-        return DEFAULT_BASE_MODEL, DEFAULT_SYSTEM_PROMPT
+        assembled = build_system_prompt_with_metadata(
+            self._db_path,
+            character_id,
+            recent_user_message=recent_user_message,
+        )
+        return model_name, assembled.prompt, assembled.used_memory_ids
 
     def _model_supports_images(self, context: ChatStreamContext, model_name: str) -> bool:
         if context.llm_model_id:
@@ -427,7 +458,9 @@ class ChatService:
 
         # Resolve model and validate request before persisting messages.
         try:
-            model_name, system_prompt = self._resolve_model_name_and_system_prompt(chat_id)
+            model_name, system_prompt, used_memory_ids = self._resolve_model_name_and_system_prompt(
+                chat_id, recent_user_message=user_content
+            )
             if normalized_images and not self._model_supports_images(context, model_name):
                 yield self._sse_payload(
                     {
@@ -540,6 +573,12 @@ class ChatService:
                 )
                 yield self._sse_payload({"type": "error", "message": "回复保存失败，请稍后重试"})
                 return
+            if used_memory_ids:
+                try:
+                    record_memory_hits(self._db_path, used_memory_ids)
+                except Exception:
+                    # Memory usage accounting is best effort and must not break chat replies.
+                    pass
             yield self._sse_payload({"type": "done", "messageId": saved["id"]})
         else:
             yield self._sse_payload({"type": "done", "messageId": None})
