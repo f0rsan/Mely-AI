@@ -2,7 +2,9 @@
 # =============================================================================
 # build_windows.sh — Full Windows release build pipeline for Mely AI
 #
-# Run this on a Windows machine (Git Bash / WSL) or in CI.
+# Run this on a native Windows shell (Git Bash / PowerShell / CMD) or a
+# Windows CI runner. Do NOT run it inside WSL/Linux: Tauri will build Linux
+# bundles there and never produce the Windows installer.
 # Prerequisites:
 #   - Python 3.12+ with virtualenv
 #   - Node.js 20+
@@ -19,6 +21,47 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND_DIR="$REPO_ROOT/backend"
 DIST_DIR="$BACKEND_DIR/dist/mely-backend"
 STAGED_RESOURCES_DIR="$REPO_ROOT/src-tauri/resources/mely-backend"
+HOST_UNAME="$(uname -s)"
+
+is_wsl() {
+  if [ -n "${WSL_DISTRO_NAME:-}" ]; then
+    return 0
+  fi
+
+  if [ -r /proc/version ] && grep -qi "microsoft" /proc/version; then
+    return 0
+  fi
+
+  return 1
+}
+
+is_native_windows_shell() {
+  case "$HOST_UNAME" in
+    MINGW*|MSYS*|CYGWIN*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+if is_wsl || [ "$HOST_UNAME" = "Linux" ] || [ "$HOST_UNAME" = "Darwin" ]; then
+  echo "ERROR: scripts/build_windows.sh must be run from a native Windows shell." >&2
+  echo "Current environment: $HOST_UNAME" >&2
+  if is_wsl; then
+    echo "Detected WSL. Tauri will build Linux bundles here (deb/rpm/AppImage), not Windows installers." >&2
+  fi
+  echo "Please open PowerShell, CMD, or Git Bash on Windows and run:" >&2
+  echo "  bash scripts/build_windows.sh" >&2
+  exit 1
+fi
+
+if ! is_native_windows_shell; then
+  echo "ERROR: Unsupported shell environment for Windows packaging: $HOST_UNAME" >&2
+  echo "Use Git Bash, PowerShell, or CMD on Windows." >&2
+  exit 1
+fi
 
 echo "=== [1/4] Build Python backend sidecar with PyInstaller ==="
 cd "$BACKEND_DIR"
@@ -110,7 +153,7 @@ echo "=== [4/4] Build Tauri Windows installer ==="
 #   2. Compile the Rust shell
 #   3. Bundle everything into an NSIS installer at:
 #      src-tauri/target/release/bundle/nsis/Mely AI_0.1.0_x64-setup.exe
-cargo tauri build
+npx tauri build --bundles nsis,msi
 
 echo ""
 echo "=== Build complete ==="
