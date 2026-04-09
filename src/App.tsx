@@ -81,6 +81,8 @@ type HomeCapability = {
 
 const DNA_FIELD_KEYS: DnaFieldKey[] = ["hairColor", "eyeColor", "skinTone", "bodyType", "style"];
 const SHOULD_AUTO_LOAD_SETUP = import.meta.env.MODE !== "test";
+const STARTUP_RETRY_ATTEMPTS = SHOULD_AUTO_LOAD_SETUP ? 12 : 3;
+const STARTUP_RETRY_DELAY_MS = import.meta.env.MODE === "test" ? 1 : 500;
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
@@ -170,6 +172,12 @@ function revokePreviewUrl(url: string): void {
   if (url.startsWith("blob:") && typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
     URL.revokeObjectURL(url);
   }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 function resolveAngleLabel(value: string): string {
@@ -1876,14 +1884,74 @@ export default function App() {
   // ── Effects — all original effects preserved ───────────────────────────────
 
   useEffect(() => {
-    void loadCharacters();
-  }, [loadCharacters]);
+    let cancelled = false;
+
+    const loadCharactersWithRetry = async () => {
+      setViewState({ kind: "loading" });
+
+      for (let attempt = 0; attempt < STARTUP_RETRY_ATTEMPTS; attempt += 1) {
+        try {
+          const data = await fetchCharacterList();
+          if (cancelled) return;
+          setViewState({ kind: "ready", items: data.items });
+          return;
+        } catch {
+          if (attempt === STARTUP_RETRY_ATTEMPTS - 1) {
+            if (!cancelled) {
+              setViewState({ kind: "error" });
+            }
+            return;
+          }
+          await delay(STARTUP_RETRY_DELAY_MS);
+        }
+      }
+    };
+
+    void loadCharactersWithRetry();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!SHOULD_AUTO_LOAD_SETUP || viewState.kind !== "ready" || hasLoadedSetupRef.current) return;
     hasLoadedSetupRef.current = true;
-    void loadSetupState();
-  }, [loadSetupState, viewState.kind]);
+
+    let cancelled = false;
+
+    const loadSetupStateWithRetry = async () => {
+      for (let attempt = 0; attempt < STARTUP_RETRY_ATTEMPTS; attempt += 1) {
+        try {
+          setSetupLoading(true);
+          setSetupError(null);
+          const next = await fetchSetupStatus();
+          if (cancelled) return;
+          setSetupStatus(next);
+          setSetupActionMessage(null);
+          return;
+        } catch (error) {
+          if (attempt === STARTUP_RETRY_ATTEMPTS - 1) {
+            if (!cancelled) {
+              setSetupError(extractSetupErrorMessage(error));
+            }
+            return;
+          }
+          await delay(STARTUP_RETRY_DELAY_MS);
+        } finally {
+          if (!cancelled) {
+            setSetupLoading(false);
+          }
+        }
+      }
+    };
+
+    void loadSetupStateWithRetry();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [viewState.kind]);
 
   useEffect(() => {
     if (viewState.kind === "ready" && viewState.items.length === 0) {

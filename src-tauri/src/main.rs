@@ -2,13 +2,22 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{
+    io::{Read, Write},
+    net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command},
     sync::Mutex,
+    thread,
+    time::Duration,
 };
 use tauri::{AppHandle, Manager, Runtime, RunEvent};
 
 struct BackendProcess(Mutex<Option<Child>>);
+
+const BACKEND_HOST: &str = "127.0.0.1";
+const BACKEND_PORT: u16 = 8000;
+const BACKEND_STARTUP_ATTEMPTS: usize = 60;
+const BACKEND_STARTUP_DELAY_MS: u64 = 250;
 
 fn backend_executable_name() -> &'static str {
     if cfg!(windows) {
@@ -36,6 +45,55 @@ fn resolve_backend_exe_from_resource_dir(resource_dir: &Path) -> PathBuf {
         .find(|path| path.exists())
         .cloned()
         .unwrap_or_else(|| candidates[0].clone())
+}
+
+fn backend_socket_addr(port: u16) -> SocketAddr {
+    SocketAddr::from((
+        BACKEND_HOST
+            .parse::<std::net::Ipv4Addr>()
+            .expect("BACKEND_HOST must be a valid IPv4 address"),
+        port,
+    ))
+}
+
+fn backend_healthcheck_succeeds(addr: SocketAddr) -> bool {
+    let mut stream = match TcpStream::connect_timeout(&addr, Duration::from_millis(200)) {
+        Ok(stream) => stream,
+        Err(_) => return false,
+    };
+
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(200)));
+
+    let request = format!(
+        "GET /api/health HTTP/1.1\r\nHost: {BACKEND_HOST}:{BACKEND_PORT}\r\nConnection: close\r\n\r\n"
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+
+    let mut response = [0_u8; 256];
+    let read = match stream.read(&mut response) {
+        Ok(read) if read > 0 => read,
+        _ => return false,
+    };
+
+    let status_line = String::from_utf8_lossy(&response[..read]);
+    status_line.starts_with("HTTP/1.1 200") || status_line.starts_with("HTTP/1.0 200")
+}
+
+fn wait_for_backend_ready(addr: SocketAddr, attempts: usize, delay: Duration) -> bool {
+    for attempt in 0..attempts {
+        if backend_healthcheck_succeeds(addr) {
+            return true;
+        }
+
+        if attempt + 1 < attempts {
+            thread::sleep(delay);
+        }
+    }
+
+    false
 }
 
 /// Resolve the path to the mely-backend executable.
@@ -73,8 +131,29 @@ fn spawn_backend<R: Runtime>(app: &AppHandle<R>) -> Option<Child> {
         return None;
     }
 
-    match Command::new(&exe).env("MELY_BACKEND_PORT", "8000").spawn() {
-        Ok(child) => Some(child),
+    match Command::new(&exe)
+        .env("MELY_BACKEND_PORT", BACKEND_PORT.to_string())
+        .spawn()
+    {
+        Ok(mut child) => {
+            let ready = wait_for_backend_ready(
+                backend_socket_addr(BACKEND_PORT),
+                BACKEND_STARTUP_ATTEMPTS,
+                Duration::from_millis(BACKEND_STARTUP_DELAY_MS),
+            );
+
+            if ready {
+                Some(child)
+            } else {
+                eprintln!(
+                    "[mely] backend sidecar did not become ready within {} ms",
+                    BACKEND_STARTUP_ATTEMPTS as u64 * BACKEND_STARTUP_DELAY_MS
+                );
+                let _ = child.kill();
+                let _ = child.wait();
+                None
+            }
+        }
         Err(error) => {
             eprintln!("[mely] failed to start backend sidecar: {error}");
             None
@@ -120,7 +199,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use std::{fs, net::TcpListener};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn unique_temp_dir(name: &str) -> PathBuf {
@@ -159,5 +238,58 @@ mod tests {
 
         assert_eq!(resolved, legacy_exe);
         fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn waits_for_backend_port_to_open() {
+        let listener = TcpListener::bind(backend_socket_addr(0)).expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("read local addr");
+        let handle = thread::spawn(move || {
+            let responses = [
+                "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK",
+            ];
+
+            for response in responses {
+                let (mut socket, _) = listener.accept().expect("accept health probe");
+                let mut request = [0_u8; 256];
+                let _ = socket.read(&mut request);
+                socket
+                    .write_all(response.as_bytes())
+                    .expect("write health response");
+            }
+        });
+
+        let ready = wait_for_backend_ready(addr, 5, Duration::from_millis(10));
+
+        assert!(ready);
+        handle.join().expect("join probe server");
+    }
+
+    #[test]
+    fn returns_false_when_backend_port_never_opens() {
+        let listener = TcpListener::bind(backend_socket_addr(0)).expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("read local addr");
+        let handle = thread::spawn(move || {
+            let responses = [
+                "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            ];
+
+            for response in responses {
+                let (mut socket, _) = listener.accept().expect("accept health probe");
+                let mut request = [0_u8; 256];
+                let _ = socket.read(&mut request);
+                socket
+                    .write_all(response.as_bytes())
+                    .expect("write health response");
+            }
+        });
+
+        let ready = wait_for_backend_ready(addr, 2, Duration::from_millis(10));
+
+        assert!(!ready);
+        handle.join().expect("join probe server");
     }
 }

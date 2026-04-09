@@ -352,6 +352,30 @@ test("renders character cards in a grid when the API returns data", async () => 
   expect(screen.getByRole("button", { name: T.createNewEntry })).toBeInTheDocument();
 });
 
+test("retries character bootstrap when backend is still starting", async () => {
+  fetchMock
+    .mockRejectedValueOnce(new Error("backend booting"))
+    .mockRejectedValueOnce(new Error("backend booting"))
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        buildCharactersResponse([
+          {
+            id: "char-1",
+            name: T.charName,
+            createdAt: "2026-03-26T09:00:00Z",
+            fingerprint: "fp-001",
+          },
+        ]),
+    });
+
+  render(<App />);
+
+  await screen.findByRole("button", { name: T.openChar(T.charName) });
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  expect(screen.queryByText(T.loadFailed)).not.toBeInTheDocument();
+});
+
 test("filters character list when clicking 训练中", async () => {
   const user = userEvent.setup();
 
@@ -673,6 +697,8 @@ test("shows a retry flow in Chinese when loading the character list fails", asyn
 
   fetchMock
     .mockRejectedValueOnce(new Error("network down"))
+    .mockRejectedValueOnce(new Error("network down"))
+    .mockRejectedValueOnce(new Error("network down"))
     .mockResolvedValueOnce({
       ok: true,
       json: async () => buildCharactersResponse([]),
@@ -684,7 +710,7 @@ test("shows a retry flow in Chinese when loading the character list fails", asyn
   await user.click(screen.getByRole("button", { name: T.retry }));
 
   await waitFor(() => {
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
   await screen.findByText(T.noChars);
 });

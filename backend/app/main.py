@@ -41,6 +41,14 @@ from app.services.voice_service import create_voice_service
 from app.services.task_queue import TaskQueue
 from app.services.bootstrap import bootstrap_application
 
+ALLOWED_CORS_ORIGINS = [
+    "http://127.0.0.1:1420",
+    "http://localhost:1420",
+    "tauri://localhost",
+    "https://tauri.localhost",
+    "http://tauri.localhost",
+]
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -107,7 +115,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Mely AI Backend", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://127.0.0.1:1420", "http://localhost:1420"],
+        allow_origins=ALLOWED_CORS_ORIGINS,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
