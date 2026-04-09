@@ -412,12 +412,6 @@ test("creates character from modal and jumps to LLM workspace", async () => {
       }),
     })
     .mockResolvedValueOnce({
-      // dataset report (404 = no dataset yet)
-      ok: false,
-      status: 404,
-      json: async () => ({ detail: "\u8bad\u7ec3\u6570\u636e\u96c6\u5c1a\u672a\u5bfc\u5165\uff0c\u8bf7\u5148\u4e0a\u4f20\u56fe\u7247\u3002" }),
-    })
-    .mockResolvedValueOnce({
       // LLM runtime check
       ok: true,
       json: async () => buildLLMRuntimeResponse(),
@@ -446,6 +440,7 @@ test("creates character from modal and jumps to LLM workspace", async () => {
       (options as RequestInit).method === "POST",
   );
   expect(createCall).toBeDefined();
+  expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/dataset/report"))).toBe(false);
 });
 
 test("shows input validation when create modal name is empty", async () => {

@@ -134,6 +134,10 @@ export function VoiceBindPanel({ characterId }: Props) {
     <div className="flex flex-col gap-4 p-4">
       <TTSEngineStatusBadge />
 
+      <div className="rounded-lg border border-yellow-800/60 bg-yellow-950/30 px-3 py-3 text-xs leading-6 text-yellow-100">
+        当前声音绑定用于验证上传、绑定和合成链路是否跑通；声纹提取仍是轻量联调，不建议把它当作最终成品效果。
+      </div>
+
       <div className="border border-gray-700 rounded-lg p-4 bg-gray-900">
         <h3 className="text-sm font-semibold text-gray-200 mb-3">声音绑定</h3>
 

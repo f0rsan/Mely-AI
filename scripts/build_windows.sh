@@ -18,6 +18,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND_DIR="$REPO_ROOT/backend"
 DIST_DIR="$BACKEND_DIR/dist/mely-backend"
+STAGED_RESOURCES_DIR="$REPO_ROOT/src-tauri/resources/mely-backend"
 
 echo "=== [1/4] Build Python backend sidecar with PyInstaller ==="
 cd "$BACKEND_DIR"
@@ -39,12 +40,15 @@ pip install --upgrade pip
 pip install -e ".[dev]"
 pip install pyinstaller
 
+export PYINSTALLER_CONFIG_DIR="${PYINSTALLER_CONFIG_DIR:-$REPO_ROOT/tmp/pyinstaller-config}"
+mkdir -p "$PYINSTALLER_CONFIG_DIR"
+
 # Clean previous build artifacts.
 rm -rf build dist
 
 # Build using the spec file.
 # The output lands in dist/mely-backend/
-pyinstaller mely_backend.spec
+pyinstaller --noconfirm mely_backend.spec
 
 echo ""
 echo "=== [1/4] Backend sidecar built: $DIST_DIR ==="
@@ -76,22 +80,40 @@ else
 fi
 
 echo ""
-echo "=== [2/4] Install frontend dependencies ==="
+echo "=== [2/4] Stage backend into Tauri resources ==="
+cd "$REPO_ROOT"
+python scripts/prepare_tauri_backend.py
+
+if [ -f "$STAGED_RESOURCES_DIR/mely-backend.exe" ]; then
+  STAGED_BACKEND_BIN="$STAGED_RESOURCES_DIR/mely-backend.exe"
+else
+  STAGED_BACKEND_BIN="$STAGED_RESOURCES_DIR/mely-backend"
+fi
+
+if [ ! -f "$STAGED_BACKEND_BIN" ]; then
+  echo "ERROR: Staged backend executable not found at $STAGED_BACKEND_BIN" >&2
+  exit 1
+fi
+
+echo "Staged backend bundle:"
+ls -lh "$STAGED_BACKEND_BIN"
+
+echo ""
+echo "=== [3/4] Install frontend dependencies ==="
 cd "$REPO_ROOT"
 npm ci
 
 echo ""
-echo "=== [3/4] Build Tauri Windows installer ==="
+echo "=== [4/4] Build Tauri Windows installer ==="
 # tauri build will:
-#   1. Run `npm run build` (Vite + TypeScript)
+#   1. Run `python scripts/prepare_tauri_backend.py && npm run build`
 #   2. Compile the Rust shell
 #   3. Bundle everything into an NSIS installer at:
 #      src-tauri/target/release/bundle/nsis/Mely AI_0.1.0_x64-setup.exe
-npm run build 2>/dev/null || true  # pre-build the frontend first
 cargo tauri build
 
 echo ""
-echo "=== [4/4] Build complete ==="
+echo "=== Build complete ==="
 INSTALLER=$(find "$REPO_ROOT/src-tauri/target/release/bundle/nsis" -name "*.exe" 2>/dev/null | head -1)
 MSI=$(find "$REPO_ROOT/src-tauri/target/release/bundle/msi" -name "*.msi" 2>/dev/null | head -1)
 

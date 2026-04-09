@@ -97,6 +97,10 @@ export function TTSGeneratePanel({ characterId, onViewHistory }: Props) {
     <div className="flex flex-col gap-4 p-4">
       <TTSEngineStatusBadge />
 
+      <div className="rounded-lg border border-yellow-800/60 bg-yellow-950/30 px-3 py-3 text-xs leading-6 text-yellow-100">
+        当前语音能力适合先验证本地 TTS 引擎和任务流；如果你还没有完成声音绑定或模型准备，先不要把它当成最终交付路径。
+      </div>
+
       <div className="border border-gray-700 rounded-lg p-4 bg-gray-900">
         <h3 className="text-sm font-semibold text-gray-200 mb-3">语音合成</h3>
 

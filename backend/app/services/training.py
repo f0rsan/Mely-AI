@@ -246,6 +246,14 @@ class TrainingService:
 
         return GpuPrecheck(vram_gb=8.0, source="fallback", result="conservative_default")
 
+    def get_gpu_precheck(self) -> dict[str, float | str]:
+        precheck = self._detect_gpu_precheck()
+        return {
+            "vramGB": precheck.vram_gb,
+            "source": precheck.source,
+            "result": precheck.result,
+        }
+
     def _resolve_effective_runtime(
         self,
         *,

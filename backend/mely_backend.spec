@@ -13,97 +13,40 @@
 #
 # Tauri bundles the entire dist/mely-backend/ directory as a resource.
 
-import sys
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_data_files
+
 block_cipher = None
+project_root = Path(SPECPATH).resolve()
 
 # ---------------------------------------------------------------------------
-# Hidden imports — FastAPI + uvicorn use a lot of dynamic/plugin imports
-# that PyInstaller cannot detect through static analysis.
+# Hidden imports — keep this list focused on modules that are pulled in
+# dynamically at runtime and therefore escape static analysis.
 # ---------------------------------------------------------------------------
 hidden_imports = [
     # uvicorn internals
     "uvicorn.logging",
-    "uvicorn.loops",
     "uvicorn.loops.auto",
     "uvicorn.loops.asyncio",
-    "uvicorn.protocols",
-    "uvicorn.protocols.http",
     "uvicorn.protocols.http.auto",
     "uvicorn.protocols.http.h11_impl",
-    "uvicorn.protocols.http.httptools_impl",
-    "uvicorn.protocols.websockets",
     "uvicorn.protocols.websockets.auto",
     "uvicorn.protocols.websockets.websockets_impl",
     "uvicorn.protocols.websockets.wsproto_impl",
-    "uvicorn.lifespan",
     "uvicorn.lifespan.on",
     "uvicorn.lifespan.off",
     # anyio (used by Starlette / FastAPI)
-    "anyio",
     "anyio._backends._asyncio",
-    "anyio._backends._trio",
-    # h11 (HTTP/1.1 parser used by uvicorn)
-    "h11",
-    "h11._readers",
-    "h11._writers",
-    "h11._events",
-    "h11._abnf",
-    "h11._util",
-    "h11._connection",
     # pydantic v2 internals
-    "pydantic",
-    "pydantic.deprecated",
-    "pydantic.deprecated.class_validators",
-    "pydantic.deprecated.config",
-    "pydantic.deprecated.tools",
     "pydantic_core",
     "pydantic_settings",
-    # starlette
-    "starlette",
-    "starlette.routing",
-    "starlette.middleware",
-    "starlette.middleware.cors",
-    "starlette.responses",
-    "starlette.staticfiles",
-    "starlette.testclient",
-    # SQLite (stdlib, but sometimes needs a nudge)
-    "sqlite3",
-    "_sqlite3",
-    # Async
-    "asyncio",
-    "asyncio.events",
-    "asyncio.base_events",
-    # email-validator (optional pydantic dependency)
-    "email_validator",
-    # Our app modules — list explicitly to be safe
-    "app",
-    "app.main",
-    "app.db",
-    "app.api",
-    "app.api.archive",
-    "app.api.characters",
-    "app.api.costumes",
-    "app.api.datasets",
-    "app.api.downloads",
-    "app.api.engine",
-    "app.api.exports",
-    "app.api.generations",
-    "app.api.health",
-    "app.api.prompt",
-    "app.api.tasks",
-    "app.api.training",
-    "app.api.voice",
-    "app.models",
-    "app.services",
-    "app.services.bootstrap",
-    "app.services.downloads",
-    "app.services.engine_runtime",
-    "app.services.task_queue",
-    "app.services.tts_runtime",
-    "app.services.training",
-    "app.services.voice_service",
+    # FastAPI file uploads
+    "multipart",
+    "python_multipart",
+    # Delayed Pillow import is used by reportlab and visual dataset scoring
+    "PIL",
+    "PIL.Image",
 ]
 
 # ---------------------------------------------------------------------------
@@ -111,12 +54,13 @@ hidden_imports = [
 # ---------------------------------------------------------------------------
 datas = [
     # Include database migration scripts so bootstrap_application() can find them
-    ("migrations", "migrations"),
+    (str(project_root / "migrations"), "migrations"),
+    *collect_data_files("reportlab"),
 ]
 
 a = Analysis(
     ["entry.py"],
-    pathex=[str(Path(".").resolve())],
+    pathex=[str(project_root)],
     binaries=[],
     datas=datas,
     hiddenimports=hidden_imports,
@@ -127,10 +71,10 @@ a = Analysis(
         # Exclude heavy packages that are not needed at runtime
         "tkinter",
         "matplotlib",
+        "mypy",
         "numpy",
         "pandas",
         "scipy",
-        "PIL",
         "cv2",
         "torch",
         "tensorflow",

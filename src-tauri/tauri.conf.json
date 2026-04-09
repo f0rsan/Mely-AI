@@ -5,7 +5,7 @@
   "identifier": "com.mely.character-workbench",
   "build": {
     "beforeDevCommand": "npm run dev:stack",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "python scripts/prepare_tauri_backend.py && npm run build",
     "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../dist"
   },
@@ -35,12 +35,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": {}
+    "resources": {
+      "resources/mely-backend": "mely-backend"
+    }
   },
   "plugins": {
     "shell": {
-      "open": false,
-      "sidecar": true
+      "open": false
     }
   }
 }

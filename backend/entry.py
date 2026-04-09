@@ -5,19 +5,19 @@
 # infinite subprocess spawning when packaged with --onefile.
 
 import multiprocessing
-import sys
 import os
+import sys
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
 
-    # When frozen by PyInstaller (--onefile), the executable extracts itself
-    # to a temp directory. We need to add that directory to sys.path so that
-    # our app package can be found at runtime.
+    # When frozen by PyInstaller, keep the bundle root on sys.path so imports
+    # continue to resolve when the app is launched outside the source tree.
     if getattr(sys, "frozen", False):
         bundle_dir = sys._MEIPASS  # type: ignore[attr-defined]
         sys.path.insert(0, bundle_dir)
 
+    from app.main import app
     import uvicorn
 
     # Read port from environment variable so Tauri can pass a dynamic port
@@ -25,7 +25,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("MELY_BACKEND_PORT", "8000"))
 
     uvicorn.run(
-        "app.main:app",
+        app,
         host="127.0.0.1",
         port=port,
         # workers=1 is mandatory in a frozen app — multiprocessing workers

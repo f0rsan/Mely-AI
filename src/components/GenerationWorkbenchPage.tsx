@@ -514,6 +514,10 @@ export function GenerationWorkbenchPage({
       {/* Engine status */}
       <EngineStatusBadge pollIntervalMs={8000} />
 
+      <div className="rounded border border-yellow-800/60 bg-yellow-950/30 px-3 py-2 text-sm text-yellow-200">
+        当前生成工作台仍是联调合同，只验证参数、任务流和归档链路，不会产出真实图片。请不要把它当作当前版本的主交付路径。
+      </div>
+
       {/* Blocking state */}
       {!contract.canGenerate && contract.blockingReason && (
         <div

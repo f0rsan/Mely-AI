@@ -261,6 +261,10 @@ export function VisualTrainingPanel({ characterId }: Props) {
 
   return (
     <div className="space-y-5">
+      <div className="rounded-lg border border-yellow-800/60 bg-yellow-950/30 px-3 py-3 text-xs leading-6 text-yellow-100">
+        当前版本只打通了视觉训练的预检、入队和状态展示，真实 AI-Toolkit 训练执行器尚未接通。你可以先验证数据准备和任务流，但现在还不会产出可用 LoRA。
+      </div>
+
       {/* Dataset selector */}
       <div className="space-y-2">
         <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">选择训练数据集</h3>

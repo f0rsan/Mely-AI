@@ -26,6 +26,8 @@ import {
   type TaskConnectionState,
   type TaskSnapshot,
 } from "./api/tasks";
+import { openLLMRuntime } from "./api/llmRuntime";
+import { fetchSetupStatus, type SetupStatus } from "./api/setup";
 import { GenerationWorkbenchPage } from "./components/GenerationWorkbenchPage";
 import { VoiceBindPanel } from "./components/VoiceBindPanel";
 import { TTSGeneratePanel } from "./components/TTSGeneratePanel";
@@ -39,6 +41,8 @@ import { VisualWorkspace } from "./components/VisualWorkspace";
 import { CharacterProfileWorkspace } from "./components/CharacterProfileWorkspace";
 import { CoverArt } from "./components/CoverArt";
 import { NavSidebar, type NavPage } from "./components/NavSidebar";
+import { EngineStatusBadge } from "./components/EngineStatusBadge";
+import { TTSEngineStatusBadge } from "./components/TTSEngineStatusBadge";
 import { getCharAccent } from "./utils/charAccent";
 import {
   createDatasetFilesFromMockCandidates,
@@ -65,10 +69,18 @@ type LLMInitialSubTab = "chat" | null;
 type DnaFormState = Record<DnaFieldKey, string>;
 
 type TextToCharacterStatus = "idle" | "loading" | "success" | "empty" | "error";
+type CapabilityTone = "ready" | "setup" | "limited";
+
+type HomeCapability = {
+  title: string;
+  tone: CapabilityTone;
+  summary: string;
+};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const DNA_FIELD_KEYS: DnaFieldKey[] = ["hairColor", "eyeColor", "skinTone", "bodyType", "style"];
+const SHOULD_AUTO_LOAD_SETUP = import.meta.env.MODE !== "test";
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
@@ -211,6 +223,107 @@ function extractDnaErrorMessage(error: unknown): string {
 function extractTextToCharacterErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) return error.message;
   return "候选图生成失败，这是 Mock 通道错误，请稍后重试。";
+}
+
+function extractSetupErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) return error.message;
+  return "环境状态检测失败，请稍后重试。";
+}
+
+function resolveCapabilityToneLabel(tone: CapabilityTone): string {
+  if (tone === "ready") return "可直接使用";
+  if (tone === "setup") return "准备后可用";
+  return "当前仅流程验证";
+}
+
+function resolveCapabilityToneStyle(tone: CapabilityTone): React.CSSProperties {
+  if (tone === "ready") {
+    return {
+      color: "#7ee787",
+      background: "rgba(35, 134, 54, 0.14)",
+      border: "1px solid rgba(35, 134, 54, 0.35)",
+    };
+  }
+  if (tone === "setup") {
+    return {
+      color: "#f2cc60",
+      background: "rgba(187, 128, 9, 0.14)",
+      border: "1px solid rgba(187, 128, 9, 0.35)",
+    };
+  }
+  return {
+    color: "#ffb86b",
+    background: "rgba(191, 90, 18, 0.14)",
+    border: "1px solid rgba(191, 90, 18, 0.35)",
+  };
+}
+
+function buildHomeCapabilities(setupStatus: SetupStatus | null): HomeCapability[] {
+  const llmReady =
+    setupStatus !== null &&
+    setupStatus.llm.installed &&
+    setupStatus.llm.running &&
+    setupStatus.llm.models.length > 0;
+
+  let llmSummary = "正在检测语言引擎状态。";
+  if (setupStatus !== null) {
+    if (!setupStatus.llm.installed) {
+      llmSummary = "需要先安装 Ollama，完成后再进入 LLM 工作台。";
+    } else if (!setupStatus.llm.running) {
+      llmSummary = setupStatus.llm.hint ?? "语言引擎尚未启动。";
+    } else if (setupStatus.llm.models.length === 0) {
+      llmSummary = "语言引擎已启动，但还没有基础模型，请先下载至少 1 个模型。";
+    } else {
+      llmSummary = `语言引擎已就绪，当前已检测到 ${setupStatus.llm.models.length} 个模型。`;
+    }
+  }
+
+  const ttsRunning = setupStatus?.ttsEngine.state === "running";
+
+  return [
+    {
+      title: "角色资料与图片数据集",
+      tone: "ready",
+      summary: "可以创建角色、编辑角色设定，并上传或整理图片数据集。",
+    },
+    {
+      title: "角色对话",
+      tone: llmReady ? "ready" : "setup",
+      summary: llmSummary,
+    },
+    {
+      title: "视觉训练",
+      tone: "limited",
+      summary: "当前只打通预检、入队和状态展示，AI-Toolkit 训练执行器尚未接通。",
+    },
+    {
+      title: "图像生成",
+      tone: "limited",
+      summary: "当前生成工作台仍是联调合同，只验证流程，不会产出真实图片。",
+    },
+    {
+      title: "声音链路",
+      tone: ttsRunning ? "limited" : "setup",
+      summary: ttsRunning
+        ? "TTS 引擎已运行，可以验证合成链路；声音绑定当前仍是轻量联调。"
+        : "需要先启动 TTS 引擎；声音绑定当前只用于验证流程是否跑通。",
+    },
+  ];
+}
+
+function resolveHeroGpuLabel(setupStatus: SetupStatus | null, loading: boolean): string {
+  if (loading && setupStatus === null) return "检测中";
+  if (setupStatus === null) return "待检测";
+  return `${setupStatus.gpu.vramGB.toFixed(1)} GB`;
+}
+
+function resolveHeroLlmLabel(setupStatus: SetupStatus | null, loading: boolean): string {
+  if (loading && setupStatus === null) return "检测中";
+  if (setupStatus === null) return "待检测";
+  if (!setupStatus.llm.installed) return "待安装";
+  if (!setupStatus.llm.running) return "待启动";
+  if (setupStatus.llm.models.length === 0) return "待下载模型";
+  return "已就绪";
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -928,6 +1041,354 @@ function CharacterGrid({
   );
 }
 
+function CapabilityCard({ capability }: { capability: HomeCapability }) {
+  return (
+    <article
+      style={{
+        padding: "16px 18px",
+        borderRadius: 18,
+        border: "1px solid rgba(255,255,255,0.08)",
+        background: "rgba(10,12,16,0.78)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <strong style={{ fontSize: 14, color: "var(--text-primary)" }}>{capability.title}</strong>
+        <span
+          style={{
+            ...resolveCapabilityToneStyle(capability.tone),
+            borderRadius: 999,
+            padding: "4px 10px",
+            fontSize: 11,
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {resolveCapabilityToneLabel(capability.tone)}
+        </span>
+      </div>
+      <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: "var(--text-secondary)" }}>
+        {capability.summary}
+      </p>
+    </article>
+  );
+}
+
+type HomeReadinessPanelProps = {
+  setupStatus: SetupStatus | null;
+  loading: boolean;
+  error: string | null;
+  expanded: boolean;
+  runtimeOpening: boolean;
+  actionMessage: string | null;
+  latestCharacter: CharacterListItem | null;
+  onCreateCharacter: () => void;
+  onOpenLatestCharacter: () => void;
+  onToggleExpanded: () => void;
+  onRefresh: () => void;
+  onOpenLLMRuntime: () => void;
+};
+
+function HomeReadinessPanel({
+  setupStatus,
+  loading,
+  error,
+  expanded,
+  runtimeOpening,
+  actionMessage,
+  latestCharacter,
+  onCreateCharacter,
+  onOpenLatestCharacter,
+  onToggleExpanded,
+  onRefresh,
+  onOpenLLMRuntime,
+}: HomeReadinessPanelProps) {
+  const capabilities = buildHomeCapabilities(setupStatus);
+  const llmNeedsInstall = setupStatus !== null && !setupStatus.llm.installed;
+  const llmNeedsStart = setupStatus !== null && setupStatus.llm.installed && !setupStatus.llm.running;
+  const llmNeedsModel =
+    setupStatus !== null &&
+    setupStatus.llm.installed &&
+    setupStatus.llm.running &&
+    setupStatus.llm.models.length === 0;
+
+  return (
+    <section
+      aria-label="首次体验与环境状态"
+      style={{
+        marginBottom: 24,
+        padding: 24,
+        borderRadius: 24,
+        border: "1px solid rgba(255,255,255,0.08)",
+        background:
+          "linear-gradient(145deg, rgba(11,14,19,0.94), rgba(19,25,36,0.92) 58%, rgba(26,18,20,0.88))",
+        boxShadow: "0 22px 80px rgba(0,0,0,0.24)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 18,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 16,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 760 }}>
+          <span className="section-label">首次体验</span>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 26, lineHeight: 1.15 }}>先走一条真实可用的最小路径</h2>
+            <p
+              style={{
+                margin: "10px 0 0",
+                fontSize: 14,
+                lineHeight: 1.7,
+                color: "var(--text-secondary)",
+              }}
+            >
+              推荐顺序：先创建角色，再补齐角色设定，然后进入 LLM 工作台。图像生成和视觉训练目前还不是可交付主路径，下面会直接告诉你哪些能力已经能用，哪些还只是流程联调。
+            </p>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {latestCharacter ? (
+            <button className="btn btn-primary" type="button" onClick={onOpenLatestCharacter}>
+              打开最近角色的 LLM 工作台
+            </button>
+          ) : (
+            <button className="btn btn-primary" type="button" onClick={onCreateCharacter}>
+              创建第一个角色
+            </button>
+          )}
+          <button className="btn btn-secondary" type="button" onClick={onToggleExpanded}>
+            {expanded ? "收起环境与设置" : "环境与设置"}
+          </button>
+          <button className="btn btn-secondary" type="button" onClick={onRefresh}>
+            重新检测
+          </button>
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+          gap: 12,
+        }}
+      >
+        <article
+          style={{
+            padding: "14px 16px",
+            borderRadius: 18,
+            border: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(255,255,255,0.03)",
+          }}
+        >
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>本地后端</span>
+          <strong style={{ display: "block", marginTop: 8, fontSize: 20 }}>
+            {loading && setupStatus === null ? "检测中" : setupStatus?.backend.status === "ok" ? "已连接" : "待确认"}
+          </strong>
+          <p style={{ margin: "8px 0 0", fontSize: 12, lineHeight: 1.6, color: "var(--text-secondary)" }}>
+            {setupStatus?.backend.dataRoot ? `数据目录：${setupStatus.backend.dataRoot}` : "等待环境检测结果。"}
+          </p>
+        </article>
+
+        <article
+          style={{
+            padding: "14px 16px",
+            borderRadius: 18,
+            border: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(255,255,255,0.03)",
+          }}
+        >
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>GPU / 显存</span>
+          <strong style={{ display: "block", marginTop: 8, fontSize: 20 }}>
+            {loading && setupStatus === null ? "检测中" : setupStatus ? `${setupStatus.gpu.vramGB.toFixed(1)} GB` : "待检测"}
+          </strong>
+          <p style={{ margin: "8px 0 0", fontSize: 12, lineHeight: 1.6, color: "var(--text-secondary)" }}>
+            {setupStatus?.gpu.recommendation ?? "检测完成后会给出模式建议。"}
+          </p>
+        </article>
+
+        <article
+          style={{
+            padding: "14px 16px",
+            borderRadius: 18,
+            border: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(255,255,255,0.03)",
+          }}
+        >
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>语言引擎</span>
+          <strong style={{ display: "block", marginTop: 8, fontSize: 20 }}>
+            {loading && setupStatus === null
+              ? "检测中"
+              : setupStatus === null
+                ? "待检测"
+                : !setupStatus.llm.installed
+                  ? "未安装"
+                  : !setupStatus.llm.running
+                    ? "未启动"
+                    : setupStatus.llm.models.length === 0
+                      ? "缺少模型"
+                      : "已就绪"}
+          </strong>
+          <p style={{ margin: "8px 0 0", fontSize: 12, lineHeight: 1.6, color: "var(--text-secondary)" }}>
+            {setupStatus === null
+              ? "检测完成后会显示 Ollama 与模型状态。"
+              : !setupStatus.llm.installed
+                ? "需要先安装 Ollama。"
+                : !setupStatus.llm.running
+                  ? setupStatus.llm.hint ?? "语言引擎尚未启动。"
+                  : setupStatus.llm.models.length === 0
+                    ? "请至少下载 1 个基础模型后再进入角色对话。"
+                    : `已检测到 ${setupStatus.llm.models.length} 个模型。`}
+          </p>
+        </article>
+      </div>
+
+      {loading ? (
+        <div className="status-block" style={{ margin: 0 }}>
+          <span className="status-chip">正在检测安装后环境状态...</span>
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="status-block" style={{ margin: 0 }}>
+          <span className="status-message">{error}</span>
+        </div>
+      ) : null}
+
+      {actionMessage ? (
+        <div className="status-block" style={{ margin: 0 }}>
+          <span className="status-message">{actionMessage}</span>
+        </div>
+      ) : null}
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+          gap: 12,
+        }}
+      >
+        {capabilities.map((capability) => (
+          <CapabilityCard key={capability.title} capability={capability} />
+        ))}
+      </div>
+
+      {expanded ? (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+            gap: 14,
+          }}
+        >
+          <section
+            style={{
+              padding: "16px 18px",
+              borderRadius: 18,
+              border: "1px solid rgba(255,255,255,0.08)",
+              background: "rgba(255,255,255,0.03)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
+            <div>
+              <h3 style={{ margin: 0, fontSize: 15 }}>语言引擎设置</h3>
+              <p style={{ margin: "8px 0 0", fontSize: 13, lineHeight: 1.6, color: "var(--text-secondary)" }}>
+                当前主路径优先依赖 Ollama。装好 Ollama 并下载基础模型后，就能先把角色设定和角色对话走通。
+              </p>
+            </div>
+            {setupStatus ? (
+              <p style={{ margin: 0, fontSize: 12, lineHeight: 1.6, color: "var(--text-secondary)" }}>
+                {setupStatus.llm.hint ?? `版本：${setupStatus.llm.version ?? "未知"} · 平台：${setupStatus.llm.platform}`}
+              </p>
+            ) : null}
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {llmNeedsInstall ? (
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  onClick={() => window.open("https://ollama.com/download", "_blank")}
+                >
+                  查看 Ollama 安装指引
+                </button>
+              ) : null}
+              {llmNeedsStart ? (
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  onClick={onOpenLLMRuntime}
+                  disabled={runtimeOpening}
+                >
+                  {runtimeOpening ? "启动中..." : "启动语言引擎"}
+                </button>
+              ) : null}
+              {llmNeedsModel ? (
+                <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                  下一步：进入任意角色的 LLM 工作台，在“模型库”里下载基础模型。
+                </span>
+              ) : null}
+            </div>
+          </section>
+
+          {setupStatus !== null ? (
+            <>
+              <section
+                style={{
+                  padding: "16px 18px",
+                  borderRadius: 18,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(255,255,255,0.03)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                }}
+              >
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 15 }}>图像引擎</h3>
+                  <p style={{ margin: "8px 0 0", fontSize: 13, lineHeight: 1.6, color: "var(--text-secondary)" }}>
+                    当前可以检测和启动图像引擎，但图像生成工作台本身仍是联调流程，不建议把它当作首条主路径。
+                  </p>
+                </div>
+                <EngineStatusBadge pollIntervalMs={8000} />
+              </section>
+
+              <section
+                style={{
+                  padding: "16px 18px",
+                  borderRadius: 18,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(255,255,255,0.03)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                }}
+              >
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 15 }}>语音引擎</h3>
+                  <p style={{ margin: "8px 0 0", fontSize: 13, lineHeight: 1.6, color: "var(--text-secondary)" }}>
+                    语音链路支持检测和启动 TTS 引擎；声音绑定当前仍是轻量联调，适合先验证流程，不适合作为完整成品路径。
+                  </p>
+                </div>
+                <TTSEngineStatusBadge pollIntervalMs={8000} />
+              </section>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 // Empty state with new classes
 function EmptyState({ onCreate }: { onCreate: () => void }) {
   return (
@@ -1034,6 +1495,12 @@ export default function App() {
   const [textSelectedCandidateIds, setTextSelectedCandidateIds] = useState<string[]>([]);
   const [textAddingToDataset, setTextAddingToDataset] = useState(false);
   const [llmInitialSubTab, setLlmInitialSubTab] = useState<LLMInitialSubTab>(null);
+  const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
+  const [setupLoading, setSetupLoading] = useState(false);
+  const [setupError, setSetupError] = useState<string | null>(null);
+  const [setupExpanded, setSetupExpanded] = useState(false);
+  const [setupActionMessage, setSetupActionMessage] = useState<string | null>(null);
+  const [openingLLMRuntime, setOpeningLLMRuntime] = useState(false);
 
   // New state for home page UI
   const [search, setSearch] = useState("");
@@ -1041,6 +1508,7 @@ export default function App() {
 
   // Ref for injecting --char-accent on detail page
   const detailRef = useRef<HTMLDivElement>(null);
+  const hasLoadedSetupRef = useRef(false);
 
   const canRunMockTask = viewState.kind === "ready";
   const dnaPromptPreview = useMemo(
@@ -1057,6 +1525,20 @@ export default function App() {
       setViewState({ kind: "ready", items: data.items });
     } catch {
       setViewState({ kind: "error" });
+    }
+  }, []);
+
+  const loadSetupState = useCallback(async () => {
+    setSetupLoading(true);
+    setSetupError(null);
+    try {
+      const next = await fetchSetupStatus();
+      setSetupStatus(next);
+      setSetupActionMessage(null);
+    } catch (error) {
+      setSetupError(extractSetupErrorMessage(error));
+    } finally {
+      setSetupLoading(false);
     }
   }, []);
 
@@ -1113,6 +1595,29 @@ export default function App() {
     resetTextToCharacterState();
   }, [clearDatasetSelection, resetTextToCharacterState]);
 
+  const handleOpenHomeSetup = useCallback(() => {
+    setSetupExpanded(true);
+    setSelectedCharacter(null);
+    setDetailTab("llm");
+    setLlmInitialSubTab(null);
+    setDatasetMessage(null);
+    setDatasetReport(null);
+    setDatasetLoadingReport(false);
+    setDnaSuggestions(null);
+    setDnaForm(createEmptyDnaForm());
+    setDnaMessage(null);
+    setDnaLoading(false);
+    setDnaSaving(false);
+    setDnaLoadedCharacterId(null);
+    clearDatasetSelection();
+    resetTextToCharacterState();
+
+    if (!hasLoadedSetupRef.current && !setupLoading) {
+      hasLoadedSetupRef.current = true;
+      void loadSetupState();
+    }
+  }, [clearDatasetSelection, loadSetupState, resetTextToCharacterState, setupLoading]);
+
   const handleOpenCharacter = useCallback((
     character: CharacterListItem,
     tab: DetailTab = "llm",
@@ -1130,6 +1635,20 @@ export default function App() {
     setDnaLoadedCharacterId(null);
     resetTextToCharacterState();
   }, [resetTextToCharacterState]);
+
+  const handleStartHomeLLMRuntime = useCallback(async () => {
+    setOpeningLLMRuntime(true);
+    setSetupActionMessage(null);
+    try {
+      await openLLMRuntime();
+      await loadSetupState();
+      setSetupActionMessage("语言引擎启动指令已发送，请等待几秒后再次确认。");
+    } catch (error) {
+      setSetupActionMessage(extractSetupErrorMessage(error));
+    } finally {
+      setOpeningLLMRuntime(false);
+    }
+  }, [loadSetupState]);
 
   const handleConfirmCreate = useCallback(async () => {
     if (createModalBusy) return;
@@ -1361,6 +1880,18 @@ export default function App() {
   }, [loadCharacters]);
 
   useEffect(() => {
+    if (!SHOULD_AUTO_LOAD_SETUP || viewState.kind !== "ready" || hasLoadedSetupRef.current) return;
+    hasLoadedSetupRef.current = true;
+    void loadSetupState();
+  }, [loadSetupState, viewState.kind]);
+
+  useEffect(() => {
+    if (viewState.kind === "ready" && viewState.items.length === 0) {
+      setSetupExpanded(true);
+    }
+  }, [viewState]);
+
+  useEffect(() => {
     if (!canRunMockTask) {
       setTaskConnection("disconnected");
       return;
@@ -1379,7 +1910,12 @@ export default function App() {
   }, [canRunMockTask]);
 
   useEffect(() => {
-    if (selectedCharacter === null) return;
+    if (selectedCharacter === null || detailTab !== "dna") {
+      setDatasetLoadingReport(false);
+      setDatasetMessage(null);
+      setDatasetReport(null);
+      return;
+    }
 
     setDatasetLoadingReport(true);
     setDatasetMessage(null);
@@ -1401,7 +1937,7 @@ export default function App() {
     return () => {
       controller.abort();
     };
-  }, [selectedCharacter]);
+  }, [detailTab, selectedCharacter]);
 
   useEffect(() => {
     if (selectedCharacter === null || detailTab !== "dna") return;
@@ -1456,6 +1992,11 @@ export default function App() {
     }
     return items;
   }, [viewState, search, activeFilter]);
+
+  const latestCharacter = useMemo(() => {
+    if (viewState.kind !== "ready" || viewState.items.length === 0) return null;
+    return viewState.items[0];
+  }, [viewState]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -1534,6 +2075,14 @@ export default function App() {
                     marginTop: "auto",
                   }}
                 >
+                  <button
+                    className="btn btn-secondary"
+                    style={{ width: "100%", fontSize: 11, marginBottom: 8 }}
+                    onClick={handleOpenHomeSetup}
+                    type="button"
+                  >
+                    环境与设置
+                  </button>
                   <button
                     className="btn btn-secondary"
                     style={{ width: "100%", fontSize: 11 }}
@@ -1629,12 +2178,12 @@ export default function App() {
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                       <path d="M6.5 1L3 7h3l-.5 4L9 5H6l.5-4z" stroke="currentColor" strokeWidth="1" strokeLinejoin="round" />
                     </svg>
-                    <span>本地 GPU</span>
-                    <span className="gpu-badge-value">运行中</span>
+                    <span>显存估算</span>
+                    <span className="gpu-badge-value">{resolveHeroGpuLabel(setupStatus, setupLoading)}</span>
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                      <path d="M6 1L2 3v3c0 2.5 1.7 4.2 4 5 2.3-.8 4-2.5 4-5V3L6 1z" stroke="currentColor" strokeWidth="1" strokeLinejoin="round" />
+                      <path d="M2 3.5h8M2 6h8M2 8.5h8" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
                     </svg>
-                    <span>本地加密</span>
+                    <span>语言引擎 {resolveHeroLlmLabel(setupStatus, setupLoading)}</span>
                   </div>
                 </div>
 
@@ -1665,8 +2214,37 @@ export default function App() {
                       {f}
                     </button>
                   ))}
+
+                  <button
+                    className={`filter-chip ${setupExpanded ? "active" : ""}`}
+                    onClick={() => setSetupExpanded((current) => !current)}
+                    type="button"
+                  >
+                    环境与设置
+                  </button>
                 </div>
               </div>
+
+              {viewState.kind === "ready" ? (
+                <HomeReadinessPanel
+                  setupStatus={setupStatus}
+                  loading={setupLoading}
+                  error={setupError}
+                  expanded={setupExpanded}
+                  runtimeOpening={openingLLMRuntime}
+                  actionMessage={setupActionMessage}
+                  latestCharacter={latestCharacter}
+                  onCreateCharacter={handleCreateEntry}
+                  onOpenLatestCharacter={() => {
+                    if (latestCharacter !== null) {
+                      handleOpenCharacter(latestCharacter, "llm", "chat");
+                    }
+                  }}
+                  onToggleExpanded={() => setSetupExpanded((current) => !current)}
+                  onRefresh={() => void loadSetupState()}
+                  onOpenLLMRuntime={() => void handleStartHomeLLMRuntime()}
+                />
+              ) : null}
 
               {/* Loading state */}
               {viewState.kind === "loading" ? (
@@ -1721,7 +2299,7 @@ export default function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <h2 id="create-modal-title" className="modal-title">创建角色</h2>
-            <p className="modal-subtitle">创建后会自动进入 LLM 工作台。</p>
+            <p className="modal-subtitle">创建后会自动进入 LLM 工作台；如果语言引擎还没准备好，页面会直接提示你下一步该做什么。</p>
             <form
               className="modal-form"
               onSubmit={(event) => {

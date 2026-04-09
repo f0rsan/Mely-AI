@@ -27,6 +27,7 @@ from app.api.chat import router as chat_router
 from app.api.visual_datasets import router as visual_datasets_router
 from app.api.visual_training import router as visual_training_router
 from app.api.profile import router as profile_router
+from app.api.setup import router as setup_router
 from app.services.downloads import create_download_service
 from app.services.training import create_training_service
 from app.services.llm_training import create_llm_training_service
@@ -133,6 +134,7 @@ def create_app() -> FastAPI:
     app.include_router(visual_datasets_router, prefix="/api")
     app.include_router(visual_training_router, prefix="/api")
     app.include_router(profile_router, prefix="/api")
+    app.include_router(setup_router, prefix="/api")
 
     @app.exception_handler(RequestValidationError)
     async def handle_validation_error(_request, _exc):

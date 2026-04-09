@@ -5,18 +5,22 @@ coverage/
 
 src-tauri/target/
 src-tauri/gen/
+src-tauri/resources/
 
 backend/.pytest_cache/
 backend/.mypy_cache/
 backend/.coverage
 backend/.venv/
+backend/.pyinstaller/
 backend/**/__pycache__/
 backend/**/*.pyc
 backend/*.egg-info/
+backend/uv.lock
 
 .DS_Store
 .idea/
 .vscode/
+.playwright-cli/
 
 .worktrees/
 worktrees/
