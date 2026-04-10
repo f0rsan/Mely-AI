@@ -8,6 +8,7 @@ If no private model is selected the base model is used.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sqlite3
@@ -20,6 +21,7 @@ from uuid import uuid4
 
 from app.db.connection import connect_database
 from app.services.llm_catalog import is_catalog_model, is_catalog_vision_model
+from app.services.memory_extraction_service import create_memory_extraction_service
 from app.services.persona_assembler import (
     DEFAULT_SYSTEM_PROMPT,
     build_memory_block_with_metadata,
@@ -154,6 +156,7 @@ def _row_to_message(row: sqlite3.Row) -> ChatMessage:
 class ChatService:
     def __init__(self, *, db_path: Path) -> None:
         self._db_path = db_path
+        self._memory_extraction_service = create_memory_extraction_service(db_path=db_path)
 
     @contextmanager
     def _conn(self):
@@ -408,6 +411,54 @@ class ChatService:
             messages.append(payload)
         return messages
 
+    def _schedule_memory_extraction(
+        self,
+        *,
+        character_id: str,
+        current_chat_id: str,
+        user_content: str,
+        assistant_content: str,
+    ) -> None:
+        try:
+            asyncio.create_task(
+                self._run_memory_extraction_safely(
+                    character_id=character_id,
+                    chat_id=current_chat_id,
+                    latest_user_message=user_content,
+                    latest_assistant_message=assistant_content,
+                )
+            )
+        except Exception as exc:
+            logger.error(
+                "chat.memory_extraction.schedule_failed chat_id=%s character_id=%s",
+                current_chat_id,
+                character_id,
+                exc_info=exc,
+            )
+
+    async def _run_memory_extraction_safely(
+        self,
+        *,
+        character_id: str,
+        chat_id: str,
+        latest_user_message: str,
+        latest_assistant_message: str,
+    ) -> None:
+        try:
+            await self._memory_extraction_service.extract_from_chat_turn(
+                character_id=character_id,
+                chat_id=chat_id,
+                latest_user_message=latest_user_message,
+                latest_assistant_message=latest_assistant_message,
+            )
+        except Exception as exc:
+            logger.error(
+                "chat.memory_extraction.failed chat_id=%s character_id=%s",
+                chat_id,
+                character_id,
+                exc_info=exc,
+            )
+
     async def stream_reply(
         self,
         chat_id: str,
@@ -579,6 +630,13 @@ class ChatService:
                 except Exception:
                     # Memory usage accounting is best effort and must not break chat replies.
                     pass
+            if context.character_id:
+                self._schedule_memory_extraction(
+                    character_id=context.character_id,
+                    current_chat_id=chat_id,
+                    user_content=user_content,
+                    assistant_content=full_reply,
+                )
             yield self._sse_payload({"type": "done", "messageId": saved["id"]})
         else:
             yield self._sse_payload({"type": "done", "messageId": None})

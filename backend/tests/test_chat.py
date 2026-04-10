@@ -278,6 +278,54 @@ class TestStreamEndpoint:
         assert user_msg["content"] == "请介绍一下自己"
         assert assistant_msg["content"] == "当然可以！"
 
+    def test_stream_still_succeeds_and_triggers_auto_memory_extraction(self, client, chat_id):
+        chat_service = client.app.state.chat_service
+
+        with patch(
+            "app.services.chat_service.ollama_chat_stream",
+            side_effect=_fake_stream("没问题"),
+        ), patch.object(
+            chat_service,
+            "_schedule_memory_extraction",
+            autospec=True,
+        ) as schedule_mock:
+            resp = client.post(
+                f"/api/chats/{chat_id}/stream",
+                json={"content": "帮我记住一点事"},
+            )
+
+        assert resp.status_code == 200
+        events = _extract_sse_events(resp.text)
+        done_events = [event for event in events if event["type"] == "done"]
+        assert len(done_events) == 1
+        assert done_events[0]["messageId"] is not None
+        schedule_mock.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_memory_extraction_safely_logs_and_swallows_errors(self, client, character_id, caplog):
+        chat_service = client.app.state.chat_service
+
+        async def _raise_extraction(**_kwargs):
+            raise RuntimeError("memory extraction exploded")
+
+        with (
+            patch.object(
+                chat_service._memory_extraction_service,
+                "extract_from_chat_turn",
+                side_effect=_raise_extraction,
+            ),
+            caplog.at_level(logging.ERROR, logger="app.services.chat_service"),
+        ):
+            await chat_service._run_memory_extraction_safely(
+                character_id=character_id,
+                chat_id="chat-safe",
+                latest_user_message="你好",
+                latest_assistant_message="你好呀",
+            )
+
+        logged = "\n".join(record.getMessage() for record in caplog.records)
+        assert "chat.memory_extraction.failed" in logged
+
     def test_stream_emits_error_event_when_ollama_offline(self, client, chat_id, caplog):
         from app.services.ollama_service import OllamaNotRunningError
 

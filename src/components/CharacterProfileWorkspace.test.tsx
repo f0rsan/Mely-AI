@@ -11,6 +11,7 @@ import {
   deleteMemory,
   updateMemory,
   type CharacterProfile,
+  type Memory,
 } from "../api/profile";
 import { CharacterProfileWorkspace } from "./CharacterProfileWorkspace";
 
@@ -185,4 +186,39 @@ test("预览失败或角色切换后，不会残留旧 preview 内容", async ()
     expect(screen.queryByText("System Prompt 预览")).not.toBeInTheDocument();
   });
   expect(screen.queryByText("旧预览内容")).not.toBeInTheDocument();
+});
+
+function buildMemory(overrides: Partial<Memory> = {}): Memory {
+  return {
+    id: "mem-1",
+    characterId: "char-1",
+    kind: "fact",
+    content: "用户喜欢草莓蛋糕",
+    importance: 4,
+    pinned: false,
+    source: "manual",
+    createdAt: "2026-04-10T10:00:00Z",
+    updatedAt: "2026-04-10T10:00:00Z",
+    lastUsedAt: null,
+    hitCount: 0,
+    ...overrides,
+  };
+}
+
+test("自动提炼的记忆显示「自动」badge，手动记忆不显示", async () => {
+  const user = userEvent.setup();
+  vi.mocked(fetchProfile).mockResolvedValue(buildProfile());
+  vi.mocked(fetchMemories).mockResolvedValue([
+    buildMemory({ id: "mem-auto", source: "auto_extracted", content: "自动提炼内容" }),
+    buildMemory({ id: "mem-manual", source: "manual", content: "手动填写内容" }),
+  ]);
+
+  render(<CharacterProfileWorkspace characterId="char-1" />);
+  await user.click(await screen.findByRole("button", { name: "记忆" }));
+
+  await screen.findByText("自动提炼内容");
+
+  const autoBadges = screen.getAllByText("自动");
+  expect(autoBadges).toHaveLength(1);
+  expect(screen.queryByText("手动填写内容")).toBeInTheDocument();
 });

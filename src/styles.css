@@ -1868,6 +1868,15 @@ textarea:focus, input:focus, select:focus { outline: none; }
   padding: 1px 6px;
 }
 
+.memory-auto-badge {
+  font-size: 10px;
+  background: color-mix(in srgb, var(--accent-brand) 10%, transparent);
+  color: color-mix(in srgb, var(--accent-brand) 70%, var(--text-muted));
+  border: 1px solid color-mix(in srgb, var(--accent-brand) 25%, transparent);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
 .memory-importance {
   font-size: 10px;
   color: var(--accent-brand);

@@ -867,6 +867,9 @@ export function CharacterProfileWorkspace({ characterId }: Props) {
                         <div className="memory-item-meta">
                           <span className="memory-kind-badge">{kindLabel(mem.kind)}</span>
                           {mem.pinned && <span className="memory-pinned-badge">常驻</span>}
+                          {mem.source === "auto_extracted" && (
+                            <span className="memory-auto-badge">自动</span>
+                          )}
                           <span className="memory-importance">
                             {"●".repeat(mem.importance)}{"○".repeat(5 - mem.importance)}
                           </span>
