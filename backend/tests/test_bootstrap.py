@@ -41,9 +41,14 @@ def test_bootstrap_creates_data_root_and_schema(temp_data_root: Path) -> None:
         table_rows = connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'"
         ).fetchall()
+        llm_training_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(llm_training_jobs)").fetchall()
+        }
 
     tables = {row[0] for row in table_rows}
     assert EXPECTED_TABLES.issubset(tables)
+    assert {"stage_name", "checkpoint_path"}.issubset(llm_training_columns)
 
 
 def test_bootstrap_is_idempotent(temp_data_root: Path) -> None:

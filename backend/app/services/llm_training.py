@@ -102,6 +102,20 @@ WORKER_ERROR_TRANSLATIONS = {
 }
 REGISTRATION_PENDING_WARNING = "训练已完成，模型已导出，但语言引擎注册未完成，可稍后重试注册"
 REGISTRATION_SUCCESS_MESSAGE = "训练完成，模型已可用"
+INITIAL_STAGE_NAME = "等待训练资源"
+FAILED_STAGE_NAME = "训练失败"
+CANCELED_STAGE_NAME = "训练已取消"
+RECOVERED_STAGE_NAME = "训练已中断"
+STATUS_STAGE_NAMES: dict[str, str] = {
+    "queued": INITIAL_STAGE_NAME,
+    "preparing": "正在准备训练环境…",
+    "training": "正在训练",
+    "exporting": "正在导出 GGUF",
+    "registering": "正在注册模型…",
+    "completed": "训练完成",
+    "failed": FAILED_STAGE_NAME,
+    "canceled": CANCELED_STAGE_NAME,
+}
 MODE_LEARNING_RATE: dict[LLMTrainingMode, float] = {
     "light": 2e-4,
     "standard": 1.5e-4,
@@ -153,6 +167,8 @@ class LLMTrainingJobRecord:
     total_steps: int
     loss: float | None
     eta_seconds: int | None
+    stage_name: str | None
+    checkpoint_path: str | None
     adapter_path: str | None
     gguf_path: str | None
     error_message: str | None
@@ -174,6 +190,8 @@ class LLMTrainingJobRecord:
             "totalSteps": self.total_steps,
             "loss": self.loss,
             "etaSeconds": self.eta_seconds,
+            "stageName": self.stage_name,
+            "checkpointPath": self.checkpoint_path,
             "adapterPath": self.adapter_path,
             "ggufPath": self.gguf_path,
             "errorMessage": self.error_message,
@@ -232,6 +250,8 @@ def _row_to_record(row: sqlite3.Row) -> LLMTrainingJobRecord:
         total_steps=int(row["total_steps"]),
         loss=row["loss"],
         eta_seconds=row["eta_seconds"],
+        stage_name=row["stage_name"],
+        checkpoint_path=row["checkpoint_path"],
         adapter_path=row["adapter_path"],
         gguf_path=row["gguf_path"],
         error_message=row["error_message"],
@@ -354,6 +374,8 @@ class LLMTrainingService:
         total_steps: int | None = None,
         loss: float | None | object = _UNSET,
         eta_seconds: int | None | object = _UNSET,
+        stage_name: str | None | object = _UNSET,
+        checkpoint_path: str | None | object = _UNSET,
         adapter_path: str | None | object = _UNSET,
         gguf_path: str | None | object = _UNSET,
         error_message: str | None | object = _UNSET,
@@ -381,6 +403,12 @@ class LLMTrainingService:
         if eta_seconds is not _UNSET:
             fields.append("eta_seconds = ?")
             values.append(eta_seconds)
+        if stage_name is not _UNSET:
+            fields.append("stage_name = ?")
+            values.append(stage_name)
+        if checkpoint_path is not _UNSET:
+            fields.append("checkpoint_path = ?")
+            values.append(checkpoint_path)
         if adapter_path is not _UNSET:
             fields.append("adapter_path = ?")
             values.append(adapter_path)
@@ -570,6 +598,7 @@ class LLMTrainingService:
                 conn,
                 job_id,
                 status="failed",
+                stage_name=FAILED_STAGE_NAME,
                 error_message=message,
                 completed_at=_utc_now(),
             )
@@ -607,12 +636,14 @@ class LLMTrainingService:
                 UPDATE llm_training_jobs
                 SET
                     status = 'failed',
+                    stage_name = ?,
                     error_message = ?,
                     eta_seconds = NULL,
                     completed_at = ?
                 WHERE status IN ({status_placeholders})
                 """,
                 (
+                    RECOVERED_STAGE_NAME,
                     INTERRUPTED_TRAINING_RECOVERY_ERROR,
                     now,
                     *RECOVERABLE_INTERRUPTED_STATUSES,
@@ -639,6 +670,7 @@ class LLMTrainingService:
             if raw_status not in NON_TERMINAL_STATUSES:
                 return "continue"
             message = str(event_payload.get("message") or "").strip() or None
+            stage_name = message or STATUS_STAGE_NAMES.get(raw_status)
             hinted_progress = STATUS_PROGRESS_HINT.get(raw_status, record.progress)
             next_progress = max(record.progress, hinted_progress)
             with self._conn() as conn:
@@ -648,6 +680,7 @@ class LLMTrainingService:
                     status=raw_status,  # type: ignore[arg-type]
                     progress=next_progress,
                     started_at=record.started_at if record.started_at else _utc_now(),
+                    stage_name=stage_name,
                     error_message=None,
                 )
                 conn.commit()
@@ -672,6 +705,8 @@ class LLMTrainingService:
             loss_value = _to_float_or_none(event_payload.get("loss"))
             eta_raw = event_payload.get("etaSeconds")
             eta_value = _to_int(eta_raw, record.eta_seconds or 0) if eta_raw is not None else None
+            checkpoint_path = str(event_payload.get("checkpointPath") or "").strip() or None
+            stage_name = str(event_payload.get("message") or "").strip() or STATUS_STAGE_NAMES.get(status)
 
             with self._conn() as conn:
                 self._update(
@@ -683,6 +718,8 @@ class LLMTrainingService:
                     total_steps=total_steps,
                     loss=loss_value if loss_value is not None else _UNSET,
                     eta_seconds=eta_value if eta_raw is not None else _UNSET,
+                    stage_name=stage_name,
+                    checkpoint_path=checkpoint_path if checkpoint_path is not None else _UNSET,
                     started_at=record.started_at if record.started_at else _utc_now(),
                     error_message=None,
                 )
@@ -711,6 +748,7 @@ class LLMTrainingService:
                     total_steps=max(latest.total_steps, latest.current_step),
                     loss=final_loss if final_loss is not None else _UNSET,
                     eta_seconds=None,
+                    stage_name=STATUS_STAGE_NAMES["registering"],
                     adapter_path=adapter_path,
                     gguf_path=gguf_path,
                     started_at=latest.started_at if latest.started_at else _utc_now(),
@@ -733,6 +771,7 @@ class LLMTrainingService:
                     conn,
                     job_id,
                     status=terminal_status,
+                    stage_name=CANCELED_STAGE_NAME if terminal_status == "canceled" else FAILED_STAGE_NAME,
                     error_message=translated_message,
                     eta_seconds=None,
                     completed_at=_utc_now(),
@@ -828,6 +867,7 @@ class LLMTrainingService:
                         status="completed",
                         progress=1.0,
                         eta_seconds=None,
+                        stage_name=STATUS_STAGE_NAMES["completed"],
                         error_message=REGISTRATION_PENDING_WARNING,
                         completed_at=_utc_now(),
                     )
@@ -855,6 +895,7 @@ class LLMTrainingService:
                         status="completed",
                         progress=1.0,
                         eta_seconds=None,
+                        stage_name=STATUS_STAGE_NAMES["completed"],
                         error_message=None,
                         completed_at=_utc_now(),
                     )
@@ -872,6 +913,7 @@ class LLMTrainingService:
                         status="completed",
                         progress=1.0,
                         eta_seconds=None,
+                        stage_name=STATUS_STAGE_NAMES["completed"],
                         error_message=REGISTRATION_PENDING_WARNING,
                         completed_at=_utc_now(),
                     )
@@ -969,9 +1011,9 @@ class LLMTrainingService:
                 """
                 INSERT INTO llm_training_jobs
                     (id, character_id, dataset_ids_json, mode, base_model,
-                     status, progress, current_step, total_steps,
+                     status, progress, current_step, total_steps, stage_name,
                      queue_task_id, created_at)
-                VALUES (?, ?, ?, ?, ?, 'queued', 0.0, 0, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, 'queued', 0.0, 0, ?, ?, ?, ?)
                 """,
                 (
                     job_id,
@@ -980,6 +1022,7 @@ class LLMTrainingService:
                     mode,
                     base_model_config.ollama_tag,
                     total_steps,
+                    INITIAL_STAGE_NAME,
                     job_id,
                     now,
                 ),
@@ -1001,6 +1044,7 @@ class LLMTrainingService:
                     conn,
                     job_id,
                     status="failed",
+                    stage_name=FAILED_STAGE_NAME,
                     error_message="训练任务入队失败，请稍后重试",
                     completed_at=_utc_now(),
                 )
@@ -1024,6 +1068,7 @@ class LLMTrainingService:
                     status="preparing",
                     progress=0.02,
                     started_at=record.started_at if record.started_at else _utc_now(),
+                    stage_name=STATUS_STAGE_NAMES["preparing"],
                     error_message=None,
                 )
                 conn.commit()
@@ -1132,6 +1177,7 @@ class LLMTrainingService:
                 conn,
                 job_id,
                 status="canceled",
+                stage_name=CANCELED_STAGE_NAME,
                 error_message="用户手动取消",
                 completed_at=_utc_now(),
             )

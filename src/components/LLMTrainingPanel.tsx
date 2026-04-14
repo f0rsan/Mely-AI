@@ -11,7 +11,6 @@ import {
   listLLMTrainingJobs,
   startLLMTraining,
 } from "../api/llmTraining";
-import { fetchCharacterLLMPreferences } from "../api/llmPreferences";
 import { createTaskStream } from "../api/tasks";
 
 type Props = {
@@ -41,17 +40,19 @@ type TrainingBaseModelOption = {
   helperText: string;
 };
 
-const DEFAULT_TRAINING_BASE_MODEL_NAME = "qwen2.5:7b-instruct-q4_K_M";
+const DEFAULT_TRAINING_BASE_MODEL_NAME = "qwen2.5:3b";
 const TRAINING_COMPATIBLE_BASE_MODELS: TrainingBaseModelOption[] = [
   {
     modelName: DEFAULT_TRAINING_BASE_MODEL_NAME,
-    label: "默认训练模型（Qwen2.5 7B）",
-    helperText: "兼容当前训练管线，适合角色微调",
+    label: "默认训练模型（Qwen2.5 3B）",
+    helperText: "显存压力更低，适合作为默认角色微调基模",
+  },
+  {
+    modelName: "qwen2.5:7b-instruct-q4_K_M",
+    label: "增强训练模型（Qwen2.5 7B）",
+    helperText: "表达能力更强，但训练更重，适合手动切换使用",
   },
 ];
-const TRAINING_COMPATIBLE_MODEL_NAME_SET = new Set(
-  TRAINING_COMPATIBLE_BASE_MODELS.map((item) => item.modelName),
-);
 const TRAINING_DEFAULT_BASE_MODEL = (
   TRAINING_COMPATIBLE_BASE_MODELS.find((item) => item.modelName === DEFAULT_TRAINING_BASE_MODEL_NAME)
   ?? TRAINING_COMPATIBLE_BASE_MODELS[0]
@@ -89,27 +90,8 @@ function formatEta(seconds: number | null): string {
   return `约 ${m} 分钟`;
 }
 
-function resolveBaseModelSelection(characterDefaultBaseModelName: string | null): {
-  selectedBaseModel: string;
-  notice: string | null;
-} {
-  if (
-    characterDefaultBaseModelName &&
-    TRAINING_COMPATIBLE_MODEL_NAME_SET.has(characterDefaultBaseModelName)
-  ) {
-    return { selectedBaseModel: characterDefaultBaseModelName, notice: null };
-  }
-
-  if (characterDefaultBaseModelName) {
-    return {
-      selectedBaseModel: TRAINING_DEFAULT_BASE_MODEL,
-      notice:
-        `角色默认基础模型「${characterDefaultBaseModelName}」可用于对话，但暂不在训练兼容列表。` +
-        `已自动回退到「${TRAINING_DEFAULT_BASE_MODEL}」。`,
-    };
-  }
-
-  return { selectedBaseModel: TRAINING_DEFAULT_BASE_MODEL, notice: null };
+function resolveStageName(job: LLMTrainingJob): string {
+  return job.stageName ?? STATUS_LABELS[job.status] ?? job.status;
 }
 
 function isRegistrationRetryHint(message: string | null): boolean {
@@ -131,6 +113,7 @@ function JobCard({
 }) {
   const isActive = !["completed", "failed", "canceled"].includes(job.status);
   const registrationRetryHint = isRegistrationRetryHint(job.errorMessage);
+  const stageName = resolveStageName(job);
 
   return (
     <div className="rounded-lg border border-zinc-700 bg-zinc-800/30 px-3 py-3 space-y-2">
@@ -171,6 +154,24 @@ function JobCard({
               <span>ETA</span>
               <span className="font-mono text-zinc-300">{formatEta(job.etaSeconds)}</span>
             </div>
+            <div className="flex items-center justify-between gap-2">
+              <span>当前阶段</span>
+              <span className="text-zinc-300 text-right">{stageName}</span>
+            </div>
+            <div className="col-span-2 space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <span>最近 checkpoint</span>
+                <span className="font-mono text-zinc-300 text-right">
+                  {job.checkpointPath ? "已生成" : "--"}
+                </span>
+              </div>
+              <p
+                className="rounded border border-zinc-700/70 bg-zinc-900/40 px-2 py-1 font-mono text-[11px] text-zinc-400 break-all"
+                title={job.checkpointPath ?? ""}
+              >
+                {job.checkpointPath ?? "--"}
+              </p>
+            </div>
             <div className="col-span-2 text-right font-mono">{Math.round(job.progress * 100)}%</div>
           </div>
         </>
@@ -204,7 +205,6 @@ export function LLMTrainingPanel({ characterId }: Props) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [mode, setMode] = useState<LLMTrainingMode>("standard");
   const [selectedBaseModel, setSelectedBaseModel] = useState<string>(TRAINING_DEFAULT_BASE_MODEL);
-  const [baseModelNotice, setBaseModelNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -224,18 +224,12 @@ export function LLMTrainingPanel({ characterId }: Props) {
 
   const loadAll = useCallback(async () => {
     try {
-      const [ds, jbs, preferences] = await Promise.all([
+      const [ds, jbs] = await Promise.all([
         listLLMDatasets(characterId),
         listLLMTrainingJobs(characterId),
-        fetchCharacterLLMPreferences(characterId).catch(() => null),
       ]);
       setDatasets(ds);
       setJobs(jbs);
-      const { selectedBaseModel: resolvedBaseModel, notice } = resolveBaseModelSelection(
-        preferences?.defaultBaseModelName ?? null,
-      );
-      setSelectedBaseModel(resolvedBaseModel);
-      setBaseModelNotice(notice);
     } catch {
       setError("加载失败，请刷新重试");
     } finally {
@@ -398,11 +392,6 @@ export function LLMTrainingPanel({ characterId }: Props) {
         <p className="text-xs text-zinc-500">
           {TRAINING_COMPATIBLE_BASE_MODELS.find((item) => item.modelName === selectedBaseModel)?.helperText}
         </p>
-        {baseModelNotice && (
-          <div className="rounded-lg border border-amber-900 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
-            {baseModelNotice}
-          </div>
-        )}
       </div>
 
       {/* Mode selector */}

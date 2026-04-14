@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from app.services.llm_training import (
+    DEFAULT_BASE_MODEL,
     LLMTrainingCharacterNotFoundError,
     LLMTrainingError,
     LLMTrainingGPUBusyError,
@@ -20,7 +21,7 @@ router = APIRouter(tags=["llm-training"])
 class StartTrainingRequest(BaseModel):
     datasetIds: list[str] = Field(min_length=1)
     mode: LLMTrainingMode = "standard"
-    baseModel: str = "qwen2.5:7b-instruct-q4_K_M"
+    baseModel: str = DEFAULT_BASE_MODEL
 
 
 class LLMTrainingJobPayload(BaseModel):
@@ -35,6 +36,8 @@ class LLMTrainingJobPayload(BaseModel):
     totalSteps: int
     loss: float | None
     etaSeconds: int | None
+    stageName: str | None
+    checkpointPath: str | None
     adapterPath: str | None
     ggufPath: str | None
     errorMessage: str | None

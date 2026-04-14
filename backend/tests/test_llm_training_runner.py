@@ -128,9 +128,13 @@ def test_worker_supports_cancel_sentinel_on_windows_safe_path(tmp_path: Path):
         cwd=REPO_ROOT,
     )
     try:
-        time.sleep(0.12)
+        assert process.stdout is not None
+        first_line = process.stdout.readline()
+        assert first_line.strip()
+        cancel_path.parent.mkdir(parents=True, exist_ok=True)
         cancel_path.write_text("cancel", encoding="utf-8")
-        stdout, stderr = process.communicate(timeout=30)
+        stdout_rest, stderr = process.communicate(timeout=30)
+        stdout = first_line + stdout_rest
     finally:
         if process.poll() is None:
             process.kill()
@@ -374,6 +378,7 @@ def test_service_runner_success_updates_db_and_worker_payload(
                     "totalSteps": 6,
                     "loss": 1.2345,
                     "etaSeconds": 12,
+                    "checkpointPath": str(tmp_path / "checkpoints" / "checkpoint-3"),
                 }
             ),
             json.dumps(
@@ -410,6 +415,8 @@ def test_service_runner_success_updates_db_and_worker_payload(
     assert final_job["currentStep"] >= 3
     assert final_job["totalSteps"] >= 6
     assert final_job["loss"] == pytest.approx(0.4321)
+    assert final_job["stageName"] == "训练完成"
+    assert final_job["checkpointPath"] == str(tmp_path / "checkpoints" / "checkpoint-3")
     assert final_job["adapterPath"] == str(adapter_path)
     assert final_job["ggufPath"] == str(gguf_path)
     assert final_job["errorMessage"] is None
@@ -427,7 +434,8 @@ def test_service_runner_success_updates_db_and_worker_payload(
     payload = launched["payload"]
     assert payload["jobId"] == job_id
     assert payload["mode"] == "light"
-    assert payload["baseModel"] == "qwen2.5:7b-instruct-q4_K_M"
+    assert payload["baseModel"] == "qwen2.5:3b"
+    assert payload["unslothModelName"] == "Qwen/Qwen2.5-3B-Instruct"
     assert payload["datasetPaths"] and payload["datasetPaths"][0].endswith(".jsonl")
     assert "llm_training_runs" in payload["outputDir"]
 

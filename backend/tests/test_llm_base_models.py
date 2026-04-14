@@ -17,7 +17,8 @@ def test_supported_training_models_have_expected_fields() -> None:
 
     default_config = get_training_base_model(DEFAULT_TRAINING_BASE_MODEL)
     assert default_config is not None
-    assert default_config.huggingface_model_id == "Qwen/Qwen2.5-7B-Instruct"
+    assert default_config.ollama_tag == "qwen2.5:3b"
+    assert default_config.huggingface_model_id == "Qwen/Qwen2.5-3B-Instruct"
     assert default_config.default_lora_rank == 16
     assert default_config.max_seq_len == 4096
     assert "QLoRA" in default_config.expected_quantization

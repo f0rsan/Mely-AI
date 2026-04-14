@@ -79,7 +79,10 @@ class TestStartTraining:
         assert body["characterId"] == character_id
         assert body["datasetIds"] == [dataset_id]
         assert body["mode"] == "standard"
+        assert body["baseModel"] == "qwen2.5:3b"
         assert body["status"] in ("queued", "preparing", "failed")
+        assert body["stageName"] == "等待训练资源"
+        assert body["checkpointPath"] is None
         assert body["progress"] >= 0.0
         assert body["id"] is not None
         assert body["createdAt"] is not None

@@ -12,16 +12,11 @@ vi.mock("../api/llmTraining", () => ({
   listLLMTrainingJobs: vi.fn(),
 }));
 
-vi.mock("../api/llmPreferences", () => ({
-  fetchCharacterLLMPreferences: vi.fn(),
-}));
-
 vi.mock("../api/tasks", () => ({
   createTaskStream: vi.fn(),
 }));
 
 import { listLLMDatasets } from "../api/llmDatasets";
-import { fetchCharacterLLMPreferences } from "../api/llmPreferences";
 import {
   getLLMTrainingJob,
   listLLMTrainingJobs,
@@ -31,7 +26,6 @@ import { type TaskEvent, createTaskStream } from "../api/tasks";
 import { LLMTrainingPanel } from "./LLMTrainingPanel";
 
 const mockListDatasets = vi.mocked(listLLMDatasets);
-const mockFetchCharacterLLMPreferences = vi.mocked(fetchCharacterLLMPreferences);
 const mockGetLLMTrainingJob = vi.mocked(getLLMTrainingJob);
 const mockListLLMTrainingJobs = vi.mocked(listLLMTrainingJobs);
 const mockStartLLMTraining = vi.mocked(startLLMTraining);
@@ -61,6 +55,8 @@ const baseJob = {
   totalSteps: 100,
   loss: 1.2345,
   etaSeconds: 120,
+  stageName: "正在训练",
+  checkpointPath: "/tmp/mely/checkpoints/checkpoint-30",
   adapterPath: null,
   ggufPath: null,
   errorMessage: null,
@@ -75,10 +71,6 @@ beforeEach(() => {
   mockGetLLMTrainingJob.mockResolvedValue(baseJob);
   mockListLLMTrainingJobs.mockResolvedValue([baseJob]);
   mockStartLLMTraining.mockResolvedValue(baseJob);
-  mockFetchCharacterLLMPreferences.mockResolvedValue({
-    characterId: "char-1",
-    defaultBaseModelName: "qwen2.5:7b-instruct-q4_K_M",
-  });
   mockCreateTaskStream.mockImplementation(() => vi.fn());
 });
 
@@ -88,25 +80,19 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test("prefers character default base model when it is training-compatible", async () => {
+test("defaults training base model to qwen2.5:3b", async () => {
   render(<LLMTrainingPanel characterId="char-1" />);
 
   const selector = await screen.findByLabelText("基础模型");
-  expect(selector).toHaveValue("qwen2.5:7b-instruct-q4_K_M");
-  expect(screen.queryByText(/已自动回退到/)).not.toBeInTheDocument();
+  expect(selector).toHaveValue("qwen2.5:3b");
 });
 
-test("falls back to training default model when character default is not training-compatible", async () => {
-  mockFetchCharacterLLMPreferences.mockResolvedValueOnce({
-    characterId: "char-1",
-    defaultBaseModelName: "minicpm-v:8b",
-  });
-
+test("shows both 3b and 7b as selectable training base models", async () => {
   render(<LLMTrainingPanel characterId="char-1" />);
 
-  const selector = await screen.findByLabelText("基础模型");
-  expect(selector).toHaveValue("qwen2.5:7b-instruct-q4_K_M");
-  expect(screen.getByText(/已自动回退到「qwen2.5:7b-instruct-q4_K_M」/)).toBeInTheDocument();
+  await screen.findByLabelText("基础模型");
+  expect(screen.getByRole("option", { name: /Qwen2\.5 3B/ })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: /Qwen2\.5 7B/ })).toBeInTheDocument();
 });
 
 test("sends baseModel in start training payload", async () => {
@@ -137,7 +123,7 @@ test("sends baseModel in start training payload", async () => {
       expect.objectContaining({
         datasetIds: ["dataset-1"],
         mode: "standard",
-        baseModel: "qwen2.5:7b-instruct-q4_K_M",
+        baseModel: "qwen2.5:3b",
       }),
     );
   });
@@ -147,9 +133,13 @@ test("shows step, total steps, loss, and ETA in active training card", async () 
   render(<LLMTrainingPanel characterId="char-1" />);
 
   await screen.findByText("当前 step");
+  expect(screen.getByText("当前阶段")).toBeInTheDocument();
+  expect(screen.getByText("最近 checkpoint")).toBeInTheDocument();
   expect(screen.getByText("总步数")).toBeInTheDocument();
   expect(screen.getByText("loss")).toBeInTheDocument();
   expect(screen.getByText("ETA")).toBeInTheDocument();
+  expect(screen.getByText("正在训练")).toBeInTheDocument();
+  expect(screen.getByText("/tmp/mely/checkpoints/checkpoint-30")).toBeInTheDocument();
   expect(screen.getByText("30")).toBeInTheDocument();
   expect(screen.getByText("100")).toBeInTheDocument();
   expect(screen.getByText("1.2345")).toBeInTheDocument();

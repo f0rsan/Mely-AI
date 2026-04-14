@@ -24,6 +24,8 @@ export type LLMTrainingJob = {
   totalSteps: number;
   loss: number | null;
   etaSeconds: number | null;
+  stageName: string | null;
+  checkpointPath: string | null;
   adapterPath: string | null;
   ggufPath: string | null;
   errorMessage: string | null;

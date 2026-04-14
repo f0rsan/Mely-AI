@@ -42,17 +42,9 @@ MODE_DISPLAY_NAMES: dict[LLMTrainingMode, str] = {
     "fine": "精细",
 }
 
-DEFAULT_TRAINING_BASE_MODEL = "qwen2.5:7b-instruct-q4_K_M"
+DEFAULT_TRAINING_BASE_MODEL = "qwen2.5:3b"
 
 SUPPORTED_TRAINING_BASE_MODELS: tuple[LLMTrainingBaseModelConfig, ...] = (
-    LLMTrainingBaseModelConfig(
-        ollama_tag="qwen2.5:7b-instruct-q4_K_M",
-        huggingface_model_id="Qwen/Qwen2.5-7B-Instruct",
-        default_lora_rank=16,
-        max_seq_len=4096,
-        expected_dtype="bfloat16",
-        expected_quantization="Ollama Q4_K_M / Unsloth 4-bit QLoRA",
-    ),
     LLMTrainingBaseModelConfig(
         ollama_tag="qwen2.5:3b",
         huggingface_model_id="Qwen/Qwen2.5-3B-Instruct",
@@ -60,6 +52,14 @@ SUPPORTED_TRAINING_BASE_MODELS: tuple[LLMTrainingBaseModelConfig, ...] = (
         max_seq_len=4096,
         expected_dtype="bfloat16",
         expected_quantization="Ollama Q4_K_M compatible / Unsloth 4-bit QLoRA",
+    ),
+    LLMTrainingBaseModelConfig(
+        ollama_tag="qwen2.5:7b-instruct-q4_K_M",
+        huggingface_model_id="Qwen/Qwen2.5-7B-Instruct",
+        default_lora_rank=16,
+        max_seq_len=4096,
+        expected_dtype="bfloat16",
+        expected_quantization="Ollama Q4_K_M / Unsloth 4-bit QLoRA",
     ),
 )
 
