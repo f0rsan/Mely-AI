@@ -84,13 +84,19 @@ async def lifespan(app: FastAPI):
             queue=task_queue,
             tts_runtime=tts_runtime,
         )
-        app.state.llm_training_service = create_llm_training_service(
-            db_path=bootstrap_state.db_path,
-            queue=task_queue,
-        )
         app.state.llm_model_service = create_llm_model_service(
             db_path=bootstrap_state.db_path,
         )
+        # Keep backend boot lightweight: GPU training dependencies are optional.
+        # Missing extras must fail when training starts, not during FastAPI import/startup.
+        llm_training_service = create_llm_training_service(
+            db_path=bootstrap_state.db_path,
+            data_root=bootstrap_state.data_root,
+            queue=task_queue,
+            llm_model_service=app.state.llm_model_service,
+        )
+        llm_training_service.recover_interrupted_jobs()
+        app.state.llm_training_service = llm_training_service
         app.state.chat_service = create_chat_service(
             db_path=bootstrap_state.db_path,
         )

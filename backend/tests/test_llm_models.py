@@ -103,7 +103,7 @@ class TestRegisterModel:
         assert resp.json()["status"] == "failed"
         mocked_create.assert_not_called()
 
-    def test_register_model_failed_when_ollama_returns_non_retryable_error(self, client, character_id):
+    def test_register_model_pending_when_ollama_returns_non_retryable_error(self, client, character_id):
         from app.services.ollama_service import OllamaAPIError
 
         with patch(
@@ -116,7 +116,7 @@ class TestRegisterModel:
                 json={"ggufPath": FAKE_GGUF},
             )
         assert resp.status_code == 201
-        assert resp.json()["status"] == "failed"
+        assert resp.json()["status"] == "pending"
 
     def test_register_model_version_increments(self, client, character_id):
         with patch(

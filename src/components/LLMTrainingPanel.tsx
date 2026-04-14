@@ -11,6 +11,7 @@ import {
   listLLMTrainingJobs,
   startLLMTraining,
 } from "../api/llmTraining";
+import { fetchCharacterLLMPreferences } from "../api/llmPreferences";
 import { createTaskStream } from "../api/tasks";
 
 type Props = {
@@ -33,6 +34,28 @@ const STATUS_LABELS: Record<string, string> = {
   failed:      "失败",
   canceled:    "已取消",
 };
+
+type TrainingBaseModelOption = {
+  modelName: string;
+  label: string;
+  helperText: string;
+};
+
+const DEFAULT_TRAINING_BASE_MODEL_NAME = "qwen2.5:7b-instruct-q4_K_M";
+const TRAINING_COMPATIBLE_BASE_MODELS: TrainingBaseModelOption[] = [
+  {
+    modelName: DEFAULT_TRAINING_BASE_MODEL_NAME,
+    label: "默认训练模型（Qwen2.5 7B）",
+    helperText: "兼容当前训练管线，适合角色微调",
+  },
+];
+const TRAINING_COMPATIBLE_MODEL_NAME_SET = new Set(
+  TRAINING_COMPATIBLE_BASE_MODELS.map((item) => item.modelName),
+);
+const TRAINING_DEFAULT_BASE_MODEL = (
+  TRAINING_COMPATIBLE_BASE_MODELS.find((item) => item.modelName === DEFAULT_TRAINING_BASE_MODEL_NAME)
+  ?? TRAINING_COMPATIBLE_BASE_MODELS[0]
+)?.modelName ?? DEFAULT_TRAINING_BASE_MODEL_NAME;
 
 function StatusBadge({ status }: { status: string }) {
   const color =
@@ -60,10 +83,43 @@ function ProgressBar({ value }: { value: number }) {
 }
 
 function formatEta(seconds: number | null): string {
-  if (seconds === null) return "";
+  if (seconds === null) return "--";
   if (seconds < 60) return `约 ${seconds}s`;
   const m = Math.ceil(seconds / 60);
   return `约 ${m} 分钟`;
+}
+
+function resolveBaseModelSelection(characterDefaultBaseModelName: string | null): {
+  selectedBaseModel: string;
+  notice: string | null;
+} {
+  if (
+    characterDefaultBaseModelName &&
+    TRAINING_COMPATIBLE_MODEL_NAME_SET.has(characterDefaultBaseModelName)
+  ) {
+    return { selectedBaseModel: characterDefaultBaseModelName, notice: null };
+  }
+
+  if (characterDefaultBaseModelName) {
+    return {
+      selectedBaseModel: TRAINING_DEFAULT_BASE_MODEL,
+      notice:
+        `角色默认基础模型「${characterDefaultBaseModelName}」可用于对话，但暂不在训练兼容列表。` +
+        `已自动回退到「${TRAINING_DEFAULT_BASE_MODEL}」。`,
+    };
+  }
+
+  return { selectedBaseModel: TRAINING_DEFAULT_BASE_MODEL, notice: null };
+}
+
+function isRegistrationRetryHint(message: string | null): boolean {
+  if (!message) return false;
+  const normalized = message.toLowerCase();
+  return (
+    (message.includes("注册") && (message.includes("重试") || message.includes("稍后"))) ||
+    normalized.includes("registration pending") ||
+    normalized.includes("pending")
+  );
 }
 
 function JobCard({
@@ -74,15 +130,14 @@ function JobCard({
   onCancel: (id: string) => void;
 }) {
   const isActive = !["completed", "failed", "canceled"].includes(job.status);
+  const registrationRetryHint = isRegistrationRetryHint(job.errorMessage);
+
   return (
     <div className="rounded-lg border border-zinc-700 bg-zinc-800/30 px-3 py-3 space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <StatusBadge status={job.status} />
           <span className="text-xs text-zinc-400">{MODE_LABELS[job.mode] ?? job.mode}</span>
-          {job.loss !== null && (
-            <span className="text-xs text-zinc-500 font-mono">loss {job.loss.toFixed(4)}</span>
-          )}
         </div>
         {isActive && (
           <button
@@ -97,20 +152,45 @@ function JobCard({
       {isActive && (
         <>
           <ProgressBar value={job.progress} />
-          <div className="flex items-center justify-between text-xs text-zinc-500">
-            <span>{Math.round(job.progress * 100)}%</span>
-            {job.etaSeconds !== null && <span>{formatEta(job.etaSeconds)}</span>}
-            {job.totalSteps > 0 && (
-              <span className="font-mono">
-                {job.currentStep} / {job.totalSteps} steps
+          <div className="text-xs text-zinc-500 grid grid-cols-2 gap-y-1.5 gap-x-3">
+            <div className="flex items-center justify-between gap-2">
+              <span>当前 step</span>
+              <span className="font-mono text-zinc-300">{job.currentStep}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span>总步数</span>
+              <span className="font-mono text-zinc-300">{job.totalSteps > 0 ? job.totalSteps : "--"}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span>loss</span>
+              <span className="font-mono text-zinc-300">
+                {job.loss !== null ? job.loss.toFixed(4) : "--"}
               </span>
-            )}
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span>ETA</span>
+              <span className="font-mono text-zinc-300">{formatEta(job.etaSeconds)}</span>
+            </div>
+            <div className="col-span-2 text-right font-mono">{Math.round(job.progress * 100)}%</div>
           </div>
         </>
       )}
 
       {job.errorMessage && (
-        <p className="text-xs text-yellow-500 leading-relaxed">{job.errorMessage}</p>
+        <div
+          className={`rounded-md border px-2 py-2 text-xs leading-relaxed space-y-1 ${
+            registrationRetryHint
+              ? "border-amber-800 bg-amber-950/30 text-amber-200"
+              : job.status === "failed"
+                ? "border-red-800 bg-red-950/30 text-red-200"
+                : "border-zinc-700 bg-zinc-900/40 text-zinc-300"
+          }`}
+        >
+          <p className="font-medium">
+            {registrationRetryHint ? "模型注册待重试" : "系统提示"}
+          </p>
+          <p>{job.errorMessage}</p>
+        </div>
       )}
 
       <p className="text-xs text-zinc-600 font-mono truncate">{job.id.slice(0, 8)}…</p>
@@ -123,6 +203,8 @@ export function LLMTrainingPanel({ characterId }: Props) {
   const [jobs, setJobs] = useState<LLMTrainingJob[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [mode, setMode] = useState<LLMTrainingMode>("standard");
+  const [selectedBaseModel, setSelectedBaseModel] = useState<string>(TRAINING_DEFAULT_BASE_MODEL);
+  const [baseModelNotice, setBaseModelNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -142,12 +224,18 @@ export function LLMTrainingPanel({ characterId }: Props) {
 
   const loadAll = useCallback(async () => {
     try {
-      const [ds, jbs] = await Promise.all([
+      const [ds, jbs, preferences] = await Promise.all([
         listLLMDatasets(characterId),
         listLLMTrainingJobs(characterId),
+        fetchCharacterLLMPreferences(characterId).catch(() => null),
       ]);
       setDatasets(ds);
       setJobs(jbs);
+      const { selectedBaseModel: resolvedBaseModel, notice } = resolveBaseModelSelection(
+        preferences?.defaultBaseModelName ?? null,
+      );
+      setSelectedBaseModel(resolvedBaseModel);
+      setBaseModelNotice(notice);
     } catch {
       setError("加载失败，请刷新重试");
     } finally {
@@ -231,6 +319,7 @@ export function LLMTrainingPanel({ characterId }: Props) {
       const job = await startLLMTraining(characterId, {
         datasetIds: Array.from(selectedIds),
         mode,
+        baseModel: selectedBaseModel,
       });
       setJobs((prev) => [job, ...prev]);
     } catch (err) {
@@ -282,6 +371,37 @@ export function LLMTrainingPanel({ characterId }: Props) {
               </li>
             ))}
           </ul>
+        )}
+      </div>
+
+      {/* Base model selector */}
+      <div className="space-y-2">
+        <label
+          htmlFor="llm-training-base-model"
+          className="text-xs font-medium text-zinc-400 uppercase tracking-wide block"
+        >
+          基础模型
+        </label>
+        <select
+          id="llm-training-base-model"
+          value={selectedBaseModel}
+          onChange={(event) => setSelectedBaseModel(event.target.value)}
+          disabled={starting || !!activeJob}
+          className="w-full rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-200 text-sm px-3 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {TRAINING_COMPATIBLE_BASE_MODELS.map((item) => (
+            <option key={item.modelName} value={item.modelName}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-zinc-500">
+          {TRAINING_COMPATIBLE_BASE_MODELS.find((item) => item.modelName === selectedBaseModel)?.helperText}
+        </p>
+        {baseModelNotice && (
+          <div className="rounded-lg border border-amber-900 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
+            {baseModelNotice}
+          </div>
         )}
       </div>
 

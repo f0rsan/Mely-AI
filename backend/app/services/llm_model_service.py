@@ -15,7 +15,6 @@ from uuid import uuid4
 
 from app.db.connection import connect_database
 from app.services.ollama_service import (
-    OllamaRetryableError,
     build_character_modelfile,
     create_model as ollama_create_model,
     delete_model as ollama_delete_model,
@@ -130,9 +129,9 @@ def _normalize_gguf_path(gguf_path: str) -> str:
 
 def _classify_registration_error(exc: Exception) -> str:
     """Classify registration failure into retryable or hard-failed state."""
-    if isinstance(exc, OllamaRetryableError):
-        return "pending"
-    return "failed"
+    if isinstance(exc, LLMModelValidationError):
+        return "failed"
+    return "pending"
 
 
 # ── Service ────────────────────────────────────────────────────────────────────

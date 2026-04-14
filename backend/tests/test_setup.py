@@ -87,3 +87,31 @@ def test_setup_status_marks_fallback_gpu_detection(monkeypatch) -> None:
     assert body["gpu"]["source"] == "fallback"
     assert body["gpu"]["vramGB"] == 8.0
     assert "保守值估算" in body["gpu"]["recommendation"]
+
+
+def test_backend_starts_without_llm_gpu_training_extras(monkeypatch) -> None:
+    app = create_app()
+
+    monkeypatch.setattr(
+        "app.services.llm_training.get_missing_gpu_training_dependencies",
+        lambda: ["unsloth", "torch"],
+    )
+
+    async def fake_check_ollama_runtime():
+        return SimpleNamespace(
+            installed=False,
+            running=False,
+            version=None,
+            minimum_version="0.3.10",
+            platform="unknown",
+            models=[],
+            hint="未检测到语言引擎，请先安装 Ollama。",
+        )
+
+    monkeypatch.setattr("app.api.setup.check_ollama_runtime", fake_check_ollama_runtime)
+
+    with TestClient(app) as client:
+        assert client.app.state.llm_training_service is not None
+        response = client.get("/api/setup/status")
+
+    assert response.status_code == 200

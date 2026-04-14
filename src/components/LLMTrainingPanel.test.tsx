@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 vi.mock("../api/llmDatasets", () => ({
@@ -12,18 +12,29 @@ vi.mock("../api/llmTraining", () => ({
   listLLMTrainingJobs: vi.fn(),
 }));
 
+vi.mock("../api/llmPreferences", () => ({
+  fetchCharacterLLMPreferences: vi.fn(),
+}));
+
 vi.mock("../api/tasks", () => ({
   createTaskStream: vi.fn(),
 }));
 
 import { listLLMDatasets } from "../api/llmDatasets";
-import { getLLMTrainingJob, listLLMTrainingJobs } from "../api/llmTraining";
+import { fetchCharacterLLMPreferences } from "../api/llmPreferences";
+import {
+  getLLMTrainingJob,
+  listLLMTrainingJobs,
+  startLLMTraining,
+} from "../api/llmTraining";
 import { type TaskEvent, createTaskStream } from "../api/tasks";
 import { LLMTrainingPanel } from "./LLMTrainingPanel";
 
 const mockListDatasets = vi.mocked(listLLMDatasets);
+const mockFetchCharacterLLMPreferences = vi.mocked(fetchCharacterLLMPreferences);
 const mockGetLLMTrainingJob = vi.mocked(getLLMTrainingJob);
 const mockListLLMTrainingJobs = vi.mocked(listLLMTrainingJobs);
+const mockStartLLMTraining = vi.mocked(startLLMTraining);
 const mockCreateTaskStream = vi.mocked(createTaskStream);
 
 const baseDataset = {
@@ -43,7 +54,7 @@ const baseJob = {
   characterId: "char-1",
   datasetIds: ["dataset-1"],
   mode: "standard" as const,
-  baseModel: "qwen2.5-7b",
+  baseModel: "qwen2.5:7b-instruct-q4_K_M",
   status: "training" as const,
   progress: 0.3,
   currentStep: 30,
@@ -63,12 +74,107 @@ beforeEach(() => {
   mockListDatasets.mockResolvedValue([baseDataset]);
   mockGetLLMTrainingJob.mockResolvedValue(baseJob);
   mockListLLMTrainingJobs.mockResolvedValue([baseJob]);
+  mockStartLLMTraining.mockResolvedValue(baseJob);
+  mockFetchCharacterLLMPreferences.mockResolvedValue({
+    characterId: "char-1",
+    defaultBaseModelName: "qwen2.5:7b-instruct-q4_K_M",
+  });
+  mockCreateTaskStream.mockImplementation(() => vi.fn());
 });
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   vi.restoreAllMocks();
+});
+
+test("prefers character default base model when it is training-compatible", async () => {
+  render(<LLMTrainingPanel characterId="char-1" />);
+
+  const selector = await screen.findByLabelText("基础模型");
+  expect(selector).toHaveValue("qwen2.5:7b-instruct-q4_K_M");
+  expect(screen.queryByText(/已自动回退到/)).not.toBeInTheDocument();
+});
+
+test("falls back to training default model when character default is not training-compatible", async () => {
+  mockFetchCharacterLLMPreferences.mockResolvedValueOnce({
+    characterId: "char-1",
+    defaultBaseModelName: "minicpm-v:8b",
+  });
+
+  render(<LLMTrainingPanel characterId="char-1" />);
+
+  const selector = await screen.findByLabelText("基础模型");
+  expect(selector).toHaveValue("qwen2.5:7b-instruct-q4_K_M");
+  expect(screen.getByText(/已自动回退到「qwen2.5:7b-instruct-q4_K_M」/)).toBeInTheDocument();
+});
+
+test("sends baseModel in start training payload", async () => {
+  const queuedJob = {
+    ...baseJob,
+    id: "job-2",
+    status: "queued" as const,
+    progress: 0,
+    currentStep: 0,
+    totalSteps: 0,
+    loss: null,
+    etaSeconds: null,
+    queueTaskId: "queue-2",
+    startedAt: null,
+  };
+  mockListLLMTrainingJobs.mockResolvedValueOnce([]);
+  mockStartLLMTraining.mockResolvedValueOnce(queuedJob);
+
+  render(<LLMTrainingPanel characterId="char-1" />);
+
+  await screen.findByText("角色语料");
+  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("button", { name: "开始训练" }));
+
+  await waitFor(() => {
+    expect(mockStartLLMTraining).toHaveBeenCalledWith(
+      "char-1",
+      expect.objectContaining({
+        datasetIds: ["dataset-1"],
+        mode: "standard",
+        baseModel: "qwen2.5:7b-instruct-q4_K_M",
+      }),
+    );
+  });
+});
+
+test("shows step, total steps, loss, and ETA in active training card", async () => {
+  render(<LLMTrainingPanel characterId="char-1" />);
+
+  await screen.findByText("当前 step");
+  expect(screen.getByText("总步数")).toBeInTheDocument();
+  expect(screen.getByText("loss")).toBeInTheDocument();
+  expect(screen.getByText("ETA")).toBeInTheDocument();
+  expect(screen.getByText("30")).toBeInTheDocument();
+  expect(screen.getByText("100")).toBeInTheDocument();
+  expect(screen.getByText("1.2345")).toBeInTheDocument();
+  expect(screen.getByText("约 2 分钟")).toBeInTheDocument();
+});
+
+test("shows registration-retry hint area when backend returns retry message", async () => {
+  mockListLLMTrainingJobs.mockResolvedValueOnce([
+    {
+      ...baseJob,
+      id: "job-2",
+      status: "completed",
+      progress: 1,
+      currentStep: 100,
+      totalSteps: 100,
+      etaSeconds: null,
+      errorMessage: "模型注册失败，稍后会自动重试",
+      completedAt: "2026-04-01T00:20:00Z",
+    },
+  ]);
+
+  render(<LLMTrainingPanel characterId="char-1" />);
+
+  await screen.findByText("模型注册待重试");
+  expect(screen.getByText("模型注册失败，稍后会自动重试")).toBeInTheDocument();
 });
 
 test("shows lightweight notice and logs when single job detail refresh fails", async () => {
