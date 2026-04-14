@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sqlite3
+import subprocess
 import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -108,10 +110,10 @@ CANCELED_STAGE_NAME = "训练已取消"
 RECOVERED_STAGE_NAME = "训练已中断"
 STATUS_STAGE_NAMES: dict[str, str] = {
     "queued": INITIAL_STAGE_NAME,
-    "preparing": "正在准备训练环境…",
+    "preparing": "合并数据集",
     "training": "正在训练",
-    "exporting": "正在导出 GGUF",
-    "registering": "正在注册模型…",
+    "exporting": "导出 GGUF",
+    "registering": "注册 Ollama",
     "completed": "训练完成",
     "failed": FAILED_STAGE_NAME,
     "canceled": CANCELED_STAGE_NAME,
@@ -150,6 +152,31 @@ class LLMTrainingCharacterNotFoundError(LLMTrainingError):
 
 class LLMTrainingGPUBusyError(LLMTrainingError):
     """GPU is occupied by another task."""
+
+
+def _open_directory(path: Path) -> None:
+    """Open a local directory in the OS file explorer."""
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(
+                ["open", str(path)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return
+
+        if sys.platform.startswith("win"):
+            os.startfile(str(path))  # type: ignore[attr-defined]
+            return
+
+        subprocess.Popen(
+            ["xdg-open", str(path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except (FileNotFoundError, OSError) as exc:
+        raise LLMTrainingError("打开运行目录失败，请手动前往训练目录查看") from exc
 
 
 # ── Domain records ────────────────────────────────────────────────────────────
@@ -362,6 +389,13 @@ class LLMTrainingService:
         with self._conn() as conn:
             row = self._get_row(conn, job_id)
             return _row_to_record(row)
+
+    def _record_to_dict(self, record: LLMTrainingJobRecord) -> dict[str, Any]:
+        payload = record.to_dict()
+        payload["runRoot"] = str(
+            self._runtime_paths(character_id=record.character_id, job_id=record.id).run_root
+        )
+        return payload
 
     def _update(
         self,
@@ -670,7 +704,8 @@ class LLMTrainingService:
             if raw_status not in NON_TERMINAL_STATUSES:
                 return "continue"
             message = str(event_payload.get("message") or "").strip() or None
-            stage_name = message or STATUS_STAGE_NAMES.get(raw_status)
+            explicit_stage_name = str(event_payload.get("stageName") or "").strip() or None
+            stage_name = explicit_stage_name or STATUS_STAGE_NAMES.get(raw_status)
             hinted_progress = STATUS_PROGRESS_HINT.get(raw_status, record.progress)
             next_progress = max(record.progress, hinted_progress)
             with self._conn() as conn:
@@ -706,7 +741,8 @@ class LLMTrainingService:
             eta_raw = event_payload.get("etaSeconds")
             eta_value = _to_int(eta_raw, record.eta_seconds or 0) if eta_raw is not None else None
             checkpoint_path = str(event_payload.get("checkpointPath") or "").strip() or None
-            stage_name = str(event_payload.get("message") or "").strip() or STATUS_STAGE_NAMES.get(status)
+            explicit_stage_name = str(event_payload.get("stageName") or "").strip() or None
+            stage_name = explicit_stage_name or STATUS_STAGE_NAMES.get(status)
 
             with self._conn() as conn:
                 self._update(
@@ -1149,7 +1185,7 @@ class LLMTrainingService:
     def get_job(self, job_id: str) -> dict[str, Any]:
         with self._conn() as conn:
             row = self._get_row(conn, job_id)
-            return _row_to_record(row).to_dict()
+            return self._record_to_dict(_row_to_record(row))
 
     def list_jobs(self, character_id: str | None = None) -> list[dict[str, Any]]:
         with self._conn() as conn:
@@ -1162,7 +1198,7 @@ class LLMTrainingService:
                 rows = conn.execute(
                     "SELECT * FROM llm_training_jobs ORDER BY created_at DESC"
                 ).fetchall()
-            return [_row_to_record(r).to_dict() for r in rows]
+            return [self._record_to_dict(_row_to_record(r)) for r in rows]
 
     def cancel_job(self, job_id: str) -> dict[str, Any]:
         with self._conn() as conn:
@@ -1185,6 +1221,12 @@ class LLMTrainingService:
 
         self._write_cancel_sentinel(character_id=record.character_id, job_id=job_id)
         return self.get_job(job_id)
+
+    def open_run_root(self, job_id: str) -> None:
+        record = self._get_record(job_id)
+        runtime_paths = self._runtime_paths(character_id=record.character_id, job_id=record.id)
+        runtime_paths.ensure_directories()
+        _open_directory(runtime_paths.run_root)
 
 
 def create_llm_training_service(

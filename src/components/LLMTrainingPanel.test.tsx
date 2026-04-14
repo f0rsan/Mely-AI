@@ -10,6 +10,7 @@ vi.mock("../api/llmTraining", () => ({
   cancelLLMTrainingJob: vi.fn(),
   getLLMTrainingJob: vi.fn(),
   listLLMTrainingJobs: vi.fn(),
+  openLLMTrainingRunRoot: vi.fn(),
 }));
 
 vi.mock("../api/tasks", () => ({
@@ -20,6 +21,7 @@ import { listLLMDatasets } from "../api/llmDatasets";
 import {
   getLLMTrainingJob,
   listLLMTrainingJobs,
+  openLLMTrainingRunRoot,
   startLLMTraining,
 } from "../api/llmTraining";
 import { type TaskEvent, createTaskStream } from "../api/tasks";
@@ -28,6 +30,7 @@ import { LLMTrainingPanel } from "./LLMTrainingPanel";
 const mockListDatasets = vi.mocked(listLLMDatasets);
 const mockGetLLMTrainingJob = vi.mocked(getLLMTrainingJob);
 const mockListLLMTrainingJobs = vi.mocked(listLLMTrainingJobs);
+const mockOpenLLMTrainingRunRoot = vi.mocked(openLLMTrainingRunRoot);
 const mockStartLLMTraining = vi.mocked(startLLMTraining);
 const mockCreateTaskStream = vi.mocked(createTaskStream);
 
@@ -57,6 +60,7 @@ const baseJob = {
   etaSeconds: 120,
   stageName: "正在训练",
   checkpointPath: "/tmp/mely/checkpoints/checkpoint-30",
+  runRoot: "/tmp/mely/llm_training_runs/job-1",
   adapterPath: null,
   ggufPath: null,
   errorMessage: null,
@@ -70,6 +74,7 @@ beforeEach(() => {
   mockListDatasets.mockResolvedValue([baseDataset]);
   mockGetLLMTrainingJob.mockResolvedValue(baseJob);
   mockListLLMTrainingJobs.mockResolvedValue([baseJob]);
+  mockOpenLLMTrainingRunRoot.mockResolvedValue(undefined);
   mockStartLLMTraining.mockResolvedValue(baseJob);
   mockCreateTaskStream.mockImplementation(() => vi.fn());
 });
@@ -144,6 +149,17 @@ test("shows step, total steps, loss, and ETA in active training card", async () 
   expect(screen.getByText("100")).toBeInTheDocument();
   expect(screen.getByText("1.2345")).toBeInTheDocument();
   expect(screen.getByText("约 2 分钟")).toBeInTheDocument();
+});
+
+test("opens run root from job card", async () => {
+  render(<LLMTrainingPanel characterId="char-1" />);
+
+  const button = await screen.findByRole("button", { name: "打开运行目录" });
+  fireEvent.click(button);
+
+  await waitFor(() => {
+    expect(mockOpenLLMTrainingRunRoot).toHaveBeenCalledWith("job-1");
+  });
 });
 
 test("shows registration-retry hint area when backend returns retry message", async () => {

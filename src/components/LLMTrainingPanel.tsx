@@ -9,6 +9,7 @@ import {
   cancelLLMTrainingJob,
   getLLMTrainingJob,
   listLLMTrainingJobs,
+  openLLMTrainingRunRoot,
   startLLMTraining,
 } from "../api/llmTraining";
 import { createTaskStream } from "../api/tasks";
@@ -107,9 +108,11 @@ function isRegistrationRetryHint(message: string | null): boolean {
 function JobCard({
   job,
   onCancel,
+  onOpenRunRoot,
 }: {
   job: LLMTrainingJob;
   onCancel: (id: string) => void;
+  onOpenRunRoot: (id: string) => void;
 }) {
   const isActive = !["completed", "failed", "canceled"].includes(job.status);
   const registrationRetryHint = isRegistrationRetryHint(job.errorMessage);
@@ -122,60 +125,83 @@ function JobCard({
           <StatusBadge status={job.status} />
           <span className="text-xs text-zinc-400">{MODE_LABELS[job.mode] ?? job.mode}</span>
         </div>
-        {isActive && (
-          <button
-            onClick={() => onCancel(job.id)}
-            className="text-xs text-zinc-500 hover:text-red-400 transition-colors"
-          >
-            取消
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {job.runRoot && (
+            <button
+              onClick={() => onOpenRunRoot(job.id)}
+              className="text-xs text-zinc-400 hover:text-indigo-300 transition-colors"
+            >
+              打开运行目录
+            </button>
+          )}
+          {isActive && (
+            <button
+              onClick={() => onCancel(job.id)}
+              className="text-xs text-zinc-500 hover:text-red-400 transition-colors"
+            >
+              取消
+            </button>
+          )}
+        </div>
       </div>
 
-      {isActive && (
-        <>
-          <ProgressBar value={job.progress} />
-          <div className="text-xs text-zinc-500 grid grid-cols-2 gap-y-1.5 gap-x-3">
-            <div className="flex items-center justify-between gap-2">
-              <span>当前 step</span>
-              <span className="font-mono text-zinc-300">{job.currentStep}</span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span>总步数</span>
-              <span className="font-mono text-zinc-300">{job.totalSteps > 0 ? job.totalSteps : "--"}</span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span>loss</span>
-              <span className="font-mono text-zinc-300">
-                {job.loss !== null ? job.loss.toFixed(4) : "--"}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span>ETA</span>
-              <span className="font-mono text-zinc-300">{formatEta(job.etaSeconds)}</span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span>当前阶段</span>
-              <span className="text-zinc-300 text-right">{stageName}</span>
-            </div>
-            <div className="col-span-2 space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <span>最近 checkpoint</span>
-                <span className="font-mono text-zinc-300 text-right">
-                  {job.checkpointPath ? "已生成" : "--"}
-                </span>
-              </div>
-              <p
-                className="rounded border border-zinc-700/70 bg-zinc-900/40 px-2 py-1 font-mono text-[11px] text-zinc-400 break-all"
-                title={job.checkpointPath ?? ""}
-              >
-                {job.checkpointPath ?? "--"}
-              </p>
-            </div>
-            <div className="col-span-2 text-right font-mono">{Math.round(job.progress * 100)}%</div>
+      {isActive && <ProgressBar value={job.progress} />}
+      <div className="text-xs text-zinc-500 grid grid-cols-2 gap-y-1.5 gap-x-3">
+        <div className="flex items-center justify-between gap-2">
+          <span>当前 step</span>
+          <span className="font-mono text-zinc-300">{job.currentStep}</span>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span>总步数</span>
+          <span className="font-mono text-zinc-300">{job.totalSteps > 0 ? job.totalSteps : "--"}</span>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span>loss</span>
+          <span className="font-mono text-zinc-300">
+            {job.loss !== null ? job.loss.toFixed(4) : "--"}
+          </span>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span>ETA</span>
+          <span className="font-mono text-zinc-300">{formatEta(job.etaSeconds)}</span>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span>当前阶段</span>
+          <span className="text-zinc-300 text-right">{stageName}</span>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span>进度</span>
+          <span className="font-mono text-zinc-300">{Math.round(job.progress * 100)}%</span>
+        </div>
+        <div className="col-span-2 space-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <span>最近 checkpoint</span>
+            <span className="font-mono text-zinc-300 text-right">
+              {job.checkpointPath ? "已生成" : "--"}
+            </span>
           </div>
-        </>
-      )}
+          <p
+            className="rounded border border-zinc-700/70 bg-zinc-900/40 px-2 py-1 font-mono text-[11px] text-zinc-400 break-all"
+            title={job.checkpointPath ?? ""}
+          >
+            {job.checkpointPath ?? "--"}
+          </p>
+        </div>
+        {job.runRoot && (
+          <div className="col-span-2 space-y-1">
+            <div className="flex items-center justify-between gap-2">
+              <span>运行目录</span>
+              <span className="font-mono text-zinc-300 text-right">可打开</span>
+            </div>
+            <p
+              className="rounded border border-zinc-700/70 bg-zinc-900/40 px-2 py-1 font-mono text-[11px] text-zinc-400 break-all"
+              title={job.runRoot}
+            >
+              {job.runRoot}
+            </p>
+          </div>
+        )}
+      </div>
 
       {job.errorMessage && (
         <div
@@ -193,8 +219,6 @@ function JobCard({
           <p>{job.errorMessage}</p>
         </div>
       )}
-
-      <p className="text-xs text-zinc-600 font-mono truncate">{job.id.slice(0, 8)}…</p>
     </div>
   );
 }
@@ -332,6 +356,14 @@ export function LLMTrainingPanel({ characterId }: Props) {
     }
   };
 
+  const handleOpenRunRoot = async (jobId: string) => {
+    try {
+      await openLLMTrainingRunRoot(jobId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "打开运行目录失败");
+    }
+  };
+
   const activeJob = jobs.find(
     (j) => !["completed", "failed", "canceled"].includes(j.status),
   );
@@ -449,7 +481,12 @@ export function LLMTrainingPanel({ characterId }: Props) {
           <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">训练记录</h3>
           <div className="space-y-2">
             {jobs.map((job) => (
-              <JobCard key={job.id} job={job} onCancel={handleCancel} />
+              <JobCard
+                key={job.id}
+                job={job}
+                onCancel={handleCancel}
+                onOpenRunRoot={handleOpenRunRoot}
+              />
             ))}
           </div>
         </div>

@@ -98,6 +98,15 @@ def test_worker_dry_run_completes_with_jsonl_protocol(tmp_path: Path):
     progress_events = [event for event in events if event["event"] == "progress"]
     assert progress_events
     assert any("checkpointPath" in event for event in progress_events)
+    stage_names = [
+        str(event.get("stageName") or "")
+        for event in events
+        if event["event"] in {"status", "progress"} and event.get("stageName")
+    ]
+    assert "合并数据集" in stage_names
+    assert "加载基础模型" in stage_names
+    assert "正在训练" in stage_names
+    assert "导出 GGUF" in stage_names
 
     final_event = events[-1]
     assert final_event["event"] == "complete"

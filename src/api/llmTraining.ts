@@ -26,6 +26,7 @@ export type LLMTrainingJob = {
   etaSeconds: number | null;
   stageName: string | null;
   checkpointPath: string | null;
+  runRoot: string | null;
   adapterPath: string | null;
   ggufPath: string | null;
   errorMessage: string | null;
@@ -107,4 +108,23 @@ export async function cancelLLMTrainingJob(
   const body = await resp.json();
   if (!resp.ok) throw new Error(extractDetail(body));
   return body as LLMTrainingJob;
+}
+
+export async function openLLMTrainingRunRoot(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const resp = await fetch(
+    `${API_BASE}/api/llm-training/${encodeURIComponent(jobId)}/open-run-root`,
+    { method: "POST", signal },
+  );
+  if (resp.ok) return;
+
+  let body: unknown = null;
+  try {
+    body = await resp.json();
+  } catch {
+    body = null;
+  }
+  throw new Error(extractDetail(body));
 }

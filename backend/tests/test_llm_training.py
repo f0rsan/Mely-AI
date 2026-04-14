@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import time
 from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -83,9 +84,36 @@ class TestStartTraining:
         assert body["status"] in ("queued", "preparing", "failed")
         assert body["stageName"] == "等待训练资源"
         assert body["checkpointPath"] is None
+        assert body["runRoot"].endswith(body["id"])
         assert body["progress"] >= 0.0
         assert body["id"] is not None
         assert body["createdAt"] is not None
+
+    def test_open_run_root_endpoint_opens_job_directory(
+        self, client, character_id, dataset_id, monkeypatch, temp_data_root
+    ):
+        opened: dict[str, str] = {}
+
+        def fake_open_directory(path: Path) -> None:
+            opened["path"] = str(path)
+
+        monkeypatch.setattr("app.services.llm_training._open_directory", fake_open_directory)
+
+        start_resp = client.post(
+            f"/api/characters/{character_id}/llm-training/start",
+            json={"datasetIds": [dataset_id], "mode": "light"},
+        )
+        assert start_resp.status_code == 202
+        job = start_resp.json()
+
+        open_resp = client.post(f"/api/llm-training/{job['id']}/open-run-root")
+        assert open_resp.status_code == 204
+
+        expected_path = (
+            temp_data_root / "characters" / character_id / "llm_training_runs" / job["id"]
+        )
+        assert opened["path"] == str(expected_path)
+        assert expected_path.exists()
 
     def test_start_training_fine_mode(self, client, character_id, dataset_id, monkeypatch):
         monkeypatch.setenv("MELY_LLM_HARDWARE_POLICY", "validation_16gb")

@@ -38,6 +38,7 @@ class LLMTrainingJobPayload(BaseModel):
     etaSeconds: int | None
     stageName: str | None
     checkpointPath: str | None
+    runRoot: str | None
     adapterPath: str | None
     ggufPath: str | None
     errorMessage: str | None
@@ -109,6 +110,21 @@ def cancel_llm_training(job_id: str, request: Request) -> LLMTrainingJobPayload:
     except LLMTrainingValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return _to_payload(job)
+
+
+@router.post(
+    "/llm-training/{job_id}/open-run-root",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def open_llm_training_run_root(job_id: str, request: Request) -> None:
+    """Open the local run directory for a training job."""
+    svc = _resolve_training_service(request)
+    try:
+        svc.open_run_root(job_id)
+    except LLMTrainingNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except LLMTrainingError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
 @router.get(

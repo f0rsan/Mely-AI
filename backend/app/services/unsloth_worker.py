@@ -271,10 +271,19 @@ class ProtocolEmitter:
         self._out.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
         self._out.flush()
 
-    def status(self, *, status: str, message: str | None = None, **extra: Any) -> None:
+    def status(
+        self,
+        *,
+        status: str,
+        message: str | None = None,
+        stage_name: str | None = None,
+        **extra: Any,
+    ) -> None:
         payload: dict[str, Any] = {"status": status}
         if message:
             payload["message"] = message
+        if stage_name:
+            payload["stageName"] = stage_name
         payload.update(extra)
         self.emit("status", **payload)
 
@@ -287,6 +296,7 @@ class ProtocolEmitter:
         loss: float | None = None,
         eta_seconds: int | None = None,
         checkpoint_path: str | None = None,
+        stage_name: str | None = None,
     ) -> None:
         payload: dict[str, Any] = {
             "status": status,
@@ -300,6 +310,8 @@ class ProtocolEmitter:
             payload["etaSeconds"] = int(max(0, eta_seconds))
         if checkpoint_path:
             payload["checkpointPath"] = checkpoint_path
+        if stage_name:
+            payload["stageName"] = stage_name
         self.emit("progress", **payload)
 
     def complete(
@@ -421,7 +433,11 @@ def _merge_sharegpt_dataset(config: WorkerConfig) -> Path:
 
 def _run_dry(config: WorkerConfig, emitter: ProtocolEmitter) -> None:
     random.seed(config.random_loss_seed)
-    emitter.status(status="preparing", message="Dry-run: 校验配置与数据集")
+    emitter.status(
+        status="preparing",
+        message="Dry-run: 正在合并数据集",
+        stage_name="合并数据集",
+    )
     _check_cancel(config)
 
     for dataset_path in config.dataset_paths:
@@ -434,7 +450,14 @@ def _run_dry(config: WorkerConfig, emitter: ProtocolEmitter) -> None:
 
     emitter.status(
         status="training",
-        message="Dry-run: 模拟训练中",
+        message="Dry-run: 正在加载基础模型",
+        stage_name="加载基础模型",
+        totalSteps=config.max_steps,
+    )
+    emitter.status(
+        status="training",
+        message="Dry-run: 正在训练",
+        stage_name="正在训练",
         totalSteps=config.max_steps,
     )
 
@@ -458,11 +481,16 @@ def _run_dry(config: WorkerConfig, emitter: ProtocolEmitter) -> None:
             loss=loss,
             eta_seconds=eta,
             checkpoint_path=checkpoint_path,
+            stage_name="正在训练",
         )
         if config.dry_run_step_delay_seconds > 0:
             time.sleep(config.dry_run_step_delay_seconds)
 
-    emitter.status(status="exporting", message="Dry-run: 模拟导出 GGUF")
+    emitter.status(
+        status="exporting",
+        message="Dry-run: 正在导出 GGUF",
+        stage_name="导出 GGUF",
+    )
     _check_cancel(config)
 
     adapter_path = config.adapter_output_dir / "adapter_model.safetensors"
@@ -495,12 +523,20 @@ def _run_unsloth_training(config: WorkerConfig, emitter: ProtocolEmitter) -> Non
         ) from exc
 
     _check_cancel(config)
-    emitter.status(status="preparing", message="正在准备训练环境")
+    emitter.status(
+        status="preparing",
+        message="正在合并数据集",
+        stage_name="合并数据集",
+    )
 
     dataset_path = _merge_sharegpt_dataset(config)
     _check_cancel(config)
 
-    emitter.status(status="training", message="正在加载基础模型")
+    emitter.status(
+        status="training",
+        message="正在加载基础模型",
+        stage_name="加载基础模型",
+    )
     try:
         model, tokenizer = FastLanguageModel.from_pretrained(
             model_name=config.unsloth_model_name,
@@ -567,6 +603,12 @@ def _run_unsloth_training(config: WorkerConfig, emitter: ProtocolEmitter) -> Non
 
     dataset = raw_dataset.map(to_chatml, batched=True)
 
+    emitter.status(
+        status="training",
+        message="正在训练",
+        stage_name="正在训练",
+    )
+
     class WorkerProgressCallback(TrainerCallback):
         def __init__(self) -> None:
             self._last_loss: float | None = None
@@ -593,6 +635,7 @@ def _run_unsloth_training(config: WorkerConfig, emitter: ProtocolEmitter) -> Non
                 loss=self._last_loss,
                 eta_seconds=eta_seconds,
                 checkpoint_path=checkpoint_path,
+                stage_name="正在训练",
             )
             return control
 
@@ -648,7 +691,11 @@ def _run_unsloth_training(config: WorkerConfig, emitter: ProtocolEmitter) -> Non
     adapter_file = _find_first_file(config.adapter_output_dir, "*.safetensors")
     adapter_path = adapter_file if adapter_file is not None else config.adapter_output_dir
 
-    emitter.status(status="exporting", message="正在导出 GGUF")
+    emitter.status(
+        status="exporting",
+        message="正在导出 GGUF",
+        stage_name="导出 GGUF",
+    )
     _check_cancel(config)
     try:
         model.save_pretrained_gguf(
