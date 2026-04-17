@@ -18,6 +18,9 @@ const BACKEND_HOST: &str = "127.0.0.1";
 const BACKEND_PORT: u16 = 8000;
 const BACKEND_STARTUP_ATTEMPTS: usize = 60;
 const BACKEND_STARTUP_DELAY_MS: u64 = 250;
+const BACKEND_HEALTH_PATH: &str = "/api/health";
+const BACKEND_READINESS_PATH: &str =
+    "/api/llm-runtime/readiness?mode=standard&baseModel=qwen2.5%3A3b&autoFix=false";
 
 fn backend_executable_name() -> &'static str {
     if cfg!(windows) {
@@ -72,7 +75,7 @@ fn backend_socket_addr(port: u16) -> SocketAddr {
     ))
 }
 
-fn backend_healthcheck_succeeds(addr: SocketAddr) -> bool {
+fn backend_http_probe_succeeds(addr: SocketAddr, path: &str) -> bool {
     let mut stream = match TcpStream::connect_timeout(&addr, Duration::from_millis(200)) {
         Ok(stream) => stream,
         Err(_) => return false,
@@ -82,7 +85,9 @@ fn backend_healthcheck_succeeds(addr: SocketAddr) -> bool {
     let _ = stream.set_write_timeout(Some(Duration::from_millis(200)));
 
     let request = format!(
-        "GET /api/health HTTP/1.1\r\nHost: {BACKEND_HOST}:{BACKEND_PORT}\r\nConnection: close\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: {}:{}\r\nConnection: close\r\n\r\n",
+        addr.ip(),
+        addr.port(),
     );
     if stream.write_all(request.as_bytes()).is_err() {
         return false;
@@ -98,9 +103,14 @@ fn backend_healthcheck_succeeds(addr: SocketAddr) -> bool {
     status_line.starts_with("HTTP/1.1 200") || status_line.starts_with("HTTP/1.0 200")
 }
 
+fn backend_required_api_succeeds(addr: SocketAddr) -> bool {
+    backend_http_probe_succeeds(addr, BACKEND_HEALTH_PATH)
+        && backend_http_probe_succeeds(addr, BACKEND_READINESS_PATH)
+}
+
 fn wait_for_backend_ready(addr: SocketAddr, attempts: usize, delay: Duration) -> bool {
     for attempt in 0..attempts {
-        if backend_healthcheck_succeeds(addr) {
+        if backend_required_api_succeeds(addr) {
             return true;
         }
 
@@ -167,7 +177,7 @@ fn spawn_backend<R: Runtime>(app: &AppHandle<R>) -> Option<Child> {
                 Some(child)
             } else {
                 eprintln!(
-                    "[mely] backend sidecar did not become ready within {} ms",
+                    "[mely] backend sidecar did not expose the required API within {} ms",
                     BACKEND_STARTUP_ATTEMPTS as u64 * BACKEND_STARTUP_DELAY_MS
                 );
                 let _ = child.kill();
@@ -286,23 +296,26 @@ mod tests {
     }
 
     #[test]
-    fn waits_for_backend_port_to_open() {
+    fn waits_for_backend_required_api_to_open() {
         let listener = TcpListener::bind(backend_socket_addr(0)).expect("bind ephemeral port");
         let addr = listener.local_addr().expect("read local addr");
         let handle = thread::spawn(move || {
             let responses = [
                 "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                 "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK",
                 "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK",
             ];
 
             for response in responses {
-                let (mut socket, _) = listener.accept().expect("accept health probe");
+                let (mut socket, _) = listener.accept().expect("accept probe");
                 let mut request = [0_u8; 256];
                 let _ = socket.read(&mut request);
                 socket
                     .write_all(response.as_bytes())
-                    .expect("write health response");
+                    .expect("write probe response");
             }
         });
 
@@ -313,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    fn returns_false_when_backend_port_never_opens() {
+    fn returns_false_when_backend_required_api_never_opens() {
         let listener = TcpListener::bind(backend_socket_addr(0)).expect("bind ephemeral port");
         let addr = listener.local_addr().expect("read local addr");
         let handle = thread::spawn(move || {
@@ -323,16 +336,49 @@ mod tests {
             ];
 
             for response in responses {
-                let (mut socket, _) = listener.accept().expect("accept health probe");
+                let (mut socket, _) = listener.accept().expect("accept probe");
                 let mut request = [0_u8; 256];
                 let _ = socket.read(&mut request);
                 socket
                     .write_all(response.as_bytes())
-                    .expect("write health response");
+                    .expect("write probe response");
             }
         });
 
         let ready = wait_for_backend_ready(addr, 2, Duration::from_millis(10));
+
+        assert!(!ready);
+        handle.join().expect("join probe server");
+    }
+
+    #[test]
+    fn returns_false_when_readiness_api_is_missing() {
+        let listener = TcpListener::bind(backend_socket_addr(0)).expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("read local addr");
+        let handle = thread::spawn(move || {
+            let responses = [
+                "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK",
+                "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            ];
+
+            for response in responses {
+                let (mut socket, _) = listener.accept().expect("accept probe");
+                let mut request = [0_u8; 512];
+                let read = socket.read(&mut request).expect("read probe request");
+                let request_text = String::from_utf8_lossy(&request[..read]);
+                if response.starts_with("HTTP/1.1 404") {
+                    assert!(
+                        request_text.starts_with(&format!("GET {BACKEND_READINESS_PATH} HTTP/1.1")),
+                        "expected readiness probe, got {request_text}",
+                    );
+                }
+                socket
+                    .write_all(response.as_bytes())
+                    .expect("write probe response");
+            }
+        });
+
+        let ready = wait_for_backend_ready(addr, 1, Duration::from_millis(10));
 
         assert!(!ready);
         handle.join().expect("join probe server");
