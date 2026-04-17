@@ -6,7 +6,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -19,8 +18,10 @@ from app.services.bootstrap import bootstrap_application
 from app.services.llm_model_service import create_llm_model_service
 from app.services.llm_training import (
     INTERRUPTED_TRAINING_RECOVERY_ERROR,
+    LLMTrainingService,
     create_llm_training_service,
 )
+from app.services.llm_runtime_manager import LLMRuntimeReadiness, RuntimeInstallProgress
 from app.services.task_queue import TaskQueue
 
 
@@ -268,20 +269,28 @@ class _FakeWorkerProcess:
 
 @pytest.fixture()
 def runner_client(temp_data_root: Path, monkeypatch: pytest.MonkeyPatch):
-    async def fake_check_ollama_status():
-        return SimpleNamespace(
-            running=True,
-            version="0.6.0",
-            models=[
-                SimpleNamespace(name="qwen2.5:7b-instruct-q4_K_M"),
-                SimpleNamespace(name="qwen2.5:3b"),
-            ],
+    async def fake_runtime_readiness(_self, **_kwargs):
+        return LLMRuntimeReadiness(
+            state="ready",
+            ready=True,
+            message="训练环境已就绪。",
+            blocking_reason=None,
+            repairable=False,
+            actions=[],
+            install_progress=RuntimeInstallProgress(
+                active=False,
+                percent=100.0,
+                stage="completed",
+                message="训练运行时已就绪。",
+            ),
+            hardware=None,
+            checks={"runtimeEnforced": True},
         )
 
-    monkeypatch.setattr("app.services.llm_training.check_ollama_status", fake_check_ollama_status)
-    monkeypatch.setattr("app.services.llm_training.get_missing_gpu_training_dependencies", lambda: [])
-    monkeypatch.setenv("MELY_GPU_VRAM_GB", "16")
-    monkeypatch.setenv("MELY_LLM_HARDWARE_POLICY", "validation_16gb")
+    monkeypatch.setattr(
+        "app.services.llm_runtime_manager.LLMRuntimeManager.get_readiness",
+        fake_runtime_readiness,
+    )
 
     app = create_app()
     with TestClient(app) as client:
@@ -361,6 +370,46 @@ def _seed_recovery_jobs(db_path: Path, *, statuses: list[str]) -> tuple[str, lis
         conn.commit()
 
     return character_id, job_ids
+
+
+@pytest.mark.asyncio
+async def test_launch_worker_process_uses_runtime_manager_launch_paths(tmp_path: Path):
+    class _RuntimeManagerStub:
+        def __init__(self, python_path: Path, worker_entry: Path) -> None:
+            self.python_path = python_path
+            self.worker_entry = worker_entry
+
+        def resolve_worker_launch(self) -> tuple[Path, Path]:
+            return self.python_path, self.worker_entry
+
+    db_path = tmp_path / "db.sqlite3"
+    data_root = tmp_path / ".mely"
+    manager = _RuntimeManagerStub(
+        python_path=tmp_path / "runtime" / "python.exe",
+        worker_entry=tmp_path / "runtime" / "tools" / "unsloth_worker.py",
+    )
+    service = LLMTrainingService(
+        db_path=db_path,
+        data_root=data_root,
+        queue=TaskQueue(),
+        llm_runtime_manager=manager,  # type: ignore[arg-type]
+    )
+
+    fake_process = _FakeWorkerProcess(lines=[], return_code=0)
+    config_path = tmp_path / "worker-config.json"
+    config_path.write_text("{}", encoding="utf-8")
+    with patch(
+        "app.services.llm_training.asyncio.create_subprocess_exec",
+        new_callable=AsyncMock,
+        return_value=fake_process,
+    ) as mocked_exec:
+        process = await service._launch_worker_process(config_path)
+
+    assert process is fake_process
+    args = mocked_exec.await_args.args
+    assert args[0] == str(manager.python_path)
+    assert args[1] == str(manager.worker_entry)
+    assert args[2] == str(config_path)
 
 
 def test_service_runner_success_updates_db_and_worker_payload(
@@ -551,6 +600,65 @@ def test_service_runner_export_failure_marks_training_failed(
     models_resp = runner_client.get(f"/api/characters/{character_id}/llm-models")
     assert models_resp.status_code == 200
     assert models_resp.json() == []
+
+
+def test_service_runner_failure_keeps_run_root_and_worker_log(
+    runner_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    launched: dict[str, Any] = {}
+
+    async def fake_launch(_self, config_path: Path):
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+        launched["payload"] = payload
+        log_path = Path(payload["logPath"])
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("worker failed log", encoding="utf-8")
+        checkpoint_path = Path(payload["checkpointDir"]) / "checkpoint-2"
+        checkpoint_path.mkdir(parents=True, exist_ok=True)
+        lines = [
+            json.dumps(
+                {
+                    "event": "progress",
+                    "status": "training",
+                    "step": 2,
+                    "totalSteps": 6,
+                    "loss": 1.1111,
+                    "checkpointPath": str(checkpoint_path),
+                }
+            ),
+            json.dumps(
+                {
+                    "event": "error",
+                    "status": "failed",
+                    "code": "worker_crash",
+                    "message": "worker crashed",
+                    "retryable": True,
+                    "logPath": str(log_path),
+                }
+            ),
+        ]
+        return _FakeWorkerProcess(lines=lines, return_code=1)
+
+    monkeypatch.setattr(
+        "app.services.llm_training.LLMTrainingService._launch_worker_process",
+        fake_launch,
+    )
+
+    character_id, dataset_id = _create_character_and_dataset(runner_client)
+    start_resp = runner_client.post(
+        f"/api/characters/{character_id}/llm-training/start",
+        json={"datasetIds": [dataset_id], "mode": "light"},
+    )
+    assert start_resp.status_code == 202
+    job_id = start_resp.json()["id"]
+
+    final_job = _wait_terminal(runner_client, job_id)
+    assert final_job["status"] == "failed"
+    run_root = Path(final_job["runRoot"])
+    assert run_root.exists()
+    assert Path(launched["payload"]["logPath"]).exists()
+    assert Path(final_job["checkpointPath"]).exists()
 
 
 def test_service_runner_error_translation_for_oom(

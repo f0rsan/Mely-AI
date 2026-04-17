@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from app.db.connection import connect_database
 from app.main import create_app
 
 
@@ -159,7 +160,8 @@ class TestRegisterModel:
 
     def test_register_model_stores_training_job_id(self, client, character_id):
         import json as _json
-        # Create a real dataset + training job first to satisfy the FK constraint
+        # Create a real dataset + training job first to satisfy the FK constraint.
+        # This model-service test should not depend on the full training runtime.
         lines = [
             _json.dumps({"user": f"q{i}", "assistant": f"a{i}，详细回答。"}) for i in range(60)
         ]
@@ -168,11 +170,31 @@ class TestRegisterModel:
             json={"filename": "data.jsonl", "content": "\n".join(lines)},
         )
         ds_id = ds_resp.json()["id"]
-        job_resp = client.post(
-            f"/api/characters/{character_id}/llm-training/start",
-            json={"datasetIds": [ds_id], "mode": "light"},
-        )
-        real_job_id = job_resp.json()["id"]
+        real_job_id = "model-register-training-job"
+        with connect_database(client.app.state.bootstrap.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO llm_training_jobs (
+                    id, character_id, dataset_ids_json, mode, base_model, status,
+                    progress, current_step, total_steps, queue_task_id, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    real_job_id,
+                    character_id,
+                    _json.dumps([ds_id]),
+                    "light",
+                    "qwen2.5:3b",
+                    "completed",
+                    1.0,
+                    400,
+                    400,
+                    real_job_id,
+                    "2026-04-14T00:00:00Z",
+                ),
+            )
+            conn.commit()
 
         with patch(
             "app.services.llm_model_service.ollama_create_model",

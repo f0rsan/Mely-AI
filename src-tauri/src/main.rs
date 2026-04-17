@@ -38,8 +38,24 @@ fn backend_candidate_paths(resource_dir: &Path) -> [PathBuf; 2] {
     ]
 }
 
+fn llm_runtime_candidate_paths(resource_dir: &Path) -> [PathBuf; 2] {
+    [
+        resource_dir.join("llm-runtime"),
+        resource_dir.join("resources").join("llm-runtime"),
+    ]
+}
+
 fn resolve_backend_exe_from_resource_dir(resource_dir: &Path) -> PathBuf {
     let candidates = backend_candidate_paths(resource_dir);
+    candidates
+        .iter()
+        .find(|path| path.exists())
+        .cloned()
+        .unwrap_or_else(|| candidates[0].clone())
+}
+
+fn resolve_llm_runtime_root_from_resource_dir(resource_dir: &Path) -> PathBuf {
+    let candidates = llm_runtime_candidate_paths(resource_dir);
     candidates
         .iter()
         .find(|path| path.exists())
@@ -131,10 +147,15 @@ fn spawn_backend<R: Runtime>(app: &AppHandle<R>) -> Option<Child> {
         return None;
     }
 
-    match Command::new(&exe)
-        .env("MELY_BACKEND_PORT", BACKEND_PORT.to_string())
-        .spawn()
-    {
+    let mut command = Command::new(&exe);
+    command.env("MELY_BACKEND_PORT", BACKEND_PORT.to_string());
+
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let runtime_root = resolve_llm_runtime_root_from_resource_dir(&resource_dir);
+        command.env("MELY_LLM_RUNTIME_RESOURCE_ROOT", runtime_root);
+    }
+
+    match command.spawn() {
         Ok(mut child) => {
             let ready = wait_for_backend_ready(
                 backend_socket_addr(BACKEND_PORT),
@@ -237,6 +258,30 @@ mod tests {
         let resolved = resolve_backend_exe_from_resource_dir(&root);
 
         assert_eq!(resolved, legacy_exe);
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn resolves_direct_llm_runtime_resource_path() {
+        let root = unique_temp_dir("llm-runtime-direct");
+        let direct_dir = root.join("llm-runtime");
+        fs::create_dir_all(&direct_dir).expect("create direct runtime dir");
+
+        let resolved = resolve_llm_runtime_root_from_resource_dir(&root);
+
+        assert_eq!(resolved, direct_dir);
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn falls_back_to_legacy_nested_llm_runtime_resource_path() {
+        let root = unique_temp_dir("llm-runtime-legacy");
+        let legacy_dir = root.join("resources").join("llm-runtime");
+        fs::create_dir_all(&legacy_dir).expect("create legacy runtime dir");
+
+        let resolved = resolve_llm_runtime_root_from_resource_dir(&root);
+
+        assert_eq!(resolved, legacy_dir);
         fs::remove_dir_all(root).expect("cleanup temp dir");
     }
 

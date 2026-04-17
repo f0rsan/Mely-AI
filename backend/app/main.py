@@ -22,6 +22,7 @@ from app.api.llm import router as llm_router
 from app.api.llm_preferences import router as llm_preferences_router
 from app.api.llm_datasets import router as llm_datasets_router
 from app.api.llm_training import router as llm_training_router
+from app.api.llm_runtime import router as llm_runtime_router
 from app.api.llm_models import router as llm_models_router
 from app.api.chat import router as chat_router
 from app.api.visual_datasets import router as visual_datasets_router
@@ -31,6 +32,7 @@ from app.api.setup import router as setup_router
 from app.services.downloads import create_download_service
 from app.services.training import create_training_service
 from app.services.llm_training import create_llm_training_service
+from app.services.llm_runtime_manager import create_llm_runtime_manager
 from app.services.llm_model_service import create_llm_model_service
 from app.services.chat_service import create_chat_service
 from app.services.visual_dataset_service import create_visual_dataset_service
@@ -58,6 +60,7 @@ async def lifespan(app: FastAPI):
     app.state.task_queue = task_queue
     app.state.download_service = None
     app.state.training_service = None
+    app.state.llm_runtime_manager = None
     await task_queue.start()
 
     engine_runtime = ComfyUIRuntime(task_queue=task_queue)
@@ -87,6 +90,9 @@ async def lifespan(app: FastAPI):
         app.state.llm_model_service = create_llm_model_service(
             db_path=bootstrap_state.db_path,
         )
+        app.state.llm_runtime_manager = create_llm_runtime_manager(
+            data_root=bootstrap_state.data_root,
+        )
         # Keep backend boot lightweight: GPU training dependencies are optional.
         # Missing extras must fail when training starts, not during FastAPI import/startup.
         llm_training_service = create_llm_training_service(
@@ -94,6 +100,7 @@ async def lifespan(app: FastAPI):
             data_root=bootstrap_state.data_root,
             queue=task_queue,
             llm_model_service=app.state.llm_model_service,
+            llm_runtime_manager=app.state.llm_runtime_manager,
         )
         llm_training_service.recover_interrupted_jobs()
         app.state.llm_training_service = llm_training_service
@@ -143,6 +150,7 @@ def create_app() -> FastAPI:
     app.include_router(llm_preferences_router, prefix="/api")
     app.include_router(llm_datasets_router, prefix="/api")
     app.include_router(llm_training_router, prefix="/api")
+    app.include_router(llm_runtime_router, prefix="/api")
     app.include_router(llm_models_router, prefix="/api")
     app.include_router(chat_router, prefix="/api")
     app.include_router(visual_datasets_router, prefix="/api")

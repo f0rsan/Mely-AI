@@ -13,11 +13,28 @@ vi.mock("../api/llmTraining", () => ({
   openLLMTrainingRunRoot: vi.fn(),
 }));
 
+vi.mock("../api/llmRuntime", () => ({
+  fetchLLMRuntimeReadiness: vi.fn(),
+  openLLMRuntime: vi.fn(),
+  repairLLMRuntime: vi.fn(),
+}));
+
+vi.mock("../api/llmPull", () => ({
+  pullLLMModel: vi.fn(),
+}));
+
 vi.mock("../api/tasks", () => ({
   createTaskStream: vi.fn(),
 }));
 
 import { listLLMDatasets } from "../api/llmDatasets";
+import { pullLLMModel } from "../api/llmPull";
+import {
+  fetchLLMRuntimeReadiness,
+  openLLMRuntime,
+  repairLLMRuntime,
+  type LLMRuntimeReadiness,
+} from "../api/llmRuntime";
 import {
   getLLMTrainingJob,
   listLLMTrainingJobs,
@@ -32,6 +49,10 @@ const mockGetLLMTrainingJob = vi.mocked(getLLMTrainingJob);
 const mockListLLMTrainingJobs = vi.mocked(listLLMTrainingJobs);
 const mockOpenLLMTrainingRunRoot = vi.mocked(openLLMTrainingRunRoot);
 const mockStartLLMTraining = vi.mocked(startLLMTraining);
+const mockFetchLLMRuntimeReadiness = vi.mocked(fetchLLMRuntimeReadiness);
+const mockOpenLLMRuntime = vi.mocked(openLLMRuntime);
+const mockRepairLLMRuntime = vi.mocked(repairLLMRuntime);
+const mockPullLLMModel = vi.mocked(pullLLMModel);
 const mockCreateTaskStream = vi.mocked(createTaskStream);
 
 const baseDataset = {
@@ -70,12 +91,71 @@ const baseJob = {
   completedAt: null,
 };
 
+function makeReadiness(
+  overrides: Partial<LLMRuntimeReadiness> = {},
+): LLMRuntimeReadiness {
+  return {
+    state: "ready",
+    ready: true,
+    message: "训练环境已就绪。",
+    blockingReason: null,
+    repairable: false,
+    actions: [],
+    installProgress: {
+      active: false,
+      percent: 100,
+      stage: "completed",
+      message: "训练运行时已就绪。",
+      startedAt: "2026-04-01T00:00:00Z",
+      updatedAt: "2026-04-01T00:01:00Z",
+      attempt: 1,
+      errorMessage: null,
+    },
+    hardware: {
+      gpuModel: "NVIDIA RTX 3070",
+      vramGB: 12,
+      driverVersion: "551.86",
+      cudaVersion: "12.1",
+      driverCompatibility: "ok",
+      cudaCompatibility: "ok",
+      diskFreeGB: 100,
+      diskRequiredGB: 12,
+      source: "env",
+      supportedModes: ["light", "standard", "fine"],
+    },
+    checks: {},
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   mockListDatasets.mockResolvedValue([baseDataset]);
   mockGetLLMTrainingJob.mockResolvedValue(baseJob);
   mockListLLMTrainingJobs.mockResolvedValue([baseJob]);
   mockOpenLLMTrainingRunRoot.mockResolvedValue(undefined);
   mockStartLLMTraining.mockResolvedValue(baseJob);
+  mockFetchLLMRuntimeReadiness.mockResolvedValue(makeReadiness());
+  mockOpenLLMRuntime.mockResolvedValue(undefined);
+  mockRepairLLMRuntime.mockResolvedValue(
+    makeReadiness({
+      state: "installing_runtime",
+      ready: false,
+      message: "训练运行时正在安装/修复，请稍候。",
+      blockingReason: "训练运行时正在安装中，请等待完成后重试。",
+      repairable: true,
+      installProgress: {
+        active: true,
+        percent: 35,
+        stage: "bootstrap",
+        message: "正在安装训练运行时…",
+        startedAt: "2026-04-01T00:00:00Z",
+        updatedAt: "2026-04-01T00:00:20Z",
+        attempt: 1,
+        errorMessage: null,
+      },
+    }),
+  );
+  mockPullLLMModel.mockResolvedValue(undefined);
   mockCreateTaskStream.mockImplementation(() => vi.fn());
 });
 
@@ -92,12 +172,185 @@ test("defaults training base model to qwen2.5:3b", async () => {
   expect(selector).toHaveValue("qwen2.5:3b");
 });
 
-test("shows both 3b and 7b as selectable training base models", async () => {
+test("shows readiness missing runtime and can install training environment", async () => {
+  mockFetchLLMRuntimeReadiness.mockResolvedValueOnce(
+    makeReadiness({
+      state: "missing_runtime",
+      ready: false,
+      message: "训练运行时尚未安装。",
+      blockingReason: "训练运行时缺失，请先执行“修复训练环境”。",
+      repairable: true,
+    }),
+  );
+
   render(<LLMTrainingPanel characterId="char-1" />);
 
-  await screen.findByLabelText("基础模型");
-  expect(screen.getByRole("option", { name: /Qwen2\.5 3B/ })).toBeInTheDocument();
-  expect(screen.getByRole("option", { name: /Qwen2\.5 7B/ })).toBeInTheDocument();
+  await screen.findByText("训练运行时未安装");
+  fireEvent.click(screen.getByRole("button", { name: "安装训练环境" }));
+
+  await waitFor(() => {
+    expect(mockRepairLLMRuntime).toHaveBeenCalledTimes(1);
+  });
+});
+
+test("shows readiness missing ollama and can open ollama action", async () => {
+  mockFetchLLMRuntimeReadiness.mockResolvedValueOnce(
+    makeReadiness({
+      state: "missing_ollama",
+      ready: false,
+      message: "语言引擎未就绪。",
+      blockingReason: "未检测到语言引擎，请先安装并启动 Ollama。",
+    }),
+  );
+
+  render(<LLMTrainingPanel characterId="char-1" />);
+
+  await screen.findByText("Ollama 未安装或未启动");
+  fireEvent.click(screen.getByRole("button", { name: "安装/启动 Ollama" }));
+
+  await waitFor(() => {
+    expect(mockOpenLLMRuntime).toHaveBeenCalledTimes(1);
+  });
+});
+
+test("shows pulling state when downloading base model", async () => {
+  mockFetchLLMRuntimeReadiness.mockResolvedValue(
+    makeReadiness({
+      state: "missing_inference_model",
+      ready: false,
+      message: "推理基础模型未就绪。",
+      blockingReason: "基础模型“qwen2.5:3b”尚未在 Ollama 中就绪。请先下载完成后再训练。",
+    }),
+  );
+
+  let resolvePull: (() => void) | null = null;
+  mockPullLLMModel.mockImplementation(async (_modelName, onEvent) => {
+    onEvent({ status: "downloading", phase: "正在下载", percent: 42 });
+    await new Promise<void>((resolve) => {
+      resolvePull = resolve;
+    });
+  });
+
+  render(<LLMTrainingPanel characterId="char-1" />);
+  await screen.findByText("基础模型尚未下载");
+
+  fireEvent.click(screen.getByRole("button", { name: "下载基础模型" }));
+  await screen.findByText("正在拉取 qwen2.5:3b");
+
+  expect(mockPullLLMModel).toHaveBeenCalledWith(
+    "qwen2.5:3b",
+    expect.any(Function),
+  );
+
+  resolvePull?.();
+});
+
+test("downloads the selected base model when the user switches model", async () => {
+  mockFetchLLMRuntimeReadiness.mockResolvedValue(
+    makeReadiness({
+      state: "missing_inference_model",
+      ready: false,
+      message: "推理基础模型未就绪。",
+      blockingReason:
+        "基础模型“qwen2.5:7b-instruct-q4_K_M”尚未在 Ollama 中就绪。请先下载完成后再训练。",
+    }),
+  );
+
+  render(<LLMTrainingPanel characterId="char-1" />);
+  const selector = await screen.findByLabelText("基础模型");
+  fireEvent.change(selector, { target: { value: "qwen2.5:7b-instruct-q4_K_M" } });
+
+  await screen.findByText("基础模型尚未下载");
+  fireEvent.click(screen.getByRole("button", { name: "下载基础模型" }));
+
+  await waitFor(() => {
+    expect(mockPullLLMModel).toHaveBeenCalledWith(
+      "qwen2.5:7b-instruct-q4_K_M",
+      expect.any(Function),
+    );
+  });
+});
+
+test("shows preparing training base snapshot status", async () => {
+  mockFetchLLMRuntimeReadiness.mockResolvedValueOnce(
+    makeReadiness({
+      state: "preparing_training_base_snapshot",
+      ready: false,
+      message: "正在准备训练模型基础权重。",
+      blockingReason: "正在准备训练模型基础权重，请稍后重试。",
+      installProgress: {
+        active: true,
+        percent: 80,
+        stage: "snapshot",
+        message: "正在恢复训练基础权重快照…",
+        startedAt: "2026-04-01T00:00:00Z",
+        updatedAt: "2026-04-01T00:00:20Z",
+        attempt: 1,
+        errorMessage: null,
+      },
+    }),
+  );
+
+  render(<LLMTrainingPanel characterId="char-1" />);
+
+  await screen.findByText("正在准备训练基础模型");
+  expect(screen.getByText(/正在恢复训练基础权重快照/)).toBeInTheDocument();
+});
+
+test("disables fine mode on 8GB and shows reason", async () => {
+  mockListLLMTrainingJobs.mockResolvedValueOnce([]);
+  mockFetchLLMRuntimeReadiness.mockResolvedValueOnce(
+    makeReadiness({
+      hardware: {
+        gpuModel: "NVIDIA RTX 3070",
+        vramGB: 8,
+        driverVersion: "551.86",
+        cudaVersion: "12.1",
+        driverCompatibility: "ok",
+        cudaCompatibility: "ok",
+        diskFreeGB: 100,
+        diskRequiredGB: 12,
+        source: "env",
+        supportedModes: ["light", "standard"],
+      },
+    }),
+  );
+
+  render(<LLMTrainingPanel characterId="char-1" />);
+
+  await screen.findByText(/精细模式至少需要 12GB/);
+  expect(screen.getByRole("button", { name: /standard/i })).toBeEnabled();
+  const fineButton = screen.getByRole("button", { name: /fine/i });
+  expect(fineButton).toBeDisabled();
+});
+
+test("shows unsupported platform without fine-mode vram warning", async () => {
+  mockListLLMTrainingJobs.mockResolvedValueOnce([]);
+  mockFetchLLMRuntimeReadiness.mockResolvedValueOnce(
+    makeReadiness({
+      state: "unsupported",
+      ready: false,
+      message: "当前系统不支持本机训练。",
+      blockingReason: "当前系统为 macOS，LLM 微调运行时仅支持 Windows + NVIDIA GPU。",
+      hardware: {
+        gpuModel: "Apple GPU",
+        vramGB: 8,
+        driverVersion: null,
+        cudaVersion: null,
+        driverCompatibility: "unknown",
+        cudaCompatibility: "unknown",
+        diskFreeGB: 100,
+        diskRequiredGB: 12,
+        source: "env",
+        supportedModes: [],
+      },
+    }),
+  );
+
+  render(<LLMTrainingPanel characterId="char-1" />);
+
+  await screen.findByText(/仅支持 Windows/);
+  expect(screen.queryByText(/精细模式至少需要 12GB/)).not.toBeInTheDocument();
 });
 
 test("sends baseModel in start training payload", async () => {
@@ -151,11 +404,11 @@ test("shows step, total steps, loss, and ETA in active training card", async () 
   expect(screen.getByText("约 2 分钟")).toBeInTheDocument();
 });
 
-test("opens run root from job card", async () => {
+test("opens run root from training panel", async () => {
   render(<LLMTrainingPanel characterId="char-1" />);
 
-  const button = await screen.findByRole("button", { name: "打开运行目录" });
-  fireEvent.click(button);
+  const buttons = await screen.findAllByRole("button", { name: "打开运行目录" });
+  fireEvent.click(buttons[0]);
 
   await waitFor(() => {
     expect(mockOpenLLMTrainingRunRoot).toHaveBeenCalledWith("job-1");

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import sys
 import time
 from types import SimpleNamespace
 from pathlib import Path
@@ -12,28 +14,69 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+WORKER_SCRIPT = REPO_ROOT / "backend" / "app" / "services" / "unsloth_worker.py"
+
+
+def _seed_runtime_manifest(data_root: Path) -> None:
+    runtime_root = data_root / "runtimes" / "llm" / "llm-win-cu121-py311-v1"
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "runtimeId": "llm-win-cu121-py311-v1",
+        "python": {"exePath": sys.executable},
+        "worker": {"entryScript": str(WORKER_SCRIPT)},
+        "readiness": {"state": "READY"},
+    }
+    (runtime_root / "manifest.runtime.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _seed_training_snapshot(data_root: Path) -> None:
+    snapshot_root = (
+        data_root / "cache" / "hf" / "models--Qwen--Qwen2.5-3B-Instruct" / "snapshots" / "local"
+    )
+    snapshot_root.mkdir(parents=True, exist_ok=True)
+    (snapshot_root / "config.json").write_text("{}", encoding="utf-8")
+
+
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture()
 def ollama_runtime_stub(monkeypatch):
     state = {
+        "installed": True,
         "running": True,
         "models": ["qwen2.5:7b-instruct-q4_K_M", "qwen2.5:3b"],
+        "hint": None,
     }
 
-    async def fake_check_ollama_status():
+    async def fake_check_ollama_runtime():
         return SimpleNamespace(
+            installed=state["installed"],
             running=state["running"],
-            version="0.6.0",
             models=[SimpleNamespace(name=name) for name in state["models"]],
+            hint=state["hint"],
         )
 
-    monkeypatch.setattr("app.services.llm_training.check_ollama_status", fake_check_ollama_status)
+    monkeypatch.setattr(
+        "app.services.llm_runtime_manager.check_ollama_runtime",
+        fake_check_ollama_runtime,
+    )
     return state
 
 
 @pytest.fixture()
-def client(temp_data_root, ollama_runtime_stub):
+def client(temp_data_root, ollama_runtime_stub, monkeypatch: pytest.MonkeyPatch):
+    _seed_runtime_manifest(temp_data_root)
+    _seed_training_snapshot(temp_data_root)
+    monkeypatch.setenv("MELY_LLM_RUNTIME_ENFORCED", "1")
+    monkeypatch.setenv("MELY_LLM_ALLOW_NON_WINDOWS_TRAINING", "1")
+    monkeypatch.setenv("MELY_GPU_NAME", "NVIDIA RTX 3070")
+    monkeypatch.setenv("MELY_GPU_VRAM_GB", "16")
+    monkeypatch.setenv("MELY_GPU_DRIVER_VERSION", "551.86")
+    monkeypatch.setenv("MELY_CUDA_VERSION", "12.1")
     app = create_app()
     with TestClient(app) as c:
         yield c
@@ -155,14 +198,13 @@ class TestStartTraining:
     def test_start_training_mode_restricted_by_product_policy(
         self, client, character_id, dataset_id, monkeypatch
     ):
-        monkeypatch.setenv("MELY_LLM_HARDWARE_POLICY", "product_8gb")
+        monkeypatch.setenv("MELY_GPU_VRAM_GB", "8")
         resp = client.post(
             f"/api/characters/{character_id}/llm-training/start",
             json={"datasetIds": [dataset_id], "mode": "fine"},
         )
         assert resp.status_code == 400
-        assert "RTX 3070 8GB 产品基线" in resp.json()["detail"]
-        assert "暂不允许" in resp.json()["detail"]
+        assert "至少需要 12GB" in resp.json()["detail"]
 
     def test_start_training_nonexistent_character_returns_404(self, client, dataset_id):
         resp = client.post(
@@ -230,31 +272,87 @@ class TestStartTraining:
             "canceled",
         )
 
-    def test_start_training_missing_gpu_dependencies_returns_chinese_error(
-        self, client, character_id, dataset_id, monkeypatch
+    def test_start_training_runtime_broken_guides_repair(
+        self, client, character_id, dataset_id, temp_data_root
     ):
-        monkeypatch.setattr(
-            "app.services.llm_training.get_missing_gpu_training_dependencies",
-            lambda: ["unsloth", "torch"],
+        broken_flag = (
+            temp_data_root
+            / "runtimes"
+            / "llm"
+            / "llm-win-cu121-py311-v1"
+            / "install"
+            / "runtime-broken.json"
         )
+        broken_flag.parent.mkdir(parents=True, exist_ok=True)
+        broken_flag.write_text(
+            json.dumps({"reason": "训练运行时依赖异常。"}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        resp = client.post(
+            f"/api/characters/{character_id}/llm-training/start",
+            json={"datasetIds": [dataset_id], "mode": "light"},
+        )
+        assert resp.status_code == 400
+        assert "修复训练环境" in resp.json()["detail"]
+
+    def test_start_training_missing_snapshot_enters_auto_prepare_state(
+        self, client, character_id, dataset_id, temp_data_root
+    ):
+        snapshot_root = (
+            temp_data_root / "cache" / "hf" / "models--Qwen--Qwen2.5-3B-Instruct"
+        )
+        if snapshot_root.exists():
+            shutil.rmtree(snapshot_root)
 
         resp = client.post(
             f"/api/characters/{character_id}/llm-training/start",
             json={"datasetIds": [dataset_id], "mode": "light"},
         )
-        assert resp.status_code == 202
-        job_id = resp.json()["id"]
+        assert resp.status_code == 400
+        assert "正在准备训练模型基础权重" in resp.json()["detail"]
 
-        job = resp.json()
-        for _ in range(20):
-            job = client.get(f"/api/llm-training/{job_id}").json()
-            if job["status"] == "failed":
-                break
-            time.sleep(0.01)
 
-        assert job["status"] == "failed"
-        assert "缺少 LLM 训练依赖" in (job["errorMessage"] or "")
-        assert "unsloth、torch" in (job["errorMessage"] or "")
+def test_start_training_blocks_when_runtime_missing(
+    temp_data_root, monkeypatch, ollama_runtime_stub, tmp_path: Path
+):
+    resource_root = tmp_path / "llm-runtime"
+    resource_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("MELY_LLM_RUNTIME_ENFORCED", "1")
+    monkeypatch.setenv("MELY_LLM_ALLOW_NON_WINDOWS_TRAINING", "1")
+    monkeypatch.setenv("MELY_LLM_RUNTIME_RESOURCE_ROOT", str(resource_root))
+    monkeypatch.setenv("MELY_GPU_NAME", "NVIDIA RTX 3070")
+    monkeypatch.setenv("MELY_GPU_VRAM_GB", "12")
+    monkeypatch.setenv("MELY_GPU_DRIVER_VERSION", "551.86")
+    monkeypatch.setenv("MELY_CUDA_VERSION", "12.1")
+
+    app = create_app()
+    with TestClient(app) as client:
+        character_resp = client.post("/api/characters", json={"name": "运行时阻断角色"})
+        assert character_resp.status_code == 201
+        character_id = character_resp.json()["id"]
+
+        lines = [
+            json.dumps({"user": f"问{i}", "assistant": f"这是回答{i}，内容详细丰富。"})
+            for i in range(60)
+        ]
+        dataset_resp = client.post(
+            f"/api/characters/{character_id}/llm-datasets",
+            json={"filename": "train.jsonl", "content": "\n".join(lines)},
+        )
+        assert dataset_resp.status_code == 201
+        dataset_id = dataset_resp.json()["id"]
+
+        start_resp = client.post(
+            f"/api/characters/{character_id}/llm-training/start",
+            json={"datasetIds": [dataset_id], "mode": "light"},
+        )
+
+    assert start_resp.status_code == 400
+    assert (
+        "训练运行时缺失" in start_resp.json()["detail"]
+        or "自动安装" in start_resp.json()["detail"]
+        or "安装中" in start_resp.json()["detail"]
+    )
 
 
 # ── Get / list jobs ────────────────────────────────────────────────────────────

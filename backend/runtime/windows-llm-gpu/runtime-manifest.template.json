@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "runtimeId": "llm-win-cu121-py311-v1",
+  "platform": {
+    "os": "windows",
+    "arch": "x86_64",
+    "cuda": "12.1"
+  },
+  "python": {
+    "version": "3.11.x",
+    "runtimeDir": "python-runtime",
+    "runtimeExecutable": "python-runtime/python.exe",
+    "exePath": "%USERPROFILE%/.mely/runtimes/llm/llm-win-cu121-py311-v1/venv/Scripts/python.exe"
+  },
+  "dependencySet": {
+    "lockFile": "requirements-lock.txt",
+    "wheelhouseDir": "wheelhouse"
+  },
+  "worker": {
+    "entryScript": "tools/unsloth_worker.py"
+  },
+  "importSmokeTest": [
+    "torch",
+    "unsloth",
+    "datasets",
+    "transformers",
+    "trl"
+  ],
+  "readiness": {
+    "state": "NOT_READY",
+    "lastCheckedAt": null,
+    "repairCount": 0,
+    "lastErrorCode": null
+  }
+}

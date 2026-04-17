@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LLMDataset, listLLMDatasets } from "../api/llmDatasets";
+import { pullLLMModel, type LLMPullEvent } from "../api/llmPull";
 import {
-  LLMDataset,
-  listLLMDatasets,
-} from "../api/llmDatasets";
+  fetchLLMRuntimeReadiness,
+  openLLMRuntime,
+  repairLLMRuntime,
+  type LLMRuntimeReadiness,
+} from "../api/llmRuntime";
 import {
   LLMTrainingJob,
   LLMTrainingMode,
@@ -19,20 +23,20 @@ type Props = {
 };
 
 const MODE_LABELS: Record<LLMTrainingMode, string> = {
-  light:    "轻量（~15 分钟）",
+  light: "轻量（~15 分钟）",
   standard: "标准（~35 分钟）",
-  fine:     "精细（~70 分钟）",
+  fine: "精细（~70 分钟）",
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  queued:      "队列中",
-  preparing:   "准备中",
-  training:    "训练中",
-  exporting:   "导出中",
+  queued: "队列中",
+  preparing: "准备中",
+  training: "训练中",
+  exporting: "导出中",
   registering: "注册中",
-  completed:   "已完成",
-  failed:      "失败",
-  canceled:    "已取消",
+  completed: "已完成",
+  failed: "失败",
+  canceled: "已取消",
 };
 
 type TrainingBaseModelOption = {
@@ -54,17 +58,19 @@ const TRAINING_COMPATIBLE_BASE_MODELS: TrainingBaseModelOption[] = [
     helperText: "表达能力更强，但训练更重，适合手动切换使用",
   },
 ];
-const TRAINING_DEFAULT_BASE_MODEL = (
-  TRAINING_COMPATIBLE_BASE_MODELS.find((item) => item.modelName === DEFAULT_TRAINING_BASE_MODEL_NAME)
-  ?? TRAINING_COMPATIBLE_BASE_MODELS[0]
-)?.modelName ?? DEFAULT_TRAINING_BASE_MODEL_NAME;
+const TRAINING_DEFAULT_BASE_MODEL =
+  (TRAINING_COMPATIBLE_BASE_MODELS.find((item) => item.modelName === DEFAULT_TRAINING_BASE_MODEL_NAME) ??
+    TRAINING_COMPATIBLE_BASE_MODELS[0])?.modelName ?? DEFAULT_TRAINING_BASE_MODEL_NAME;
 
 function StatusBadge({ status }: { status: string }) {
   const color =
-    status === "completed" ? "text-green-400 bg-green-950/40 border-green-800" :
-    status === "failed"    ? "text-red-400 bg-red-950/40 border-red-800" :
-    status === "canceled"  ? "text-zinc-500 bg-zinc-800 border-zinc-700" :
-    "text-indigo-400 bg-indigo-950/40 border-indigo-800";
+    status === "completed"
+      ? "text-green-400 bg-green-950/40 border-green-800"
+      : status === "failed"
+        ? "text-red-400 bg-red-950/40 border-red-800"
+        : status === "canceled"
+          ? "text-zinc-500 bg-zinc-800 border-zinc-700"
+          : "text-indigo-400 bg-indigo-950/40 border-indigo-800";
   return (
     <span className={`text-xs px-1.5 py-0.5 rounded border font-mono ${color}`}>
       {STATUS_LABELS[status] ?? status}
@@ -103,6 +109,84 @@ function isRegistrationRetryHint(message: string | null): boolean {
     normalized.includes("registration pending") ||
     normalized.includes("pending")
   );
+}
+
+function resolveReadinessTitle(
+  readiness: LLMRuntimeReadiness | null,
+  runtimeLoading: boolean,
+  isPullingModel: boolean,
+  pullingModelName: string,
+): string {
+  if (isPullingModel) return `正在拉取 ${pullingModelName}`;
+  if (runtimeLoading && readiness === null) return "正在检测训练环境";
+  if (readiness === null) return "训练环境状态暂不可用";
+  if (readiness.state === "installing_runtime") {
+    if (readiness.installProgress.stage === "snapshot") {
+      return "正在准备训练基础模型";
+    }
+    return "正在安装训练运行时";
+  }
+  switch (readiness.state) {
+    case "missing_runtime":
+      return "训练运行时未安装";
+    case "missing_ollama":
+      return "Ollama 未安装或未启动";
+    case "missing_inference_model":
+      return "基础模型尚未下载";
+    case "preparing_training_base_snapshot":
+      return "正在准备训练基础模型";
+    case "missing_training_base_snapshot":
+      return "训练基础模型缺失，需要修复";
+    case "runtime_broken":
+      return "训练环境异常，需要修复";
+    case "ready":
+      return "已就绪，可开始训练";
+    case "unsupported":
+      return "当前设备暂不支持当前训练设置";
+    default:
+      return "训练环境状态暂不可用";
+  }
+}
+
+function resolveReadinessTone(readiness: LLMRuntimeReadiness | null): string {
+  if (readiness?.ready) {
+    return "border-green-800/60 bg-green-950/30 text-green-200";
+  }
+  if (readiness?.state === "runtime_broken" || readiness?.state === "unsupported") {
+    return "border-red-800/70 bg-red-950/30 text-red-200";
+  }
+  return "border-amber-800/70 bg-amber-950/30 text-amber-200";
+}
+
+function formatReadinessDetail(
+  readiness: LLMRuntimeReadiness | null,
+  pullProgress: LLMPullEvent | null,
+  isPullingModel: boolean,
+): string {
+  if (isPullingModel) {
+    if (typeof pullProgress?.percent === "number") {
+      return `基础模型下载中，已完成 ${Math.round(pullProgress.percent)}%。`;
+    }
+    if (pullProgress?.phase) {
+      return `基础模型下载中：${pullProgress.phase}。`;
+    }
+    return "基础模型下载中，请保持网络连接。";
+  }
+
+  if (readiness === null) {
+    return "正在获取训练环境状态，请稍候。";
+  }
+
+  if (
+    readiness.state === "installing_runtime" ||
+    readiness.state === "preparing_training_base_snapshot"
+  ) {
+    const percent = Math.round(readiness.installProgress.percent);
+    const progressText = Number.isFinite(percent) ? `（${percent}%）` : "";
+    return `${readiness.installProgress.message}${progressText}`;
+  }
+
+  return readiness.blockingReason ?? readiness.message;
 }
 
 function JobCard({
@@ -213,9 +297,7 @@ function JobCard({
                 : "border-zinc-700 bg-zinc-900/40 text-zinc-300"
           }`}
         >
-          <p className="font-medium">
-            {registrationRetryHint ? "模型注册待重试" : "系统提示"}
-          </p>
+          <p className="font-medium">{registrationRetryHint ? "模型注册待重试" : "系统提示"}</p>
           <p>{job.errorMessage}</p>
         </div>
       )}
@@ -230,7 +312,13 @@ export function LLMTrainingPanel({ characterId }: Props) {
   const [mode, setMode] = useState<LLMTrainingMode>("standard");
   const [selectedBaseModel, setSelectedBaseModel] = useState<string>(TRAINING_DEFAULT_BASE_MODEL);
   const [loading, setLoading] = useState(true);
+  const [runtimeLoading, setRuntimeLoading] = useState(true);
   const [starting, setStarting] = useState(false);
+  const [runtimeReadiness, setRuntimeReadiness] = useState<LLMRuntimeReadiness | null>(null);
+  const [runtimeActionLoading, setRuntimeActionLoading] = useState<
+    "repair" | "open_ollama" | "pull_model" | null
+  >(null);
+  const [pullProgress, setPullProgress] = useState<LLMPullEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [streamNotice, setStreamNotice] = useState<string | null>(null);
   const streamNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -246,12 +334,9 @@ export function LLMTrainingPanel({ characterId }: Props) {
     }, 4000);
   }, []);
 
-  const loadAll = useCallback(async () => {
+  const loadTrainingData = useCallback(async () => {
     try {
-      const [ds, jbs] = await Promise.all([
-        listLLMDatasets(characterId),
-        listLLMTrainingJobs(characterId),
-      ]);
+      const [ds, jbs] = await Promise.all([listLLMDatasets(characterId), listLLMTrainingJobs(characterId)]);
       setDatasets(ds);
       setJobs(jbs);
     } catch {
@@ -261,9 +346,47 @@ export function LLMTrainingPanel({ characterId }: Props) {
     }
   }, [characterId]);
 
+  const loadReadiness = useCallback(
+    async (options?: { silent?: boolean; autoFix?: boolean; mode?: LLMTrainingMode }) => {
+      if (!options?.silent) {
+        setRuntimeLoading(true);
+      }
+      try {
+        const readiness = await fetchLLMRuntimeReadiness({
+          mode: options?.mode ?? mode,
+          baseModel: selectedBaseModel,
+          autoFix: options?.autoFix ?? false,
+        });
+        setRuntimeReadiness(readiness);
+        return readiness;
+      } catch (err) {
+        if (!options?.silent) {
+          setError(err instanceof Error ? err.message : "训练环境状态检测失败，请稍后重试");
+        }
+        return null;
+      } finally {
+        if (!options?.silent) {
+          setRuntimeLoading(false);
+        }
+      }
+    },
+    [mode, selectedBaseModel],
+  );
+
   useEffect(() => {
-    loadAll();
-  }, [loadAll]);
+    void loadTrainingData();
+  }, [loadTrainingData]);
+
+  useEffect(() => {
+    void loadReadiness();
+  }, [loadReadiness]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      void loadReadiness({ silent: true });
+    }, 8000);
+    return () => clearInterval(timer);
+  }, [loadReadiness]);
 
   useEffect(() => {
     return () => {
@@ -273,9 +396,10 @@ export function LLMTrainingPanel({ characterId }: Props) {
     };
   }, []);
 
-  // Subscribe to task stream for real-time training progress
   const jobsRef = useRef(jobs);
-  useEffect(() => { jobsRef.current = jobs; }, [jobs]);
+  useEffect(() => {
+    jobsRef.current = jobs;
+  }, [jobs]);
 
   useEffect(() => {
     const teardown = createTaskStream(async (event) => {
@@ -284,7 +408,6 @@ export function LLMTrainingPanel({ characterId }: Props) {
 
       const knownIds = new Set(jobsRef.current.map((j) => j.id));
       if (knownIds.has(task.id)) {
-        // Update known job with fresh details
         try {
           const full = await getLLMTrainingJob(task.id);
           setJobs((prev) => prev.map((j) => (j.id === full.id ? full : j)));
@@ -299,7 +422,6 @@ export function LLMTrainingPanel({ characterId }: Props) {
           });
         }
       } else if (task.name === `llm-training-${characterId}`) {
-        // A new job for this character appeared (e.g. started elsewhere)
         try {
           const all = await listLLMTrainingJobs(characterId);
           setJobs(all);
@@ -318,6 +440,41 @@ export function LLMTrainingPanel({ characterId }: Props) {
     return teardown;
   }, [characterId, showStreamNotice]);
 
+  const activeJob = useMemo(
+    () => jobs.find((j) => !["completed", "failed", "canceled"].includes(j.status)),
+    [jobs],
+  );
+
+  const runRootJobId = useMemo(() => {
+    if (activeJob?.runRoot) return activeJob.id;
+    const historyJob = jobs.find((job) => job.runRoot);
+    return historyJob?.id ?? null;
+  }, [activeJob, jobs]);
+
+  const supportedModes = runtimeReadiness?.hardware?.supportedModes;
+  useEffect(() => {
+    if (!supportedModes || supportedModes.length === 0) {
+      return;
+    }
+    if (!supportedModes.includes(mode)) {
+      if (supportedModes.includes("standard")) {
+        setMode("standard");
+      } else {
+        setMode(supportedModes[0]);
+      }
+    }
+  }, [mode, supportedModes]);
+
+  const fineModeDisabledReason = useMemo(() => {
+    if (!runtimeReadiness?.hardware) return null;
+    if (runtimeReadiness.state === "unsupported") return null;
+    if (runtimeReadiness.hardware.supportedModes.includes("fine")) return null;
+    return (
+      `当前设备显存为 ${runtimeReadiness.hardware.vramGB.toFixed(1)}GB，` +
+      "精细模式至少需要 12GB。"
+    );
+  }, [runtimeReadiness]);
+
   const toggleDataset = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -331,6 +488,17 @@ export function LLMTrainingPanel({ characterId }: Props) {
       setError("请先选择至少一个数据集");
       return;
     }
+
+    const latestReadiness = await loadReadiness({ mode });
+    if (latestReadiness === null) {
+      setError("训练环境检测失败，请稍后重试");
+      return;
+    }
+    if (!latestReadiness.ready) {
+      setError(latestReadiness.blockingReason ?? "训练环境未就绪，请先完成准备步骤");
+      return;
+    }
+
     setStarting(true);
     setError(null);
     try {
@@ -364,13 +532,158 @@ export function LLMTrainingPanel({ characterId }: Props) {
     }
   };
 
-  const activeJob = jobs.find(
-    (j) => !["completed", "failed", "canceled"].includes(j.status),
+  const handleRepairRuntime = async () => {
+    setRuntimeActionLoading("repair");
+    setError(null);
+    try {
+      const readiness = await repairLLMRuntime();
+      setRuntimeReadiness(readiness);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "修复训练环境失败，请稍后重试");
+    } finally {
+      setRuntimeActionLoading(null);
+      void loadReadiness({ silent: true });
+    }
+  };
+
+  const handleOpenOllama = async () => {
+    setRuntimeActionLoading("open_ollama");
+    setError(null);
+    try {
+      await openLLMRuntime();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "启动语言引擎失败，请稍后重试");
+    } finally {
+      setRuntimeActionLoading(null);
+      void loadReadiness({ silent: true });
+    }
+  };
+
+  const handleDownloadBaseModel = async () => {
+    setRuntimeActionLoading("pull_model");
+    setPullProgress({
+      status: "running",
+      phase: "正在准备下载",
+      percent: 0,
+    });
+    setError(null);
+    try {
+      await pullLLMModel(selectedBaseModel, (event) => {
+        setPullProgress(event);
+      });
+      setPullProgress({
+        status: "done",
+        phase: "下载完成",
+        percent: 100,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "下载基础模型失败，请稍后重试");
+    } finally {
+      setRuntimeActionLoading(null);
+      await loadReadiness({ silent: true });
+    }
+  };
+
+  const readinessTitle = resolveReadinessTitle(
+    runtimeReadiness,
+    runtimeLoading,
+    runtimeActionLoading === "pull_model",
+    selectedBaseModel,
   );
+  const readinessDetail = formatReadinessDetail(
+    runtimeReadiness,
+    pullProgress,
+    runtimeActionLoading === "pull_model",
+  );
+  const readinessTone = resolveReadinessTone(runtimeReadiness);
+
+  const canInstallRuntime = runtimeReadiness?.state === "missing_runtime";
+  const canRepairRuntime =
+    runtimeReadiness?.state === "runtime_broken" ||
+    runtimeReadiness?.state === "missing_training_base_snapshot";
+  const canOpenOllama = runtimeReadiness?.state === "missing_ollama";
+  const canDownloadBaseModel =
+    runtimeReadiness?.state === "missing_inference_model" || runtimeActionLoading === "pull_model";
 
   return (
     <div className="space-y-5">
-      {/* Dataset selector */}
+      <div className={`rounded-lg border px-3 py-3 space-y-2 ${readinessTone}`}>
+        <div className="flex items-center justify-between gap-3">
+          <div className="space-y-1">
+            <p className="text-xs font-medium tracking-wide uppercase text-zinc-200">训练环境状态</p>
+            <p className="text-sm font-medium">{readinessTitle}</p>
+          </div>
+          {runtimeLoading && (
+            <span className="text-xs text-zinc-300">检测中…</span>
+          )}
+        </div>
+        <p className="text-xs leading-relaxed text-zinc-300">{readinessDetail}</p>
+        {fineModeDisabledReason && (
+          <p className="text-xs text-amber-200">{fineModeDisabledReason}</p>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {canInstallRuntime && (
+            <button
+              type="button"
+              onClick={() => void handleRepairRuntime()}
+              disabled={runtimeActionLoading !== null}
+              className="text-xs px-2.5 py-1 rounded border border-indigo-700 bg-indigo-950/50 text-indigo-300 hover:text-indigo-200 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {runtimeActionLoading === "repair" ? "处理中…" : "安装训练环境"}
+            </button>
+          )}
+          {canRepairRuntime && (
+            <button
+              type="button"
+              onClick={() => void handleRepairRuntime()}
+              disabled={runtimeActionLoading !== null}
+              className="text-xs px-2.5 py-1 rounded border border-indigo-700 bg-indigo-950/50 text-indigo-300 hover:text-indigo-200 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {runtimeActionLoading === "repair" ? "处理中…" : "修复训练环境"}
+            </button>
+          )}
+          {canOpenOllama && (
+            <button
+              type="button"
+              onClick={() => void handleOpenOllama()}
+              disabled={runtimeActionLoading !== null}
+              className="text-xs px-2.5 py-1 rounded border border-zinc-700 bg-zinc-800 text-zinc-200 hover:text-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {runtimeActionLoading === "open_ollama" ? "处理中…" : "安装/启动 Ollama"}
+            </button>
+          )}
+          {canDownloadBaseModel && (
+            <button
+              type="button"
+              onClick={() => void handleDownloadBaseModel()}
+              disabled={runtimeActionLoading !== null}
+              className="text-xs px-2.5 py-1 rounded border border-zinc-700 bg-zinc-800 text-zinc-200 hover:text-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {runtimeActionLoading === "pull_model" ? "下载中…" : "下载基础模型"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              if (runRootJobId) {
+                void handleOpenRunRoot(runRootJobId);
+              }
+            }}
+            disabled={!runRootJobId}
+            className="text-xs px-2.5 py-1 rounded border border-zinc-700 bg-zinc-800 text-zinc-300 hover:text-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            打开运行目录
+          </button>
+          <button
+            type="button"
+            onClick={() => void loadReadiness()}
+            className="text-xs px-2.5 py-1 rounded border border-zinc-700 bg-zinc-800 text-zinc-300 hover:text-zinc-100"
+          >
+            重新检测
+          </button>
+        </div>
+      </div>
+
       <div className="space-y-2">
         <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">选择训练数据集</h3>
         {loading ? (
@@ -400,7 +713,6 @@ export function LLMTrainingPanel({ characterId }: Props) {
         )}
       </div>
 
-      {/* Base model selector */}
       <div className="space-y-2">
         <label
           htmlFor="llm-training-base-model"
@@ -422,33 +734,40 @@ export function LLMTrainingPanel({ characterId }: Props) {
           ))}
         </select>
         <p className="text-xs text-zinc-500">
-          {TRAINING_COMPATIBLE_BASE_MODELS.find((item) => item.modelName === selectedBaseModel)?.helperText}
+          {
+            TRAINING_COMPATIBLE_BASE_MODELS.find((item) => item.modelName === selectedBaseModel)
+              ?.helperText
+          }
         </p>
       </div>
 
-      {/* Mode selector */}
       <div className="space-y-2">
         <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">训练模式</h3>
         <div className="grid grid-cols-3 gap-2">
-          {(["light", "standard", "fine"] as LLMTrainingMode[]).map((m) => (
-            <button
-              key={m}
-              onClick={() => setMode(m)}
-              className={`rounded-lg border px-3 py-2 text-xs text-left transition-colors ${
-                mode === m
-                  ? "border-indigo-500 bg-indigo-950/40 text-indigo-300"
-                  : "border-zinc-700 bg-zinc-800/30 text-zinc-400 hover:border-zinc-500"
-              }`}
-            >
-              <span className="font-medium capitalize">{m}</span>
-              <br />
-              <span className="text-zinc-500">{MODE_LABELS[m].split("（")[1]?.replace("）", "") ?? ""}</span>
-            </button>
-          ))}
+          {(["light", "standard", "fine"] as LLMTrainingMode[]).map((m) => {
+            const modeDisabled = supportedModes ? !supportedModes.includes(m) : false;
+            return (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                disabled={modeDisabled || starting || !!activeJob}
+                className={`rounded-lg border px-3 py-2 text-xs text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  mode === m
+                    ? "border-indigo-500 bg-indigo-950/40 text-indigo-300"
+                    : "border-zinc-700 bg-zinc-800/30 text-zinc-400 hover:border-zinc-500"
+                }`}
+              >
+                <span className="font-medium capitalize">{m}</span>
+                <br />
+                <span className="text-zinc-500">
+                  {MODE_LABELS[m].split("（")[1]?.replace("）", "") ?? ""}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* Error */}
       {error && (
         <div className="rounded-lg bg-red-950/50 border border-red-800 px-3 py-2 text-xs text-red-300">
           {error}
@@ -464,18 +783,30 @@ export function LLMTrainingPanel({ characterId }: Props) {
         </div>
       )}
 
-      {/* Start button */}
       <button
-        onClick={handleStart}
-        disabled={starting || !!activeJob || selectedIds.size === 0}
+        onClick={() => void handleStart()}
+        disabled={
+          starting ||
+          !!activeJob ||
+          selectedIds.size === 0 ||
+          runtimeLoading ||
+          !runtimeReadiness?.ready
+        }
         className="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500
                    disabled:opacity-40 disabled:cursor-not-allowed
                    text-sm font-medium text-white transition-colors"
       >
-        {starting ? "提交中…" : activeJob ? "训练进行中…" : "开始训练"}
+        {starting
+          ? "提交中…"
+          : runtimeLoading
+            ? "检测训练环境中…"
+            : activeJob
+              ? "训练进行中…"
+              : runtimeReadiness?.ready
+                ? "开始训练"
+                : "训练环境未就绪"}
       </button>
 
-      {/* Job history */}
       {jobs.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">训练记录</h3>

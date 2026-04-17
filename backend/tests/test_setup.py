@@ -112,6 +112,7 @@ def test_backend_starts_without_llm_gpu_training_extras(monkeypatch) -> None:
 
     with TestClient(app) as client:
         assert client.app.state.llm_training_service is not None
+        assert client.app.state.llm_runtime_manager is not None
         response = client.get("/api/setup/status")
 
     assert response.status_code == 200

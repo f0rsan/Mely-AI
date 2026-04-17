@@ -16,7 +16,6 @@ import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from importlib.util import find_spec
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
@@ -25,18 +24,17 @@ from app.core.paths import ensure_llm_directories
 from app.db.connection import connect_database
 from app.services.llm_base_models import (
     DEFAULT_TRAINING_BASE_MODEL,
-    build_model_not_downloaded_error,
-    build_mode_not_allowed_error,
     build_unsupported_model_error,
-    get_active_hardware_policy,
     get_training_base_model,
-    is_mode_allowed_for_policy,
 )
-from app.services.ollama_service import OllamaAPIError, check_ollama_status
+from app.services.llm_runtime_manager import (
+    detect_missing_runtime_dependencies,
+)
 from app.services.task_queue import TaskQueue
 
 if TYPE_CHECKING:
     from app.services.llm_model_service import LLMModelService
+    from app.services.llm_runtime_manager import LLMRuntimeManager
 
 
 # ── Types ─────────────────────────────────────────────────────────────────────
@@ -62,23 +60,9 @@ MODE_PRESETS: dict[LLMTrainingMode, dict[str, Any]] = {
     "fine": {"min_steps": 800, "max_steps": 1500, "eta_min": 70},
 }
 
-# VRAM required per mode (approximate, Unsloth QLoRA)
-VRAM_REQUIRED: dict[LLMTrainingMode, float] = {
-    "light": 6.0,
-    "standard": 6.5,
-    "fine": 7.0,
-}
-
 MISSING_GPU_DEPENDENCIES_MSG = (
     "当前环境缺少 LLM 训练依赖（{modules}）。"
-    "请先安装 backend[gpu-training] 后再启动训练。"
-)
-GPU_TRAINING_RUNTIME_DEPENDENCIES = (
-    "unsloth",
-    "torch",
-    "datasets",
-    "transformers",
-    "trl",
+    "请先修复训练环境后再启动训练。"
 )
 WORKER_PROTOCOL_EVENTS = {"status", "progress", "complete", "error"}
 TERMINAL_STATUSES = {"completed", "failed", "canceled"}
@@ -96,7 +80,7 @@ STATUS_PROGRESS_HINT: dict[str, float] = {
 }
 WORKER_ERROR_TRANSLATIONS = {
     "out_of_memory": "显存不足，请尝试轻量模式或关闭其他程序",
-    "missing_dependency": "训练环境缺少依赖，请先安装 LLM 训练组件后重试",
+    "missing_dependency": "训练运行时依赖异常，请先执行“修复训练环境”后重试",
     "gguf_export_failed": "模型导出失败，请稍后重试",
     "gguf_export_oom": "模型导出失败：内存不足，请关闭其他程序后重试",
     "worker_crash": "训练进程异常退出，请稍后重试",
@@ -346,11 +330,7 @@ def get_missing_gpu_training_dependencies() -> list[str]:
     - FastAPI startup must stay import-safe without GPU extras.
     - GPU dependency checks run only when an LLM training job starts.
     """
-    missing: list[str] = []
-    for module in GPU_TRAINING_RUNTIME_DEPENDENCIES:
-        if find_spec(module) is None:
-            missing.append(module)
-    return missing
+    return detect_missing_runtime_dependencies()
 
 
 # ── Service class ─────────────────────────────────────────────────────────────
@@ -363,11 +343,13 @@ class LLMTrainingService:
         data_root: Path,
         queue: TaskQueue,
         llm_model_service: LLMModelService | None = None,
+        llm_runtime_manager: LLMRuntimeManager | None = None,
     ) -> None:
         self._db_path = db_path
         self._data_root = data_root
         self._queue = queue
         self._llm_model_service = llm_model_service
+        self._llm_runtime_manager = llm_runtime_manager
         self._worker_script = Path(__file__).with_name("unsloth_worker.py")
 
     @contextmanager
@@ -569,9 +551,14 @@ class LLMTrainingService:
         self,
         config_path: Path,
     ) -> asyncio.subprocess.Process:
+        runtime_manager = self._llm_runtime_manager
+        if runtime_manager is None:
+            raise RuntimeError("训练运行时管理器未初始化，请先执行“修复训练环境”后重试。")
+        worker_python, worker_entry = runtime_manager.resolve_worker_launch()
+
         return await asyncio.create_subprocess_exec(
-            sys.executable,
-            str(self._worker_script),
+            str(worker_python),
+            str(worker_entry),
             str(config_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
@@ -980,36 +967,20 @@ class LLMTrainingService:
         if base_model_config is None:
             raise LLMTrainingValidationError(build_unsupported_model_error(base_model))
 
-        try:
-            ollama_status = await check_ollama_status()
-        except OllamaAPIError as exc:
-            raise LLMTrainingValidationError("语言引擎状态检查失败，请稍后重试") from exc
+        runtime_manager = self._llm_runtime_manager
+        if runtime_manager is None:
+            raise LLMTrainingValidationError("训练运行时未初始化，请先执行“修复训练环境”后重试。")
 
-        if not ollama_status.running:
-            raise LLMTrainingValidationError("语言引擎未启动，请先启动 Ollama")
-
-        downloaded_models = {
-            str(model.name).strip().lower()
-            for model in ollama_status.models
-            if getattr(model, "name", None)
-        }
-        if base_model_config.ollama_tag.strip().lower() not in downloaded_models:
+        runtime_readiness = await runtime_manager.get_readiness(
+            mode=mode,
+            base_model=base_model_config.ollama_tag,
+            auto_fix=True,
+        )
+        if not runtime_readiness.ready:
             raise LLMTrainingValidationError(
-                build_model_not_downloaded_error(base_model_config.ollama_tag)
-            )
-
-        hardware_policy = get_active_hardware_policy()
-        if not is_mode_allowed_for_policy(mode, hardware_policy):
-            raise LLMTrainingValidationError(
-                build_mode_not_allowed_error(mode, hardware_policy)
-            )
-
-        # GPU precheck
-        vram_gb = _detect_vram_gb()
-        required = VRAM_REQUIRED[mode]
-        if vram_gb < required:
-            raise LLMTrainingValidationError(
-                f"显存不足（当前 {vram_gb:.1f}GB，{mode} 模式需要 {required}GB）"
+                runtime_readiness.blocking_reason
+                or runtime_readiness.message
+                or "训练环境尚未就绪，请先修复后重试。"
             )
 
         # Check GPU mutex
@@ -1113,13 +1084,25 @@ class LLMTrainingService:
             if self._is_canceled(job_id):
                 return
 
-            missing_dependencies = get_missing_gpu_training_dependencies()
-            if missing_dependencies:
-                missing_message = MISSING_GPU_DEPENDENCIES_MSG.format(
-                    modules="、".join(missing_dependencies)
+            runtime_manager = self._llm_runtime_manager
+            if runtime_manager is None:
+                runtime_message = "训练运行时未初始化，请先执行“修复训练环境”后重试。"
+                self._mark_failed(job_id, runtime_message)
+                raise RuntimeError(runtime_message)
+
+            readiness = await runtime_manager.get_readiness(
+                mode=record.mode,
+                base_model=record.base_model,
+                auto_fix=False,
+            )
+            if not readiness.ready:
+                runtime_message = (
+                    readiness.blocking_reason
+                    or readiness.message
+                    or "训练环境尚未就绪，请先修复后重试。"
                 )
-                self._mark_failed(job_id, missing_message)
-                raise RuntimeError(missing_message)
+                self._mark_failed(job_id, runtime_message)
+                raise RuntimeError(runtime_message)
 
             try:
                 dataset_paths = self._resolve_dataset_paths(record)
@@ -1235,10 +1218,12 @@ def create_llm_training_service(
     data_root: Path,
     queue: TaskQueue,
     llm_model_service: LLMModelService | None = None,
+    llm_runtime_manager: LLMRuntimeManager | None = None,
 ) -> LLMTrainingService:
     return LLMTrainingService(
         db_path=db_path,
         data_root=data_root,
         queue=queue,
         llm_model_service=llm_model_service,
+        llm_runtime_manager=llm_runtime_manager,
     )
