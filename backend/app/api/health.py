@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
+API_FEATURES = {"llmRuntimeReadiness": True}
 
 
 @router.get("/health", response_model=None)
@@ -14,6 +15,7 @@ def read_health(request: Request):
             content={
                 "status": "error",
                 "app": "mely-backend",
+                "api": {"features": API_FEATURES},
                 "services": {"api": "running"},
                 "dataRoot": None,
                 "database": {
@@ -29,6 +31,7 @@ def read_health(request: Request):
     body = {
         "status": bootstrap.status,
         "app": "mely-backend",
+        "api": {"features": API_FEATURES},
         "services": {"api": "running"},
         "dataRoot": str(bootstrap.data_root),
         "database": {

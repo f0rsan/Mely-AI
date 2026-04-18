@@ -28,6 +28,7 @@ REQUIRED_API_PROBES = (
     ("/api/health", "health"),
     ("/api/llm-runtime/readiness?mode=standard&baseModel=qwen2.5%3A3b&autoFix=false", "LLM runtime readiness"),
 )
+REQUIRED_HEALTH_FEATURE = "llmRuntimeReadiness"
 
 
 def resolve_source_dir() -> Path:
@@ -125,6 +126,20 @@ def probe_endpoint_status(url: str) -> int:
         return 0
 
 
+def probe_endpoint_json(url: str) -> dict | None:
+    try:
+        with urlopen(url, timeout=10) as response:
+            content_type = response.headers.get("Content-Type", "")
+            if "json" not in content_type.lower():
+                return None
+            import json
+
+            payload = json.loads(response.read().decode("utf-8"))
+            return payload if isinstance(payload, dict) else None
+    except (HTTPError, URLError, OSError, ValueError):
+        return None
+
+
 def verify_backend_api_compatibility(backend_binary: Path) -> None:
     port = pick_backend_port()
     process = subprocess.Popen(
@@ -148,6 +163,18 @@ def verify_backend_api_compatibility(backend_binary: Path) -> None:
             time.sleep(0.2)
         else:
             raise RuntimeError("backend sidecar did not become healthy within 15 seconds.")
+
+        health_payload = probe_endpoint_json(f"{base_url}/api/health")
+        feature_enabled = (
+            isinstance(health_payload, dict)
+            and isinstance(health_payload.get("api"), dict)
+            and isinstance(health_payload["api"].get("features"), dict)
+            and health_payload["api"]["features"].get(REQUIRED_HEALTH_FEATURE) is True
+        )
+        if not feature_enabled:
+            raise RuntimeError(
+                f"backend health payload is missing required feature '{REQUIRED_HEALTH_FEATURE}'."
+            )
 
         for relative_path, label in REQUIRED_API_PROBES:
             status = probe_endpoint_status(f"{base_url}{relative_path}")

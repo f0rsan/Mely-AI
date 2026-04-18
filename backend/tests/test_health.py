@@ -17,6 +17,7 @@ def test_health_endpoint_returns_bootstrap_details(temp_data_root) -> None:
     assert body["status"] == "ok"
     assert body["app"] == "mely-backend"
     assert body["services"]["api"] == "running"
+    assert body["api"]["features"]["llmRuntimeReadiness"] is True
     assert body["dataRoot"] == str(temp_data_root)
     assert body["database"]["initialized"] is True
     assert body["database"]["path"] == str(temp_data_root / "db" / "mely.db")
@@ -39,6 +40,7 @@ def test_health_returns_503_without_bootstrap_state() -> None:
 
     body = response.json()
     assert body["error"] == "bootstrap_not_run"
+    assert body["api"]["features"]["llmRuntimeReadiness"] is True
     assert body["database"]["initialized"] is False
 
 
@@ -61,5 +63,6 @@ def test_health_sanitizes_bootstrap_error_text() -> None:
     body = response.json()
     assert body["status"] == "error"
     assert body["error"] == "bootstrap_failed"
+    assert body["api"]["features"]["llmRuntimeReadiness"] is True
     assert body["database"]["error"] == "bootstrap_failed"
     assert "permission denied" not in body["database"]["error"]

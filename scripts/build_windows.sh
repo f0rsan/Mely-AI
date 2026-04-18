@@ -246,12 +246,26 @@ npm ci
 
 echo ""
 echo "=== [5/6] Build Tauri Windows installer ==="
+# Remove previous release bundle outputs so the final installer path always
+# points to the current build rather than a stale artifact left in target/.
+rm -rf "$REPO_ROOT/src-tauri/target/release/bundle/nsis" \
+       "$REPO_ROOT/src-tauri/target/release/bundle/msi"
+
 # tauri build will:
 #   1. Run `python scripts/prepare_tauri_backend.py --require-source-fresh --verify-api-compatibility && npm run build`
 #   2. Compile the Rust shell
 #   3. Bundle everything into an NSIS installer at:
 #      src-tauri/target/release/bundle/nsis/Mely AI_0.1.0_x64-setup.exe
 npx tauri build --bundles nsis,msi
+
+echo ""
+echo "=== [5b/6] Smoke-test the built desktop executable ==="
+DESKTOP_EXE="$REPO_ROOT/src-tauri/target/release/mely-ai.exe"
+if [ ! -f "$DESKTOP_EXE" ]; then
+  echo "ERROR: Built desktop executable not found at $DESKTOP_EXE" >&2
+  exit 1
+fi
+python scripts/verify_windows_desktop_backend.py --executable "$DESKTOP_EXE"
 
 echo ""
 echo "=== [6/6] Collect artifact summary ==="
