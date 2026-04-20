@@ -29,6 +29,7 @@ STAGED_RESOURCES_DIR="$REPO_ROOT/src-tauri/resources/mely-backend"
 STAGED_LLM_RUNTIME_DIR="$REPO_ROOT/src-tauri/resources/llm-runtime"
 RUNTIME_BUILD_DIR="$REPO_ROOT/build/windows-llm-runtime/llm-runtime"
 RELEASE_SUMMARY_PATH="$REPO_ROOT/build/windows-training-release-artifacts.txt"
+BUILD_TAURI_CONFIG_PATH="$REPO_ROOT/build/windows-tauri.build.json"
 HOST_UNAME="$(uname -s)"
 
 is_wsl() {
@@ -61,6 +62,52 @@ path_size_human() {
     return 0
   fi
   echo "N/A"
+}
+
+resolve_windows_build_version() {
+  local explicit_version="${MELY_BUILD_VERSION:-}"
+  if [ -n "$explicit_version" ]; then
+    echo "$explicit_version"
+    return 0
+  fi
+
+  local commit_count
+  commit_count=$(git -C "$REPO_ROOT" rev-list --count HEAD 2>/dev/null || true)
+  if [ -n "$commit_count" ]; then
+    echo "0.1.${commit_count}"
+    return 0
+  fi
+
+  echo "0.1.$(date +%s)"
+}
+
+validate_semver_version() {
+  local version="$1"
+  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "ERROR: Invalid build version '$version'. Expected MAJOR.MINOR.PATCH." >&2
+    exit 1
+  fi
+}
+
+write_tauri_build_config() {
+  local source_config="$1"
+  local target_config="$2"
+  local build_version="$3"
+
+  python - "$source_config" "$target_config" "$build_version" <<'PY'
+import json
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1])
+target = pathlib.Path(sys.argv[2])
+version = sys.argv[3]
+
+payload = json.loads(source.read_text(encoding="utf-8"))
+payload["version"] = version
+target.parent.mkdir(parents=True, exist_ok=True)
+target.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
 }
 
 assert_backend_endpoint_ok() {
@@ -256,7 +303,11 @@ rm -rf "$REPO_ROOT/src-tauri/target/release/bundle/nsis" \
 #   2. Compile the Rust shell
 #   3. Bundle everything into an NSIS installer at:
 #      src-tauri/target/release/bundle/nsis/Mely AI_0.1.0_x64-setup.exe
-npx tauri build --bundles nsis,msi
+BUILD_VERSION="$(resolve_windows_build_version)"
+validate_semver_version "$BUILD_VERSION"
+write_tauri_build_config "$REPO_ROOT/src-tauri/tauri.conf.json" "$BUILD_TAURI_CONFIG_PATH" "$BUILD_VERSION"
+echo "Using Windows installer version: $BUILD_VERSION"
+npx tauri build --bundles nsis,msi --config "$BUILD_TAURI_CONFIG_PATH"
 
 echo ""
 echo "=== [5b/6] Smoke-test the built desktop executable ==="
@@ -290,6 +341,7 @@ mkdir -p "$(dirname "$RELEASE_SUMMARY_PATH")"
   echo "runtime_build_size=$(path_size_human "$RUNTIME_BUILD_DIR")"
   echo "runtime_stage_dir=$STAGED_LLM_RUNTIME_DIR"
   echo "runtime_stage_size=$(path_size_human "$STAGED_LLM_RUNTIME_DIR")"
+  echo "build_version=$BUILD_VERSION"
   echo "nsis_installer=${INSTALLER:-N/A}"
   if [ -n "${INSTALLER:-}" ]; then
     echo "nsis_installer_size=$(path_size_human "$INSTALLER")"
