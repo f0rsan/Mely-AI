@@ -307,6 +307,12 @@ rm -rf "$REPO_ROOT/src-tauri/target/release/bundle/nsis" \
 BUILD_VERSION="$(resolve_windows_build_version)"
 validate_semver_version "$BUILD_VERSION"
 write_tauri_build_config "$REPO_ROOT/src-tauri/tauri.conf.json" "$BUILD_TAURI_CONFIG_PATH" "$BUILD_VERSION"
+mkdir -p "$(dirname "$STAGED_RELEASE_SUMMARY_PATH")"
+{
+  echo "timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  echo "build_version=$BUILD_VERSION"
+  echo "note=Bundled pre-build summary. Full release summary is generated under build/ after packaging."
+} > "$STAGED_RELEASE_SUMMARY_PATH"
 echo "Using Windows installer version: $BUILD_VERSION"
 npx tauri build --bundles nsis,msi --config "$BUILD_TAURI_CONFIG_PATH"
 
@@ -356,7 +362,6 @@ mkdir -p "$(dirname "$RELEASE_SUMMARY_PATH")"
     echo "msi_installer_size=N/A"
   fi
 } > "$RELEASE_SUMMARY_PATH"
-cp "$RELEASE_SUMMARY_PATH" "$STAGED_RELEASE_SUMMARY_PATH"
 
 echo "Artifact summary: $RELEASE_SUMMARY_PATH"
 echo "Bundled summary: $STAGED_RELEASE_SUMMARY_PATH"
