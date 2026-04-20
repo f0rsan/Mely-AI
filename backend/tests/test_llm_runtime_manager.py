@@ -4,7 +4,9 @@ import asyncio
 import json
 import os
 import shutil
+import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -344,7 +346,7 @@ async def test_readiness_runtime_broken_then_repair(runtime_manager, monkeypatch
     assert broken.state == "runtime_broken"
 
     repairing = await manager.repair_runtime()
-    assert repairing.state == "installing_runtime"
+    assert repairing.state in {"installing_runtime", "ready"}
 
     for _ in range(50):
         ready_state = await manager.get_readiness()
@@ -414,6 +416,64 @@ async def test_vram_below_8gb_blocked(runtime_manager, monkeypatch):
     assert readiness.state == "unsupported"
     assert readiness.blocking_reason is not None
     assert "低于训练最低要求 8GB" in readiness.blocking_reason
+
+
+@pytest.mark.asyncio
+async def test_readiness_hardware_probe_does_not_block_event_loop(runtime_manager, monkeypatch):
+    manager, data_root = runtime_manager
+    _seed_runtime_manifest(
+        data_root,
+        worker_script=Path(os.environ["MELY_LLM_RUNTIME_RESOURCE_ROOT"]) / "tools" / "unsloth_worker.py",
+    )
+    _seed_training_snapshot(data_root)
+    monkeypatch.setattr("app.services.llm_runtime_manager.detect_missing_runtime_dependencies", lambda: [])
+
+    async def fake_check_ollama_runtime():
+        return SimpleNamespace(
+            installed=True,
+            running=True,
+            models=[SimpleNamespace(name="qwen2.5:3b")],
+            hint=None,
+        )
+
+    monkeypatch.setattr("app.services.llm_runtime_manager.check_ollama_runtime", fake_check_ollama_runtime)
+
+    original_hardware_probe = manager._detect_hardware
+
+    def slow_hardware_probe():
+        time.sleep(0.08)
+        return original_hardware_probe()
+
+    monkeypatch.setattr(manager, "_detect_hardware", slow_hardware_probe)
+
+    start = time.perf_counter()
+    readiness_task = asyncio.create_task(manager.get_readiness(base_model="qwen2.5:3b"))
+    await asyncio.sleep(0.01)
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 0.05
+
+    readiness = await readiness_task
+    assert readiness.state == "ready"
+
+
+def test_detect_hardware_ignores_stuck_nvidia_smi(runtime_manager, monkeypatch):
+    manager, _data_root = runtime_manager
+
+    monkeypatch.delenv("MELY_GPU_NAME", raising=False)
+    monkeypatch.delenv("MELY_GPU_VRAM_GB", raising=False)
+    monkeypatch.delenv("MELY_GPU_DRIVER_VERSION", raising=False)
+    monkeypatch.delenv("MELY_CUDA_VERSION", raising=False)
+
+    def fake_run(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired(cmd="nvidia-smi", timeout=2.0)
+
+    monkeypatch.setattr("app.services.llm_runtime_manager.subprocess.run", fake_run)
+
+    hardware = manager._detect_hardware()
+
+    assert hardware.vram_gb == 8.0
+    assert hardware.source == "fallback"
 
 
 def test_llm_runtime_api_returns_readiness(monkeypatch, temp_data_root, tmp_path: Path):

@@ -44,6 +44,7 @@ FINE_TRAINING_MIN_VRAM_GB = 12.0
 MIN_CUDA_VERSION = (12, 1)
 MIN_DRIVER_VERSION = (531, 79)
 MIN_FREE_DISK_GB = 12.0
+NVIDIA_SMI_TIMEOUT_SECONDS = 2.0
 ALLOW_NON_WINDOWS_TRAINING_ENV = "MELY_LLM_ALLOW_NON_WINDOWS_TRAINING"
 
 
@@ -436,6 +437,7 @@ class LLMRuntimeManager:
                     capture_output=True,
                     text=True,
                     check=False,
+                    timeout=NVIDIA_SMI_TIMEOUT_SECONDS,
                 )
                 if result.returncode == 0:
                     line = result.stdout.strip().splitlines()[0]
@@ -448,6 +450,8 @@ class LLMRuntimeManager:
                         except ValueError:
                             pass
                         driver_version = driver_version or parts[2]
+            except subprocess.TimeoutExpired:
+                pass
             except Exception:
                 pass
 
@@ -751,7 +755,7 @@ class LLMRuntimeManager:
         base_model: str = DEFAULT_TRAINING_BASE_MODEL,
         auto_fix: bool = False,
     ) -> LLMRuntimeReadiness:
-        hardware = self._detect_hardware()
+        hardware = await asyncio.to_thread(self._detect_hardware)
         checks: dict[str, Any] = {
             "runtimeEnforced": self._strict_enforcement,
             "runtimeResourceRoot": str(self._runtime_resource_root),
