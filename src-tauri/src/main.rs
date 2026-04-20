@@ -10,6 +10,7 @@ use std::{
     thread,
     time::Duration,
 };
+use serde_json::Value;
 use tauri::{AppHandle, Manager, Runtime, RunEvent};
 
 struct BackendProcess(Mutex<Option<Child>>);
@@ -21,6 +22,13 @@ const BACKEND_STARTUP_DELAY_MS: u64 = 250;
 const BACKEND_HEALTH_PATH: &str = "/api/health";
 const BACKEND_READINESS_PATH: &str =
     "/api/llm-runtime/readiness?mode=standard&baseModel=qwen2.5%3A3b&autoFix=false";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExistingBackendState {
+    Clear,
+    MelyBackend,
+    OtherService,
+}
 
 fn backend_executable_name() -> &'static str {
     if cfg!(windows) {
@@ -75,10 +83,10 @@ fn backend_socket_addr(port: u16) -> SocketAddr {
     ))
 }
 
-fn backend_http_probe_succeeds(addr: SocketAddr, path: &str) -> bool {
+fn backend_http_response(addr: SocketAddr, path: &str) -> Option<String> {
     let mut stream = match TcpStream::connect_timeout(&addr, Duration::from_millis(200)) {
         Ok(stream) => stream,
-        Err(_) => return false,
+        Err(_) => return None,
     };
 
     let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
@@ -90,17 +98,123 @@ fn backend_http_probe_succeeds(addr: SocketAddr, path: &str) -> bool {
         addr.port(),
     );
     if stream.write_all(request.as_bytes()).is_err() {
+        return None;
+    }
+
+    let mut response = Vec::with_capacity(1024);
+    let mut buffer = [0_u8; 512];
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => response.extend_from_slice(&buffer[..read]),
+            Err(_) => return None,
+        }
+    }
+
+    if response.is_empty() {
+        return None;
+    }
+
+    Some(String::from_utf8_lossy(&response).into_owned())
+}
+
+fn backend_http_probe_succeeds(addr: SocketAddr, path: &str) -> bool {
+    let Some(response) = backend_http_response(addr, path) else {
+        return false;
+    };
+    response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.0 200")
+}
+
+fn backend_response_body(response: &str) -> Option<&str> {
+    response.split_once("\r\n\r\n").map(|(_, body)| body)
+}
+
+fn health_response_identifies_mely_backend(response: &str) -> bool {
+    if !(response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.0 200")) {
         return false;
     }
 
-    let mut response = [0_u8; 256];
-    let read = match stream.read(&mut response) {
-        Ok(read) if read > 0 => read,
-        _ => return false,
+    let Some(body) = backend_response_body(response) else {
+        return false;
+    };
+    let Ok(payload) = serde_json::from_str::<Value>(body) else {
+        return false;
     };
 
-    let status_line = String::from_utf8_lossy(&response[..read]);
-    status_line.starts_with("HTTP/1.1 200") || status_line.starts_with("HTTP/1.0 200")
+    payload
+        .get("app")
+        .and_then(Value::as_str)
+        .map(|app| app == "mely-backend")
+        .unwrap_or(false)
+}
+
+fn detect_existing_backend_state(addr: SocketAddr) -> ExistingBackendState {
+    let Some(response) = backend_http_response(addr, BACKEND_HEALTH_PATH) else {
+        return ExistingBackendState::Clear;
+    };
+
+    if health_response_identifies_mely_backend(&response) {
+        ExistingBackendState::MelyBackend
+    } else {
+        ExistingBackendState::OtherService
+    }
+}
+
+fn wait_for_backend_port_to_clear(addr: SocketAddr, attempts: usize, delay: Duration) -> bool {
+    for attempt in 0..attempts {
+        if matches!(detect_existing_backend_state(addr), ExistingBackendState::Clear) {
+            return true;
+        }
+
+        if attempt + 1 < attempts {
+            thread::sleep(delay);
+        }
+    }
+
+    false
+}
+
+#[cfg(windows)]
+fn terminate_existing_backend_processes() -> bool {
+    match Command::new("taskkill")
+        .args(["/IM", backend_executable_name(), "/F", "/T"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+    {
+        Ok(status) => status.success(),
+        Err(_) => false,
+    }
+}
+
+#[cfg(not(windows))]
+fn terminate_existing_backend_processes() -> bool {
+    false
+}
+
+fn ensure_backend_port_available(addr: SocketAddr) -> bool {
+    match detect_existing_backend_state(addr) {
+        ExistingBackendState::Clear => true,
+        ExistingBackendState::MelyBackend => {
+            eprintln!(
+                "[mely] detected an existing mely-backend on port {}; attempting cleanup",
+                addr.port()
+            );
+            let _ = terminate_existing_backend_processes();
+            wait_for_backend_port_to_clear(
+                addr,
+                BACKEND_STARTUP_ATTEMPTS,
+                Duration::from_millis(BACKEND_STARTUP_DELAY_MS),
+            )
+        }
+        ExistingBackendState::OtherService => {
+            eprintln!(
+                "[mely] backend port {} is occupied by another process; startup aborted",
+                addr.port()
+            );
+            false
+        }
+    }
 }
 
 fn backend_required_api_succeeds(addr: SocketAddr) -> bool {
@@ -150,11 +264,23 @@ fn backend_exe_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
     }
 }
 
-fn spawn_backend<R: Runtime>(app: &AppHandle<R>) -> Option<Child> {
-    let exe = backend_exe_path(app)?;
+fn spawn_backend<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Child>, String> {
+    let Some(exe) = backend_exe_path(app) else {
+        return Ok(None);
+    };
     if !exe.exists() {
-        eprintln!("[mely] backend executable not found at {}", exe.display());
-        return None;
+        return Err(format!(
+            "backend executable not found at {}",
+            exe.display()
+        ));
+    }
+
+    let addr = backend_socket_addr(BACKEND_PORT);
+    if !ensure_backend_port_available(addr) {
+        return Err(format!(
+            "backend port {} could not be prepared for launch",
+            BACKEND_PORT
+        ));
     }
 
     let mut command = Command::new(&exe);
@@ -168,26 +294,26 @@ fn spawn_backend<R: Runtime>(app: &AppHandle<R>) -> Option<Child> {
     match command.spawn() {
         Ok(mut child) => {
             let ready = wait_for_backend_ready(
-                backend_socket_addr(BACKEND_PORT),
+                addr,
                 BACKEND_STARTUP_ATTEMPTS,
                 Duration::from_millis(BACKEND_STARTUP_DELAY_MS),
             );
 
             if ready {
-                Some(child)
+                Ok(Some(child))
             } else {
-                eprintln!(
-                    "[mely] backend sidecar did not expose the required API within {} ms",
+                let message = format!(
+                    "backend sidecar did not expose the required API within {} ms",
                     BACKEND_STARTUP_ATTEMPTS as u64 * BACKEND_STARTUP_DELAY_MS
                 );
+                eprintln!("[mely] {message}");
                 let _ = child.kill();
                 let _ = child.wait();
-                None
+                Err(message)
             }
         }
         Err(error) => {
-            eprintln!("[mely] failed to start backend sidecar: {error}");
-            None
+            Err(format!("failed to start backend sidecar: {error}"))
         }
     }
 }
@@ -206,13 +332,19 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .manage(BackendProcess(Mutex::new(None)))
         .setup(|app| {
-            if let Some(child) = spawn_backend(app.handle()) {
-                let backend_process = app.state::<BackendProcess>();
-                let mut guard = backend_process
-                    .0
-                    .lock()
-                    .expect("backend process mutex poisoned");
-                *guard = Some(child);
+            match spawn_backend(app.handle()) {
+                Ok(Some(child)) => {
+                    let backend_process = app.state::<BackendProcess>();
+                    let mut guard = backend_process
+                        .0
+                        .lock()
+                        .expect("backend process mutex poisoned");
+                    *guard = Some(child);
+                }
+                Ok(None) => {}
+                Err(message) => {
+                    return Err(std::io::Error::other(message).into());
+                }
             }
             Ok(())
         })
@@ -381,6 +513,84 @@ mod tests {
         let ready = wait_for_backend_ready(addr, 1, Duration::from_millis(10));
 
         assert!(!ready);
+        handle.join().expect("join probe server");
+    }
+
+    #[test]
+    fn health_response_identifies_mely_backend_payload() {
+        let response = concat!(
+            "HTTP/1.1 200 OK\r\n",
+            "Content-Type: application/json\r\n",
+            "Connection: close\r\n\r\n",
+            "{\"status\":\"ok\",\"app\":\"mely-backend\"}"
+        );
+
+        assert!(health_response_identifies_mely_backend(response));
+    }
+
+    #[test]
+    fn health_response_rejects_other_service_payload() {
+        let response = concat!(
+            "HTTP/1.1 200 OK\r\n",
+            "Content-Type: application/json\r\n",
+            "Connection: close\r\n\r\n",
+            "{\"status\":\"ok\",\"app\":\"other-service\"}"
+        );
+
+        assert!(!health_response_identifies_mely_backend(response));
+    }
+
+    #[test]
+    fn detects_existing_mely_backend_from_health_probe() {
+        let listener = TcpListener::bind(backend_socket_addr(0)).expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("read local addr");
+        let handle = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept probe");
+            let mut request = [0_u8; 256];
+            let _ = socket.read(&mut request);
+            socket
+                .write_all(
+                    concat!(
+                        "HTTP/1.1 200 OK\r\n",
+                        "Content-Type: application/json\r\n",
+                        "Connection: close\r\n\r\n",
+                        "{\"status\":\"ok\",\"app\":\"mely-backend\"}"
+                    )
+                    .as_bytes(),
+                )
+                .expect("write probe response");
+        });
+
+        let state = detect_existing_backend_state(addr);
+
+        assert_eq!(state, ExistingBackendState::MelyBackend);
+        handle.join().expect("join probe server");
+    }
+
+    #[test]
+    fn detects_other_service_from_health_probe() {
+        let listener = TcpListener::bind(backend_socket_addr(0)).expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("read local addr");
+        let handle = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept probe");
+            let mut request = [0_u8; 256];
+            let _ = socket.read(&mut request);
+            socket
+                .write_all(
+                    concat!(
+                        "HTTP/1.1 200 OK\r\n",
+                        "Content-Type: application/json\r\n",
+                        "Connection: close\r\n\r\n",
+                        "{\"status\":\"ok\",\"app\":\"other-service\"}"
+                    )
+                    .as_bytes(),
+                )
+                .expect("write probe response");
+        });
+
+        let state = detect_existing_backend_state(addr);
+
+        assert_eq!(state, ExistingBackendState::OtherService);
         handle.join().expect("join probe server");
     }
 }
