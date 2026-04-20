@@ -20,6 +20,7 @@ const BACKEND_PORT: u16 = 8000;
 const BACKEND_STARTUP_ATTEMPTS: usize = 60;
 const BACKEND_STARTUP_DELAY_MS: u64 = 250;
 const BACKEND_HEALTH_PATH: &str = "/api/health";
+const BACKEND_RUNTIME_PATH: &str = "/api/llm/runtime";
 const BACKEND_READINESS_PATH: &str =
     "/api/llm-runtime/readiness?mode=standard&baseModel=qwen2.5%3A3b&autoFix=false";
 
@@ -139,12 +140,16 @@ fn backend_http_probe_succeeds(addr: SocketAddr, path: &str) -> bool {
     response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.0 200")
 }
 
+fn backend_response_is_ok(response: &str) -> bool {
+    response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.0 200")
+}
+
 fn backend_response_body(response: &str) -> Option<&str> {
     response.split_once("\r\n\r\n").map(|(_, body)| body)
 }
 
 fn health_response_identifies_mely_backend(response: &str) -> bool {
-    if !(response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.0 200")) {
+    if !backend_response_is_ok(response) {
         return false;
     }
 
@@ -160,6 +165,20 @@ fn health_response_identifies_mely_backend(response: &str) -> bool {
         .and_then(Value::as_str)
         .map(|app| app == "mely-backend")
         .unwrap_or(false)
+}
+
+fn runtime_response_exposes_build_version(response: &str) -> bool {
+    if !backend_response_is_ok(response) {
+        return false;
+    }
+
+    let Some(body) = backend_response_body(response) else {
+        return false;
+    };
+    let Ok(payload) = serde_json::from_str::<Value>(body) else {
+        return false;
+    };
+    payload.get("buildVersion").is_some()
 }
 
 fn detect_existing_backend_state(addr: SocketAddr) -> ExistingBackendState {
@@ -231,9 +250,17 @@ fn ensure_backend_port_available(addr: SocketAddr) -> bool {
     }
 }
 
+fn backend_runtime_contract_succeeds(addr: SocketAddr) -> bool {
+    let Some(response) = backend_http_response(addr, BACKEND_RUNTIME_PATH) else {
+        return false;
+    };
+    runtime_response_exposes_build_version(&response)
+}
+
 fn backend_required_api_succeeds(addr: SocketAddr) -> bool {
     backend_http_probe_succeeds(addr, BACKEND_HEALTH_PATH)
         && backend_http_probe_succeeds(addr, BACKEND_READINESS_PATH)
+        && backend_runtime_contract_succeeds(addr)
 }
 
 fn wait_for_backend_ready(addr: SocketAddr, attempts: usize, delay: Duration) -> bool {
@@ -248,6 +275,20 @@ fn wait_for_backend_ready(addr: SocketAddr, attempts: usize, delay: Duration) ->
     }
 
     false
+}
+
+fn read_build_version_from_summary(summary_path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(summary_path).ok()?;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(raw_value) = trimmed.strip_prefix("build_version=") {
+            let value = raw_value.trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Resolve the path to the mely-backend executable.
@@ -279,15 +320,9 @@ fn backend_exe_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
 }
 
 fn spawn_backend<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Child>, String> {
-    let Some(exe) = backend_exe_path(app) else {
+    let Some(primary_exe) = backend_exe_path(app) else {
         return Ok(None);
     };
-    if !exe.exists() {
-        return Err(format!(
-            "backend executable not found at {}",
-            exe.display()
-        ));
-    }
 
     let addr = backend_socket_addr(BACKEND_PORT);
     if !ensure_backend_port_available(addr) {
@@ -297,56 +332,101 @@ fn spawn_backend<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Child>, String
         ));
     }
 
-    let mut command = Command::new(&exe);
-    let desktop_build_version = app.package_info().version.to_string();
-    command.env("MELY_BACKEND_PORT", BACKEND_PORT.to_string());
-    command.env("MELY_DESKTOP_BUILD_VERSION", desktop_build_version.clone());
-    command.env("MELY_BACKEND_EXECUTABLE", &exe);
+    let package_version = app.package_info().version.to_string();
+    let mut build_version = package_version.clone();
+    let mut runtime_root_for_env: Option<PathBuf> = None;
+    let mut summary_path_for_env: Option<PathBuf> = None;
+    let mut candidate_paths: Vec<PathBuf> = vec![primary_exe.clone()];
 
     if let Ok(resource_dir) = app.path().resource_dir() {
-        let runtime_root = resolve_llm_runtime_root_from_resource_dir(&resource_dir);
-        command.env("MELY_LLM_RUNTIME_RESOURCE_ROOT", &runtime_root);
+        for candidate in backend_candidate_paths(&resource_dir) {
+            if !candidate_paths.contains(&candidate) {
+                candidate_paths.push(candidate);
+            }
+        }
+        runtime_root_for_env = Some(resolve_llm_runtime_root_from_resource_dir(&resource_dir));
         if let Some(summary_path) = resolve_build_summary_path_from_resource_dir(&resource_dir) {
+            if let Some(summary_build_version) = read_build_version_from_summary(&summary_path) {
+                build_version = summary_build_version;
+            }
+            summary_path_for_env = Some(summary_path);
+        }
+    }
+
+    let mut attempt_errors: Vec<String> = Vec::new();
+    let mut launched_paths: Vec<PathBuf> = Vec::new();
+    for exe in candidate_paths {
+        if launched_paths.contains(&exe) {
+            continue;
+        }
+        launched_paths.push(exe.clone());
+        if !exe.exists() {
+            attempt_errors.push(format!("{} (not found)", exe.display()));
+            continue;
+        }
+
+        let mut command = Command::new(&exe);
+        command.env("MELY_BACKEND_PORT", BACKEND_PORT.to_string());
+        command.env("MELY_DESKTOP_BUILD_VERSION", &build_version);
+        command.env("MELY_BACKEND_EXECUTABLE", &exe);
+        if let Some(runtime_root) = runtime_root_for_env.as_ref() {
+            command.env("MELY_LLM_RUNTIME_RESOURCE_ROOT", runtime_root);
+        }
+        if let Some(summary_path) = summary_path_for_env.as_ref() {
             command.env("MELY_WINDOWS_BUILD_SUMMARY_PATH", summary_path);
         }
         eprintln!(
-            "[mely] launching backend sidecar: build_version={} backend={} runtime_root={}",
-            desktop_build_version,
+            "[mely] launching backend sidecar: build_version={} package_version={} backend={} runtime_root={} summary={}",
+            build_version,
+            package_version,
             exe.display(),
-            runtime_root.display(),
+            runtime_root_for_env
+                .as_deref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            summary_path_for_env
+                .as_deref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "N/A".to_string()),
         );
-    } else {
-        eprintln!(
-            "[mely] launching backend sidecar: build_version={} backend={}",
-            desktop_build_version,
-            exe.display(),
-        );
-    }
 
-    match command.spawn() {
-        Ok(mut child) => {
-            let ready = wait_for_backend_ready(
-                addr,
-                BACKEND_STARTUP_ATTEMPTS,
-                Duration::from_millis(BACKEND_STARTUP_DELAY_MS),
-            );
+        match command.spawn() {
+            Ok(mut child) => {
+                let ready = wait_for_backend_ready(
+                    addr,
+                    BACKEND_STARTUP_ATTEMPTS,
+                    Duration::from_millis(BACKEND_STARTUP_DELAY_MS),
+                );
 
-            if ready {
-                Ok(Some(child))
-            } else {
+                if ready {
+                    return Ok(Some(child));
+                }
+
                 let message = format!(
-                    "backend sidecar did not expose the required API within {} ms",
+                    "{} failed to expose required API contract within {} ms",
+                    exe.display(),
                     BACKEND_STARTUP_ATTEMPTS as u64 * BACKEND_STARTUP_DELAY_MS
                 );
                 eprintln!("[mely] {message}");
+                attempt_errors.push(message);
                 let _ = child.kill();
                 let _ = child.wait();
-                Err(message)
+            }
+            Err(error) => {
+                let message = format!("failed to start backend sidecar {}: {error}", exe.display());
+                eprintln!("[mely] {message}");
+                attempt_errors.push(message);
             }
         }
-        Err(error) => {
-            Err(format!("failed to start backend sidecar: {error}"))
-        }
+    }
+
+    if attempt_errors.is_empty() {
+        Err("backend executable not found in any candidate path".to_string())
+    } else {
+        Err(format!(
+            "failed to launch a compatible backend sidecar: {}",
+            attempt_errors.join(" | ")
+        ))
     }
 }
 
@@ -547,6 +627,7 @@ mod tests {
                 "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                 "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK",
                 "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK",
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"buildVersion\":\"0.1.1\"}",
             ];
 
             for response in responses {
@@ -625,6 +706,40 @@ mod tests {
     }
 
     #[test]
+    fn returns_false_when_runtime_api_missing_build_version() {
+        let listener = TcpListener::bind(backend_socket_addr(0)).expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("read local addr");
+        let handle = thread::spawn(move || {
+            let responses = [
+                "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK",
+                "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK",
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"version\":\"0.8.0\"}",
+            ];
+
+            for response in responses {
+                let (mut socket, _) = listener.accept().expect("accept probe");
+                let mut request = [0_u8; 512];
+                let read = socket.read(&mut request).expect("read probe request");
+                let request_text = String::from_utf8_lossy(&request[..read]);
+                if response.contains("\"version\"") {
+                    assert!(
+                        request_text.starts_with(&format!("GET {BACKEND_RUNTIME_PATH} HTTP/1.1")),
+                        "expected runtime probe, got {request_text}",
+                    );
+                }
+                socket
+                    .write_all(response.as_bytes())
+                    .expect("write probe response");
+            }
+        });
+
+        let ready = wait_for_backend_ready(addr, 1, Duration::from_millis(10));
+
+        assert!(!ready);
+        handle.join().expect("join probe server");
+    }
+
+    #[test]
     fn health_response_identifies_mely_backend_payload() {
         let response = concat!(
             "HTTP/1.1 200 OK\r\n",
@@ -646,6 +761,28 @@ mod tests {
         );
 
         assert!(!health_response_identifies_mely_backend(response));
+    }
+
+    #[test]
+    fn runtime_response_identifies_build_version_field() {
+        let response = concat!(
+            "HTTP/1.1 200 OK\r\n",
+            "Content-Type: application/json\r\n",
+            "Connection: close\r\n\r\n",
+            "{\"buildVersion\":\"0.1.2\",\"installed\":true}"
+        );
+        assert!(runtime_response_exposes_build_version(response));
+    }
+
+    #[test]
+    fn runtime_response_rejects_missing_build_version_field() {
+        let response = concat!(
+            "HTTP/1.1 200 OK\r\n",
+            "Content-Type: application/json\r\n",
+            "Connection: close\r\n\r\n",
+            "{\"installed\":true}"
+        );
+        assert!(!runtime_response_exposes_build_version(response));
     }
 
     #[test]

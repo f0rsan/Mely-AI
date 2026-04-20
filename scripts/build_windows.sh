@@ -31,6 +31,8 @@ STAGED_RELEASE_SUMMARY_PATH="$REPO_ROOT/src-tauri/resources/windows-training-rel
 RUNTIME_BUILD_DIR="$REPO_ROOT/build/windows-llm-runtime/llm-runtime"
 RELEASE_SUMMARY_PATH="$REPO_ROOT/build/windows-training-release-artifacts.txt"
 BUILD_TAURI_CONFIG_PATH="$REPO_ROOT/build/windows-tauri.build.json"
+CARGO_MANIFEST_PATH="$REPO_ROOT/src-tauri/Cargo.toml"
+CARGO_MANIFEST_BACKUP_PATH="$REPO_ROOT/build/windows-cargo.toml.backup"
 HOST_UNAME="$(uname -s)"
 
 is_wsl() {
@@ -109,6 +111,46 @@ payload["version"] = version
 target.parent.mkdir(parents=True, exist_ok=True)
 target.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
+}
+
+write_cargo_build_version() {
+  local cargo_toml_path="$1"
+  local build_version="$2"
+
+  python - "$cargo_toml_path" "$build_version" <<'PY'
+import pathlib
+import sys
+
+cargo_toml = pathlib.Path(sys.argv[1])
+version = sys.argv[2]
+lines = cargo_toml.read_text(encoding="utf-8").splitlines(keepends=True)
+
+in_package = False
+replaced = False
+updated: list[str] = []
+for line in lines:
+    stripped = line.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        in_package = stripped == "[package]"
+    elif in_package and stripped.startswith("version"):
+        indent = line[: len(line) - len(line.lstrip())]
+        newline = "\n" if line.endswith("\n") else ""
+        updated.append(f'{indent}version = "{version}"{newline}')
+        replaced = True
+        continue
+    updated.append(line)
+
+if not replaced:
+    raise SystemExit("failed to locate [package] version field in Cargo.toml")
+
+cargo_toml.write_text("".join(updated), encoding="utf-8")
+PY
+}
+
+restore_cargo_manifest_if_needed() {
+  if [ -f "$CARGO_MANIFEST_BACKUP_PATH" ]; then
+    mv "$CARGO_MANIFEST_BACKUP_PATH" "$CARGO_MANIFEST_PATH"
+  fi
 }
 
 assert_backend_endpoint_ok() {
@@ -307,6 +349,10 @@ rm -rf "$REPO_ROOT/src-tauri/target/release/bundle/nsis" \
 BUILD_VERSION="$(resolve_windows_build_version)"
 validate_semver_version "$BUILD_VERSION"
 write_tauri_build_config "$REPO_ROOT/src-tauri/tauri.conf.json" "$BUILD_TAURI_CONFIG_PATH" "$BUILD_VERSION"
+mkdir -p "$(dirname "$CARGO_MANIFEST_BACKUP_PATH")"
+cp "$CARGO_MANIFEST_PATH" "$CARGO_MANIFEST_BACKUP_PATH"
+trap restore_cargo_manifest_if_needed EXIT
+write_cargo_build_version "$CARGO_MANIFEST_PATH" "$BUILD_VERSION"
 mkdir -p "$(dirname "$STAGED_RELEASE_SUMMARY_PATH")"
 {
   echo "timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -315,6 +361,8 @@ mkdir -p "$(dirname "$STAGED_RELEASE_SUMMARY_PATH")"
 } > "$STAGED_RELEASE_SUMMARY_PATH"
 echo "Using Windows installer version: $BUILD_VERSION"
 npx tauri build --bundles nsis,msi --config "$BUILD_TAURI_CONFIG_PATH"
+restore_cargo_manifest_if_needed
+trap - EXIT
 
 echo ""
 echo "=== [5b/6] Smoke-test the built desktop executable ==="

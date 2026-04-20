@@ -75,9 +75,11 @@ def test_backend_api_compatibility_checks_required_endpoints(monkeypatch, tmp_pa
     monkeypatch.setattr(
         module,
         "probe_endpoint_json",
-        lambda _url: {
-            "api": {"features": {"llmRuntimeReadiness": True}},
-        },
+        lambda url: (
+            {"buildVersion": "0.1.123"}
+            if url.endswith("/api/llm/runtime")
+            else {"api": {"features": {"llmRuntimeReadiness": True}}}
+        ),
     )
     monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
 
@@ -131,4 +133,27 @@ def test_backend_api_compatibility_fails_when_health_feature_missing(monkeypatch
     monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
 
     with pytest.raises(RuntimeError, match="health payload is missing required feature"):
+        module.verify_backend_api_compatibility(binary)
+
+
+def test_backend_api_compatibility_fails_when_runtime_build_version_missing(monkeypatch, tmp_path):
+    module = _load_prepare_module()
+    binary = tmp_path / "mely-backend.exe"
+    binary.write_text("binary", encoding="utf-8")
+    process = Mock()
+    process.poll.return_value = None
+    process.wait.return_value = 0
+    monkeypatch.setattr(module, "pick_backend_port", lambda: 19191)
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(module, "probe_endpoint_status", lambda _url: 200)
+    monkeypatch.setattr(
+        module,
+        "probe_endpoint_json",
+        lambda _url: {
+            "api": {"features": {"llmRuntimeReadiness": True}},
+        },
+    )
+    monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(RuntimeError, match="buildVersion"):
         module.verify_backend_api_compatibility(binary)

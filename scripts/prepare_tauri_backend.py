@@ -29,6 +29,7 @@ REQUIRED_API_PROBES = (
     ("/api/llm-runtime/readiness?mode=standard&baseModel=qwen2.5%3A3b&autoFix=false", "LLM runtime readiness"),
 )
 REQUIRED_HEALTH_FEATURE = "llmRuntimeReadiness"
+REQUIRED_RUNTIME_FIELD = "buildVersion"
 
 
 def resolve_source_dir() -> Path:
@@ -180,6 +181,12 @@ def verify_backend_api_compatibility(backend_binary: Path) -> None:
             status = probe_endpoint_status(f"{base_url}{relative_path}")
             if status != 200:
                 raise RuntimeError(f"{label} endpoint check failed with HTTP {status}.")
+
+        runtime_payload = probe_endpoint_json(f"{base_url}/api/llm/runtime")
+        if not isinstance(runtime_payload, dict) or REQUIRED_RUNTIME_FIELD not in runtime_payload:
+            raise RuntimeError(
+                "runtime endpoint payload is missing required buildVersion field."
+            )
     finally:
         if process.poll() is None:
             process.terminate()
