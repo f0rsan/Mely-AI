@@ -22,15 +22,21 @@ def _load_verify_module():
 
 def test_wait_for_desktop_backend_accepts_expected_health_feature(monkeypatch):
     module = _load_verify_module()
-    statuses = iter(
-        [
-            (200, {"api": {"features": {"llmRuntimeReadiness": True}}}),
-            (200, {"ready": False}),
-            (200, {"api": {"features": {"llmRuntimeReadiness": True}}}),
-            (200, {"ready": True}),
-        ]
-    )
-    monkeypatch.setattr(module, "probe_json", lambda _url: next(statuses))
+    counters = {"readiness": 0}
+
+    def fake_probe(url: str):
+        if url == module.HEALTH_URL:
+            return (200, {"api": {"features": {"llmRuntimeReadiness": True}}})
+        if url == module.RUNTIME_URL:
+            return (200, {"buildVersion": "0.1.123"})
+        if url == module.READINESS_URL:
+            counters["readiness"] += 1
+            if counters["readiness"] == 1:
+                return (200, {"ready": False})
+            return (200, {"ready": True})
+        raise AssertionError(f"unexpected url: {url}")
+
+    monkeypatch.setattr(module, "probe_json", fake_probe)
     monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
 
     module.wait_for_desktop_backend_ready(timeout_seconds=1.0)

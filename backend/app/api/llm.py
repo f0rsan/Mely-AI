@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -48,6 +49,10 @@ class LLMRuntimePayload(BaseModel):
     platform: str
     models: list[LLMModelInfoPayload]
     hint: str | None = None
+    buildVersion: str | None = None
+    backendExecutable: str | None = None
+    runtimeResourceRoot: str | None = None
+    releaseSummaryPath: str | None = None
 
 
 class LLMCatalogItemPayload(BaseModel):
@@ -107,6 +112,10 @@ def _runtime_to_payload(s: OllamaRuntimeStatus) -> LLMRuntimePayload:
         platform=s.platform,
         models=[_model_to_payload(m) for m in s.models],
         hint=s.hint,
+        buildVersion=os.getenv("MELY_DESKTOP_BUILD_VERSION"),
+        backendExecutable=os.getenv("MELY_BACKEND_EXECUTABLE"),
+        runtimeResourceRoot=os.getenv("MELY_LLM_RUNTIME_RESOURCE_ROOT"),
+        releaseSummaryPath=os.getenv("MELY_WINDOWS_BUILD_SUMMARY_PATH"),
     )
 
 

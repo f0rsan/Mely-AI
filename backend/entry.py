@@ -23,6 +23,18 @@ if __name__ == "__main__":
     # Read port from environment variable so Tauri can pass a dynamic port
     # (avoids conflicts if the user already has something on 8000).
     port = int(os.environ.get("MELY_BACKEND_PORT", "8000"))
+    build_version = os.environ.get("MELY_DESKTOP_BUILD_VERSION", "")
+    backend_executable = os.environ.get("MELY_BACKEND_EXECUTABLE", "")
+    runtime_resource_root = os.environ.get("MELY_LLM_RUNTIME_RESOURCE_ROOT", "")
+    summary_path = os.environ.get("MELY_WINDOWS_BUILD_SUMMARY_PATH", "")
+    print(
+        "[mely] startup "
+        f"build_version={build_version or 'unknown'} "
+        f"backend={backend_executable or 'unknown'} "
+        f"runtime_root={runtime_resource_root or 'unknown'} "
+        f"summary={summary_path or 'N/A'}",
+        flush=True,
+    )
 
     uvicorn.run(
         app,

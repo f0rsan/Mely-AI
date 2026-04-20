@@ -21,6 +21,13 @@ export function hasBaseModel(status: LLMRuntimeStatus): boolean {
   return status.models.length > 0;
 }
 
+function formatPathTail(rawPath: string | null | undefined): string {
+  if (!rawPath) return "";
+  const parts = rawPath.split(/[\\/]/).filter(Boolean);
+  if (parts.length <= 3) return rawPath;
+  return `…/${parts.slice(-3).join("/")}`;
+}
+
 function resolveBaseModelChatDisabledReason(
   status: LLMRuntimeStatus | null,
   loading: boolean,
@@ -138,6 +145,19 @@ function RuntimeBanner({
         <span className="text-zinc-700">·</span>
         <span className="text-zinc-400">已安装模型 {runtime.models.length} 个</span>
       </div>
+      {(runtime.buildVersion || runtime.releaseSummaryPath) && (
+        <p className="text-[11px] text-zinc-500 leading-relaxed">
+          构建版本：{runtime.buildVersion ?? "未知"}
+          {runtime.releaseSummaryPath && (
+            <>
+              {" "}· 构建摘要：
+              <span title={runtime.releaseSummaryPath} className="font-mono text-zinc-400">
+                {formatPathTail(runtime.releaseSummaryPath)}
+              </span>
+            </>
+          )}
+        </p>
+      )}
       <button
         type="button"
         onClick={onRefresh}

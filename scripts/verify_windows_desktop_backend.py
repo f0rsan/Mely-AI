@@ -17,11 +17,13 @@ from urllib.request import urlopen
 DEFAULT_PORT = 8000
 DEFAULT_TIMEOUT_SECONDS = 20.0
 HEALTH_URL = f"http://127.0.0.1:{DEFAULT_PORT}/api/health"
+RUNTIME_URL = f"http://127.0.0.1:{DEFAULT_PORT}/api/llm/runtime"
 READINESS_URL = (
     f"http://127.0.0.1:{DEFAULT_PORT}"
     "/api/llm-runtime/readiness?mode=standard&baseModel=qwen2.5%3A3b&autoFix=false"
 )
 REQUIRED_HEALTH_FEATURE = "llmRuntimeReadiness"
+REQUIRED_RUNTIME_FIELD = "buildVersion"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -67,6 +69,7 @@ def probe_json(url: str) -> tuple[int, dict | None]:
 def wait_for_desktop_backend_ready(timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> None:
     deadline = time.time() + timeout_seconds
     last_health_status = 0
+    last_runtime_status = 0
     last_readiness_status = 0
 
     while time.time() < deadline:
@@ -81,15 +84,22 @@ def wait_for_desktop_backend_ready(timeout_seconds: float = DEFAULT_TIMEOUT_SECO
             if not feature_enabled:
                 raise RuntimeError("桌面后端健康接口缺少训练环境能力标记，当前打包产物仍是旧后端。")
 
+            last_runtime_status, runtime_payload = probe_json(RUNTIME_URL)
+            if last_runtime_status == 200:
+                if not isinstance(runtime_payload, dict) or REQUIRED_RUNTIME_FIELD not in runtime_payload:
+                    raise RuntimeError(
+                        "桌面后端缺少构建版本字段，当前打包产物可能仍是旧版本。"
+                    )
+
             last_readiness_status, _readiness_payload = probe_json(READINESS_URL)
-            if last_readiness_status == 200:
+            if last_runtime_status == 200 and last_readiness_status == 200:
                 return
 
         time.sleep(0.25)
 
     raise RuntimeError(
         "桌面可执行体启动后未通过后端验收。"
-        f" health={last_health_status}, readiness={last_readiness_status}."
+        f" health={last_health_status}, runtime={last_runtime_status}, readiness={last_readiness_status}."
     )
 
 

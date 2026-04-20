@@ -28,6 +28,10 @@ export type LLMRuntimeStatus = {
   platform: string;
   models: LLMRuntimeModelInfo[];
   hint: string | null;
+  buildVersion?: string | null;
+  backendExecutable?: string | null;
+  runtimeResourceRoot?: string | null;
+  releaseSummaryPath?: string | null;
 };
 
 export type LLMRuntimeReadinessAction = {
