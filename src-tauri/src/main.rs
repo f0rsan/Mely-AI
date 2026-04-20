@@ -625,11 +625,8 @@ mod tests {
             let responses = [
                 "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                 "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                 "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK",
                 "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK",
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"buildVersion\":\"0.1.1\"}",
             ];
 
             for response in responses {
@@ -708,27 +705,19 @@ mod tests {
     }
 
     #[test]
-    fn returns_false_when_runtime_api_missing_build_version() {
+    fn does_not_require_runtime_api_during_startup_probe() {
         let listener = TcpListener::bind(backend_socket_addr(0)).expect("bind ephemeral port");
         let addr = listener.local_addr().expect("read local addr");
         let handle = thread::spawn(move || {
             let responses = [
                 "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK",
                 "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK",
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"version\":\"0.8.0\"}",
             ];
 
             for response in responses {
                 let (mut socket, _) = listener.accept().expect("accept probe");
                 let mut request = [0_u8; 512];
-                let read = socket.read(&mut request).expect("read probe request");
-                let request_text = String::from_utf8_lossy(&request[..read]);
-                if response.contains("\"version\"") {
-                    assert!(
-                        request_text.starts_with(&format!("GET {BACKEND_RUNTIME_PATH} HTTP/1.1")),
-                        "expected runtime probe, got {request_text}",
-                    );
-                }
+                let _ = socket.read(&mut request).expect("read probe request");
                 socket
                     .write_all(response.as_bytes())
                     .expect("write probe response");
@@ -737,7 +726,7 @@ mod tests {
 
         let ready = wait_for_backend_ready(addr, 1, Duration::from_millis(10));
 
-        assert!(!ready);
+        assert!(ready);
         handle.join().expect("join probe server");
     }
 

@@ -1,7 +1,8 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { fetchLLMRuntimeReadiness } from "./llmRuntime";
+import { fetchLLMRuntime, fetchLLMRuntimeReadiness } from "./llmRuntime";
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -31,4 +32,24 @@ test("preserves explicit backend detail for readiness errors", async () => {
   await expect(fetchLLMRuntimeReadiness()).rejects.toThrow(
     "训练运行时管理器尚未初始化，请稍后重试。",
   );
+});
+
+test("fails fast when runtime status fetch stalls", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("fetch", vi.fn().mockImplementation(() => new Promise(() => {})));
+
+  const promise = fetchLLMRuntime();
+  await vi.advanceTimersByTimeAsync(8_100);
+
+  await expect(promise).rejects.toThrow("语言引擎状态检测超时，请稍后重试。");
+});
+
+test("fails fast when readiness fetch stalls", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("fetch", vi.fn().mockImplementation(() => new Promise(() => {})));
+
+  const promise = fetchLLMRuntimeReadiness();
+  await vi.advanceTimersByTimeAsync(12_100);
+
+  await expect(promise).rejects.toThrow("训练环境状态检测超时，请稍后重试。");
 });

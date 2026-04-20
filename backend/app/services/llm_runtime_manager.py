@@ -664,7 +664,11 @@ class LLMRuntimeManager:
             if force_repair:
                 command.append("--force-reinstall")
 
-            process = subprocess.run(command, capture_output=True, text=True, check=False)
+            # Run the bootstrap subprocess in a thread pool so the asyncio event loop
+            # remains responsive to other API requests while installation proceeds.
+            process = await asyncio.to_thread(
+                subprocess.run, command, capture_output=True, text=True, check=False
+            )
             install_log_path = self._runtime_install_dir / "install.log"
             install_log_path.write_text(
                 "\n".join(
@@ -712,8 +716,11 @@ class LLMRuntimeManager:
                     stage="snapshot",
                     message="正在下载训练基础权重，请保持网络连接…",
                 )
-                self._prepare_hf_snapshot_with_runtime(
-                    huggingface_model_id=base_model_config.huggingface_model_id
+                # Run the HF snapshot download in a thread pool to avoid blocking the
+                # asyncio event loop during what can be a lengthy network operation.
+                await asyncio.to_thread(
+                    self._prepare_hf_snapshot_with_runtime,
+                    huggingface_model_id=base_model_config.huggingface_model_id,
                 )
             if not self._snapshot_ready(base_model_config.huggingface_model_id):
                 raise RuntimeError(

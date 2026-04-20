@@ -1,3 +1,5 @@
+import asyncio
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -54,6 +56,23 @@ ALLOWED_CORS_ORIGINS = [
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # On Windows the ProactorEventLoop raises ConnectionResetError (WinError 10054)
+    # whenever a client closes a connection. This is harmless noise — suppress it so
+    # it doesn't flood the console or mask real errors.
+    if sys.platform.startswith("win"):
+        _default_handler = asyncio.get_running_loop().default_exception_handler
+
+        def _suppress_win_connection_reset(loop: asyncio.AbstractEventLoop, context: dict) -> None:
+            exc = context.get("exception")
+            if isinstance(exc, ConnectionResetError):
+                return
+            if _default_handler is not None:
+                _default_handler(loop, context)
+            else:
+                loop.default_exception_handler(context)
+
+        asyncio.get_running_loop().set_exception_handler(_suppress_win_connection_reset)
+
     bootstrap_state = bootstrap_application()
     app.state.bootstrap = bootstrap_state
     task_queue = TaskQueue()

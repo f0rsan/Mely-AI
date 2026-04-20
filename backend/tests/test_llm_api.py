@@ -1,6 +1,7 @@
 """Tests for M1-A: Ollama environment integration + LLM API endpoints."""
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -260,6 +261,27 @@ class TestLLMRuntime:
         assert body["version"] == "0.3.10"
         assert len(body["models"]) == 1
         assert body["models"][0]["name"] == "qwen2.5:7b-instruct-q4_K_M"
+
+    def test_degrades_gracefully_when_runtime_probe_times_out(self, client):
+        with patch(
+            "app.api.llm.check_ollama_runtime",
+            new_callable=AsyncMock,
+            side_effect=asyncio.TimeoutError,
+        ), patch(
+            "app.api.llm.is_ollama_installed",
+            return_value=True,
+        ), patch(
+            "app.api.llm.current_platform",
+            return_value="win32-amd64",
+        ):
+            resp = client.get("/api/llm/runtime")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["installed"] is True
+        assert body["running"] is False
+        assert body["platform"] == "win32-amd64"
+        assert "超时" in (body["hint"] or "")
 
 
 # ── POST /api/llm/runtime/open ────────────────────────────────────────────────

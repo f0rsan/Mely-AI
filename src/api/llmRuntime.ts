@@ -1,3 +1,5 @@
+import { FetchTimeoutError, fetchWithTimeout } from "./http";
+
 const API_BASE = "http://127.0.0.1:8000";
 
 export type LLMRuntimeReadinessState =
@@ -101,12 +103,19 @@ function extractDetail(body: unknown, options?: { status?: number; api?: string 
 }
 
 export async function fetchLLMRuntime(signal?: AbortSignal): Promise<LLMRuntimeStatus> {
-  const resp = await fetch(`${API_BASE}/api/llm/runtime`, { signal });
-  const body = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    throw new Error(extractDetail(body, { status: resp.status }));
+  try {
+    const resp = await fetchWithTimeout(`${API_BASE}/api/llm/runtime`, { signal, timeoutMs: 8_000 });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      throw new Error(extractDetail(body, { status: resp.status }));
+    }
+    return body as LLMRuntimeStatus;
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error("语言引擎状态检测超时，请稍后重试。");
+    }
+    throw err;
   }
-  return body as LLMRuntimeStatus;
 }
 
 export async function fetchLLMRuntimeReadiness(
@@ -121,12 +130,22 @@ export async function fetchLLMRuntimeReadiness(
   query.set("mode", options?.mode ?? "standard");
   query.set("baseModel", options?.baseModel ?? "qwen2.5:3b");
   query.set("autoFix", options?.autoFix ? "true" : "false");
-  const resp = await fetch(`${API_BASE}/api/llm-runtime/readiness?${query.toString()}`, { signal });
-  const body = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    throw new Error(extractDetail(body, { status: resp.status, api: "readiness" }));
+  try {
+    const resp = await fetchWithTimeout(
+      `${API_BASE}/api/llm-runtime/readiness?${query.toString()}`,
+      { signal, timeoutMs: 12_000 },
+    );
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      throw new Error(extractDetail(body, { status: resp.status, api: "readiness" }));
+    }
+    return body as LLMRuntimeReadiness;
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error("训练环境状态检测超时，请稍后重试。");
+    }
+    throw err;
   }
-  return body as LLMRuntimeReadiness;
 }
 
 export async function repairLLMRuntime(signal?: AbortSignal): Promise<LLMRuntimeReadiness> {
