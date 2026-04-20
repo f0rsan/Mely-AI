@@ -355,7 +355,7 @@ export function LLMTrainingPanel({ characterId }: Props) {
         const readiness = await fetchLLMRuntimeReadiness({
           mode: options?.mode ?? mode,
           baseModel: selectedBaseModel,
-          autoFix: options?.autoFix ?? false,
+          autoFix: options?.autoFix ?? !options?.silent,
         });
         setRuntimeReadiness(readiness);
         return readiness;

@@ -172,6 +172,20 @@ test("defaults training base model to qwen2.5:3b", async () => {
   expect(selector).toHaveValue("qwen2.5:3b");
 });
 
+test("initial readiness check enables auto-fix for packaged runtime preparation", async () => {
+  render(<LLMTrainingPanel characterId="char-1" />);
+
+  await screen.findByLabelText("基础模型");
+
+  expect(mockFetchLLMRuntimeReadiness.mock.calls[0]?.[0]).toEqual(
+    expect.objectContaining({
+      mode: "standard",
+      baseModel: "qwen2.5:3b",
+      autoFix: true,
+    }),
+  );
+});
+
 test("shows readiness missing runtime and can install training environment", async () => {
   mockFetchLLMRuntimeReadiness.mockResolvedValueOnce(
     makeReadiness({
