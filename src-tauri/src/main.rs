@@ -277,6 +277,25 @@ fn wait_for_backend_ready(addr: SocketAddr, attempts: usize, delay: Duration) ->
     false
 }
 
+fn monitor_backend_contract(exe: PathBuf, addr: SocketAddr) {
+    thread::spawn(move || {
+        let ready = wait_for_backend_ready(
+            addr,
+            BACKEND_STARTUP_ATTEMPTS,
+            Duration::from_millis(BACKEND_STARTUP_DELAY_MS),
+        );
+        if ready {
+            eprintln!("[mely] backend sidecar ready: {}", exe.display());
+        } else {
+            eprintln!(
+                "[mely] backend sidecar launched but did not expose required API contract within {} ms: {}",
+                BACKEND_STARTUP_ATTEMPTS as u64 * BACKEND_STARTUP_DELAY_MS,
+                exe.display()
+            );
+        }
+    });
+}
+
 fn read_build_version_from_summary(summary_path: &Path) -> Option<String> {
     let content = std::fs::read_to_string(summary_path).ok()?;
     for line in content.lines() {
@@ -391,26 +410,9 @@ fn spawn_backend<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Child>, String
         );
 
         match command.spawn() {
-            Ok(mut child) => {
-                let ready = wait_for_backend_ready(
-                    addr,
-                    BACKEND_STARTUP_ATTEMPTS,
-                    Duration::from_millis(BACKEND_STARTUP_DELAY_MS),
-                );
-
-                if ready {
-                    return Ok(Some(child));
-                }
-
-                let message = format!(
-                    "{} failed to expose required API contract within {} ms",
-                    exe.display(),
-                    BACKEND_STARTUP_ATTEMPTS as u64 * BACKEND_STARTUP_DELAY_MS
-                );
-                eprintln!("[mely] {message}");
-                attempt_errors.push(message);
-                let _ = child.kill();
-                let _ = child.wait();
+            Ok(child) => {
+                monitor_backend_contract(exe.clone(), addr);
+                return Ok(Some(child));
             }
             Err(error) => {
                 let message = format!("failed to start backend sidecar {}: {error}", exe.display());
