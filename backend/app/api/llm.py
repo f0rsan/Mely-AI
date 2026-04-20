@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 
@@ -17,7 +18,9 @@ from app.services.ollama_service import (
     OllamaStatus,
     check_ollama_runtime,
     check_ollama_status,
+    current_platform,
     delete_model,
+    is_ollama_installed,
     open_ollama_runtime,
     pull_model,
 )
@@ -172,8 +175,25 @@ async def get_llm_health(_request: Request) -> LLMHealthPayload:
 
 @router.get("/runtime", response_model=LLMRuntimePayload)
 async def get_llm_runtime(_request: Request) -> LLMRuntimePayload:
-    runtime = await check_ollama_runtime()
-    return _runtime_to_payload(runtime)
+    try:
+        runtime = await check_ollama_runtime()
+        return _runtime_to_payload(runtime)
+    except asyncio.TimeoutError:
+        # Runtime probe timed out — degrade gracefully so the UI can still render.
+        installed = is_ollama_installed()
+        return LLMRuntimePayload(
+            installed=installed,
+            running=False,
+            version=None,
+            minimumVersion="0.1.0",
+            platform=current_platform(),
+            models=[],
+            hint="语言引擎状态检测超时，请稍后重试。",
+            buildVersion=os.getenv("MELY_DESKTOP_BUILD_VERSION"),
+            backendExecutable=os.getenv("MELY_BACKEND_EXECUTABLE"),
+            runtimeResourceRoot=os.getenv("MELY_LLM_RUNTIME_RESOURCE_ROOT"),
+            releaseSummaryPath=os.getenv("MELY_WINDOWS_BUILD_SUMMARY_PATH"),
+        )
 
 
 @router.post("/runtime/open", status_code=status.HTTP_204_NO_CONTENT)

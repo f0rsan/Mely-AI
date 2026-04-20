@@ -596,6 +596,8 @@ class LLMRuntimeManager:
             str(cache_root),
         ]
         process = subprocess.run(command, capture_output=True, text=True, check=False)
+        # Ensure the log directory exists; the HF script may recreate the runtime tree.
+        self._runtime_install_dir.mkdir(parents=True, exist_ok=True)
         snapshot_log_path = self._runtime_install_dir / "hf-snapshot.log"
         snapshot_log_path.write_text(
             "\n".join(
@@ -669,6 +671,10 @@ class LLMRuntimeManager:
             process = await asyncio.to_thread(
                 subprocess.run, command, capture_output=True, text=True, check=False
             )
+            # The bootstrap script may clean or recreate --target-root, which removes
+            # the install subdirectory.  Re-create it before writing the log so that
+            # a directory-not-found error never masks the real bootstrap failure.
+            self._runtime_install_dir.mkdir(parents=True, exist_ok=True)
             install_log_path = self._runtime_install_dir / "install.log"
             install_log_path.write_text(
                 "\n".join(
