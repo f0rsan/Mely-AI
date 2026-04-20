@@ -45,3 +45,22 @@ def test_regular_import_failure_stays_failed(monkeypatch):
 
     assert result["status"] == "failed"
     assert "missing dependency" in result["error"]
+
+
+def test_main_reports_deferred_gpu_check_without_raw_traceback(monkeypatch, capsys):
+    module = _load_verify_module()
+
+    def fake_import(name: str):
+        if name == "unsloth":
+            raise NotImplementedError("Unsloth cannot find any torch accelerator? You need a GPU.")
+        return object()
+
+    monkeypatch.setattr(module.importlib, "import_module", fake_import)
+
+    exit_code = module.main(["--modules", "unsloth"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "[deferred] unsloth" in output
+    assert "full check is deferred to runtime readiness on the target GPU machine" in output
+    assert "NotImplementedError" not in output

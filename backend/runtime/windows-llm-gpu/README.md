@@ -20,6 +20,9 @@ It is intentionally separated from the backend sidecar bundle.
   - First-launch install / repair helper.
 - `tools/verify_import_chain.py`
   - Import-chain smoke validator.
+  - `unsloth` may report `[deferred]` during packaging because its import path requires
+    an active torch accelerator. This does not fail the build; the full accelerator
+    check is enforced later by runtime readiness on the target GPU machine.
 
 ## Build commands
 

@@ -17,6 +17,10 @@ GPU_REQUIRED_SNIPPETS = (
     "you need a gpu",
     "no gpu found",
 )
+DEFERRED_GPU_CHECK_MESSAGE = (
+    "import requires an active torch accelerator; "
+    "full check is deferred to runtime readiness on the target GPU machine"
+)
 
 
 def utc_now() -> str:
@@ -55,6 +59,7 @@ def check_module(module_name: str) -> dict[str, str]:
             return {
                 "module": module_name,
                 "status": "deferred_gpu_check",
+                "message": DEFERRED_GPU_CHECK_MESSAGE,
                 "error": f"{exc.__class__.__name__}: {exc}",
             }
         return {
@@ -89,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
             if item["status"] == "ok":
                 print(f"[ok] {item['module']}")
             elif item["status"] == "deferred_gpu_check":
-                print(f"[deferred] {item['module']} -> {item['error']}")
+                print(f"[deferred] {item['module']} -> {item['message']}")
             else:
                 print(f"[failed] {item['module']} -> {item['error']}")
 
