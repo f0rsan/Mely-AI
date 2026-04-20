@@ -2,16 +2,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
     net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
-    process::{Child, Command},
+    process::{Child, Command, Stdio},
     sync::Mutex,
     thread,
     time::Duration,
 };
 use serde_json::Value;
-use tauri::{AppHandle, Manager, Runtime, RunEvent};
+use tauri::{AppHandle, Emitter, Manager, Runtime, RunEvent};
 
 struct BackendProcess(Mutex<Option<Child>>);
 
@@ -260,7 +260,6 @@ fn backend_runtime_contract_succeeds(addr: SocketAddr) -> bool {
 fn backend_required_api_succeeds(addr: SocketAddr) -> bool {
     backend_http_probe_succeeds(addr, BACKEND_HEALTH_PATH)
         && backend_http_probe_succeeds(addr, BACKEND_READINESS_PATH)
-        && backend_runtime_contract_succeeds(addr)
 }
 
 fn wait_for_backend_ready(addr: SocketAddr, attempts: usize, delay: Duration) -> bool {
@@ -277,7 +276,7 @@ fn wait_for_backend_ready(addr: SocketAddr, attempts: usize, delay: Duration) ->
     false
 }
 
-fn monitor_backend_contract(exe: PathBuf, addr: SocketAddr) {
+fn monitor_backend_startup<R: Runtime>(exe: PathBuf, addr: SocketAddr, app: AppHandle<R>) {
     thread::spawn(move || {
         let ready = wait_for_backend_ready(
             addr,
@@ -286,12 +285,48 @@ fn monitor_backend_contract(exe: PathBuf, addr: SocketAddr) {
         );
         if ready {
             eprintln!("[mely] backend sidecar ready: {}", exe.display());
+            // Resolve build version from the runtime endpoint so the startup
+            // window can display it before the main window opens.
+            let build_version = backend_http_response(addr, BACKEND_RUNTIME_PATH)
+                .and_then(|r| {
+                    let body = backend_response_body(&r)?;
+                    let v: Value = serde_json::from_str(body).ok()?;
+                    v.get("buildVersion")?.as_str().map(|s| s.to_owned())
+                })
+                .unwrap_or_default();
+            let _ = app.emit(
+                "startup-done",
+                serde_json::json!({ "buildVersion": build_version }),
+            );
         } else {
-            eprintln!(
-                "[mely] backend sidecar launched but did not expose required API contract within {} ms: {}",
-                BACKEND_STARTUP_ATTEMPTS as u64 * BACKEND_STARTUP_DELAY_MS,
+            let msg = format!(
+                "后端服务未能在 {} 秒内启动：{}",
+                BACKEND_STARTUP_ATTEMPTS as u64 * BACKEND_STARTUP_DELAY_MS / 1000,
                 exe.display()
             );
+            eprintln!("[mely] {msg}");
+            let _ = app.emit("startup-error", msg);
+        }
+    });
+}
+
+/// Pipe a readable stream (stdout or stderr) line-by-line to `startup-log` events.
+fn forward_stream_to_startup<R: Runtime>(
+    stream: impl std::io::Read + Send + 'static,
+    app: AppHandle<R>,
+) {
+    thread::spawn(move || {
+        let reader = BufReader::new(stream);
+        for line in reader.lines() {
+            match line {
+                Ok(text) => {
+                    let trimmed = text.trim().to_owned();
+                    if !trimmed.is_empty() {
+                        let _ = app.emit("startup-log", &trimmed);
+                    }
+                }
+                Err(_) => break,
+            }
         }
     });
 }
@@ -340,6 +375,32 @@ fn backend_exe_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
 
 fn spawn_backend<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Child>, String> {
     let Some(primary_exe) = backend_exe_path(app) else {
+        // Dev mode: backend already running. Signal startup-done immediately so
+        // the startup window transitions to the main window without waiting.
+        let app_clone = app.clone();
+        thread::spawn(move || {
+            let addr = backend_socket_addr(BACKEND_PORT);
+            let ready = wait_for_backend_ready(
+                addr,
+                BACKEND_STARTUP_ATTEMPTS,
+                Duration::from_millis(BACKEND_STARTUP_DELAY_MS),
+            );
+            if ready {
+                let build_version = backend_http_response(addr, BACKEND_RUNTIME_PATH)
+                    .and_then(|r| {
+                        let body = backend_response_body(&r)?;
+                        let v: Value = serde_json::from_str(body).ok()?;
+                        v.get("buildVersion")?.as_str().map(|s| s.to_owned())
+                    })
+                    .unwrap_or_default();
+                let _ = app_clone.emit(
+                    "startup-done",
+                    serde_json::json!({ "buildVersion": build_version }),
+                );
+            } else {
+                let _ = app_clone.emit("startup-error", "开发模式：后端未能及时就绪");
+            }
+        });
         return Ok(None);
     };
 
@@ -388,12 +449,17 @@ fn spawn_backend<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Child>, String
         command.env("MELY_BACKEND_PORT", BACKEND_PORT.to_string());
         command.env("MELY_DESKTOP_BUILD_VERSION", &build_version);
         command.env("MELY_BACKEND_EXECUTABLE", &exe);
+        // Disable Python's output buffering so stdout lines appear immediately.
+        command.env("PYTHONUNBUFFERED", "1");
         if let Some(runtime_root) = runtime_root_for_env.as_ref() {
             command.env("MELY_LLM_RUNTIME_RESOURCE_ROOT", runtime_root);
         }
         if let Some(summary_path) = summary_path_for_env.as_ref() {
             command.env("MELY_WINDOWS_BUILD_SUMMARY_PATH", summary_path);
         }
+        // Pipe stdout/stderr so we can forward lines to the startup log window.
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+
         eprintln!(
             "[mely] launching backend sidecar: build_version={} package_version={} backend={} runtime_root={} summary={}",
             build_version,
@@ -410,8 +476,15 @@ fn spawn_backend<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Child>, String
         );
 
         match command.spawn() {
-            Ok(child) => {
-                monitor_backend_contract(exe.clone(), addr);
+            Ok(mut child) => {
+                // Forward stdout and stderr to the startup log window in real time.
+                if let Some(stdout) = child.stdout.take() {
+                    forward_stream_to_startup(stdout, app.clone());
+                }
+                if let Some(stderr) = child.stderr.take() {
+                    forward_stream_to_startup(stderr, app.clone());
+                }
+                monitor_backend_startup(exe.clone(), addr, app.clone());
                 return Ok(Some(child));
             }
             Err(error) => {
@@ -441,9 +514,28 @@ fn stop_backend(process: &BackendProcess) {
     *guard = None;
 }
 
+/// Close the startup overlay and reveal the main application window.
+#[tauri::command]
+fn show_main_window(app: AppHandle) {
+    if let Some(startup) = app.get_webview_window("startup") {
+        let _ = startup.close();
+    }
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.show();
+        let _ = main.set_focus();
+    }
+}
+
+/// Allow the startup window to quit the whole app (e.g. on fatal backend error).
+#[tauri::command]
+fn close_app(app: AppHandle) {
+    app.exit(0);
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .invoke_handler(tauri::generate_handler![show_main_window, close_app])
         .manage(BackendProcess(Mutex::new(None)))
         .setup(|app| {
             match spawn_backend(app.handle()) {

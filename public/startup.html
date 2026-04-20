@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mely AI</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%; height: 100%;
+      background: #09090b;
+      color: #e4e4e7;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      user-select: none;
+      overflow: hidden;
+    }
+
+    .shell {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      padding: 28px 28px 20px;
+      gap: 16px;
+    }
+
+    /* drag region so user can move the frameless window */
+    .drag-region {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 36px;
+      -webkit-app-region: drag;
+    }
+
+    /* ── header ─────────────────────────────────────────────── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    .logo-mark {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, #6366f1 0%, #a78bfa 100%);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; font-weight: 700; color: #fff;
+      flex-shrink: 0;
+    }
+
+    .brand { font-size: 15px; font-weight: 600; color: #f4f4f5; }
+    .tagline { font-size: 11px; color: #71717a; margin-top: 1px; }
+
+    /* ── status bar ──────────────────────────────────────────── */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .spinner {
+      width: 14px; height: 14px;
+      border: 2px solid #3f3f46;
+      border-top-color: #6366f1;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+
+    .spinner.done { border-color: #22c55e; border-top-color: #22c55e; animation: none; }
+    .spinner.error { border-color: #ef4444; border-top-color: #ef4444; animation: none; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #status-text { font-size: 12px; color: #a1a1aa; }
+
+    /* ── log area ────────────────────────────────────────────── */
+    .log-area {
+      flex: 1;
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 8px;
+      padding: 10px 12px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      min-height: 0;
+    }
+
+    .log-line {
+      font-size: 11px;
+      font-family: 'Cascadia Code', 'Consolas', 'Menlo', monospace;
+      line-height: 1.6;
+      color: #71717a;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .log-line.info  { color: #a1a1aa; }
+    .log-line.ready { color: #4ade80; }
+    .log-line.warn  { color: #fbbf24; }
+    .log-line.error { color: #f87171; }
+
+    /* ── footer ──────────────────────────────────────────────── */
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    #version { font-size: 11px; color: #52525b; }
+
+    .btn-close {
+      display: none;
+      padding: 4px 12px;
+      background: #27272a;
+      border: 1px solid #3f3f46;
+      border-radius: 6px;
+      color: #a1a1aa;
+      font-size: 11px;
+      cursor: pointer;
+      -webkit-app-region: no-drag;
+    }
+    .btn-close:hover { background: #3f3f46; color: #e4e4e7; }
+    .btn-close.visible { display: block; }
+  </style>
+</head>
+<body>
+  <div class="drag-region"></div>
+
+  <div class="shell">
+    <div class="header">
+      <div class="logo-mark">M</div>
+      <div>
+        <div class="brand">Mely AI</div>
+        <div class="tagline">正在初始化应用…</div>
+      </div>
+    </div>
+
+    <div class="status-bar">
+      <div class="spinner" id="spinner"></div>
+      <div id="status-text">正在启动后端服务…</div>
+    </div>
+
+    <div class="log-area" id="log-area"></div>
+
+    <div class="footer">
+      <span id="version"></span>
+      <button class="btn-close" id="btn-close" onclick="closeApp()">关闭</button>
+    </div>
+  </div>
+
+  <script>
+    // ── helpers ──────────────────────────────────────────────────────────────
+    const logArea    = document.getElementById('log-area');
+    const statusText = document.getElementById('status-text');
+    const spinner    = document.getElementById('spinner');
+    const versionEl  = document.getElementById('version');
+    const btnClose   = document.getElementById('btn-close');
+
+    function appendLog(text, cls = 'info') {
+      const line = document.createElement('div');
+      line.className = `log-line ${cls}`;
+      line.textContent = text;
+      logArea.appendChild(line);
+      logArea.scrollTop = logArea.scrollHeight;
+    }
+
+    function setStatus(text) { statusText.textContent = text; }
+
+    function markReady(buildVersion) {
+      spinner.className = 'spinner done';
+      setStatus('服务就绪，正在打开主界面…');
+      if (buildVersion) versionEl.textContent = `v${buildVersion}`;
+      appendLog('✓ 后端服务已就绪', 'ready');
+    }
+
+    function markError(msg) {
+      spinner.className = 'spinner error';
+      setStatus('启动失败');
+      appendLog(`✗ ${msg}`, 'error');
+      btnClose.classList.add('visible');
+    }
+
+    // ── Tauri internals helpers ───────────────────────────────────────────────
+    function tauriInvoke(cmd, args = {}) {
+      return window.__TAURI_INTERNALS__.invoke(cmd, args);
+    }
+
+    // Listen to a Tauri event (works without @tauri-apps/api bundle)
+    async function tauriListen(event, callback) {
+      const id = window.__TAURI_INTERNALS__.transformCallback(
+        (e) => callback(e.payload),
+        false
+      );
+      await tauriInvoke('plugin:event|listen', {
+        event,
+        target: { kind: 'AnyLabel' },
+        handler: id,
+      });
+      return id;
+    }
+
+    function closeApp() {
+      tauriInvoke('close_app').catch(() => window.close());
+    }
+
+    // ── main ─────────────────────────────────────────────────────────────────
+    (async () => {
+      // Listen for individual log lines forwarded from Rust
+      await tauriListen('startup-log', (line) => {
+        const lower = String(line).toLowerCase();
+        const cls = lower.includes('error') || lower.includes('err') ? 'error'
+                  : lower.includes('warn')  ? 'warn'
+                  : 'info';
+        appendLog(line, cls);
+      });
+
+      // Listen for the ready signal
+      await tauriListen('startup-done', ({ buildVersion }) => {
+        markReady(buildVersion);
+        setTimeout(() => {
+          tauriInvoke('show_main_window').catch(() => {});
+        }, 600);
+      });
+
+      // Listen for fatal startup errors
+      await tauriListen('startup-error', (msg) => {
+        markError(msg);
+      });
+
+      appendLog('[mely] 正在启动后端服务进程…');
+    })();
+  </script>
+</body>
+</html>

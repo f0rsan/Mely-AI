@@ -16,12 +16,24 @@
     },
     "windows": [
       {
+        "label": "startup",
+        "title": "Mely AI",
+        "url": "startup.html",
+        "width": 520,
+        "height": 340,
+        "resizable": false,
+        "center": true,
+        "decorations": false,
+        "visible": true
+      },
+      {
         "label": "main",
         "title": "Mely AI",
         "width": 1200,
         "height": 800,
         "resizable": true,
-        "center": true
+        "center": true,
+        "visible": false
       }
     ]
   },
