@@ -538,10 +538,33 @@ class LLMRuntimeManager:
             ]
         return []
 
+    # Maximum time an install task may run before it is considered stale.
+    # Bootstrap (600 s) + HF snapshot (1800 s) + generous headroom.
+    _MAX_INSTALL_SECONDS: float = 2700.0  # 45 minutes
+
     async def _ensure_install_task(self, *, reason: str, force_repair: bool) -> None:
         async with self._install_lock:
             if self._runtime_in_installation():
-                return
+                # If the task has been running for longer than the hard cap, cancel it
+                # so the next auto-fix cycle can start a fresh attempt instead of
+                # waiting forever on a stalled subprocess.
+                started = self._install_progress.started_at
+                if started:
+                    try:
+                        from datetime import datetime as _dt, timezone as _tz
+                        elapsed = (
+                            _dt.now(_tz.utc)
+                            - _dt.fromisoformat(started.replace("Z", "+00:00"))
+                        ).total_seconds()
+                        if elapsed > self._MAX_INSTALL_SECONDS and self._install_task is not None:
+                            self._install_task.cancel()
+                            self._install_task = None
+                        else:
+                            return
+                    except Exception:
+                        return
+                else:
+                    return
             self._install_progress.attempt += 1
             started_at = _utc_now()
             if "snapshot" in reason:
@@ -595,7 +618,29 @@ class LLMRuntimeManager:
             "--cache-dir",
             str(cache_root),
         ]
-        process = subprocess.run(command, capture_output=True, text=True, check=False)
+        # Allow up to 30 minutes for model weight download over a slow/VPN network.
+        _SNAPSHOT_TIMEOUT_SECONDS = 1800
+        try:
+            process = subprocess.run(
+                command, capture_output=True, text=True, check=False, timeout=_SNAPSHOT_TIMEOUT_SECONDS
+            )
+        except subprocess.TimeoutExpired:
+            self._runtime_install_dir.mkdir(parents=True, exist_ok=True)
+            snapshot_log_path = self._runtime_install_dir / "hf-snapshot.log"
+            snapshot_log_path.write_text(
+                "\n".join(
+                    [
+                        f"timestamp={_utc_now()}",
+                        f"repo_id={huggingface_model_id}",
+                        "return_code=TIMEOUT",
+                        "--- error ---",
+                        f"HF snapshot download timed out after {_SNAPSHOT_TIMEOUT_SECONDS} seconds.",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            raise RuntimeError("训练基础权重下载超时（超过 30 分钟），请检查网络连接后重试。")
         # Ensure the log directory exists; the HF script may recreate the runtime tree.
         self._runtime_install_dir.mkdir(parents=True, exist_ok=True)
         snapshot_log_path = self._runtime_install_dir / "hf-snapshot.log"
@@ -668,9 +713,40 @@ class LLMRuntimeManager:
 
             # Run the bootstrap subprocess in a thread pool so the asyncio event loop
             # remains responsive to other API requests while installation proceeds.
-            process = await asyncio.to_thread(
-                subprocess.run, command, capture_output=True, text=True, check=False
-            )
+            # A hard 10-minute timeout prevents the UI from freezing at 35% forever
+            # when pip/network stalls (common on Windows with restricted networks).
+            _BOOTSTRAP_TIMEOUT_SECONDS = 600
+            try:
+                process = await asyncio.to_thread(
+                    subprocess.run,
+                    command,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=_BOOTSTRAP_TIMEOUT_SECONDS,
+                )
+            except subprocess.TimeoutExpired:
+                # The bootstrap script may have partially cleaned --target-root;
+                # ensure the log directory exists before writing.
+                self._runtime_install_dir.mkdir(parents=True, exist_ok=True)
+                install_log_path = self._runtime_install_dir / "install.log"
+                install_log_path.write_text(
+                    "\n".join(
+                        [
+                            f"timestamp={_utc_now()}",
+                            f"reason={reason}",
+                            f"force_repair={force_repair}",
+                            "return_code=TIMEOUT",
+                            "--- error ---",
+                            f"Bootstrap script timed out after {_BOOTSTRAP_TIMEOUT_SECONDS} seconds.",
+                            "",
+                        ]
+                    ),
+                    encoding="utf-8",
+                )
+                raise RuntimeError(
+                    "训练运行时安装超时（超过 10 分钟），请检查网络连接或磁盘空间后重试。"
+                )
             # The bootstrap script may clean or recreate --target-root, which removes
             # the install subdirectory.  Re-create it before writing the log so that
             # a directory-not-found error never masks the real bootstrap failure.
