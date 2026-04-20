@@ -29,6 +29,8 @@ export type LLMTrainingJob = {
   stageName: string | null;
   checkpointPath: string | null;
   runRoot: string | null;
+  logPath: string | null;
+  logExcerpt: string | null;
   adapterPath: string | null;
   ggufPath: string | null;
   errorMessage: string | null;

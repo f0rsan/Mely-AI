@@ -81,6 +81,10 @@ const baseJob = {
   etaSeconds: 120,
   stageName: "正在训练",
   checkpointPath: "/tmp/mely/checkpoints/checkpoint-30",
+  logPath: "/tmp/mely/llm_training_runs/job-1/worker.log",
+  logExcerpt:
+    "[2026-04-01T00:01:00Z] 正在准备训练环境\n" +
+    "[2026-04-01T00:01:03Z] 正在训练 30/100 loss=1.2345 ETA=120s",
   runRoot: "/tmp/mely/llm_training_runs/job-1",
   adapterPath: null,
   ggufPath: null,
@@ -416,6 +420,9 @@ test("shows step, total steps, loss, and ETA in active training card", async () 
   expect(screen.getByText("100")).toBeInTheDocument();
   expect(screen.getByText("1.2345")).toBeInTheDocument();
   expect(screen.getByText("约 2 分钟")).toBeInTheDocument();
+  expect(screen.getByText("训练日志")).toBeInTheDocument();
+  expect(screen.getByText(/正在准备训练环境/)).toBeInTheDocument();
+  expect(screen.getByText(/正在训练 30\/100/)).toBeInTheDocument();
 });
 
 test("opens run root from training panel", async () => {

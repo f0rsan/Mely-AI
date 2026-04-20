@@ -287,6 +287,23 @@ function JobCard({
         )}
       </div>
 
+      {job.logExcerpt && (
+        <div className="space-y-1">
+          <div className="flex items-center justify-between gap-2 text-xs text-zinc-500">
+            <span>训练日志</span>
+            <span className="font-mono text-zinc-400">
+              {job.logPath ? "最近片段" : "内联日志"}
+            </span>
+          </div>
+          <pre
+            className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-zinc-700/70 bg-zinc-950/60 px-2 py-2 font-mono text-[11px] leading-relaxed text-zinc-300"
+            title={job.logPath ?? ""}
+          >
+            {job.logExcerpt}
+          </pre>
+        </div>
+      )}
+
       {job.errorMessage && (
         <div
           className={`rounded-md border px-2 py-2 text-xs leading-relaxed space-y-1 ${

@@ -13,7 +13,7 @@ import os
 import sqlite3
 import subprocess
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -88,6 +88,8 @@ WORKER_ERROR_TRANSLATIONS = {
 }
 REGISTRATION_PENDING_WARNING = "训练已完成，模型已导出，但语言引擎注册未完成，可稍后重试注册"
 REGISTRATION_SUCCESS_MESSAGE = "训练完成，模型已可用"
+WORKER_RUNTIME_LOAD_FAILURE_MESSAGE = "训练进程异常退出：运行时依赖加载失败，请先执行“修复训练环境”后重试。"
+WORKER_GPU_ACCELERATOR_MESSAGE = "当前未检测到可用 GPU 加速，请确认在 Windows + NVIDIA 环境中运行。"
 INITIAL_STAGE_NAME = "等待训练资源"
 FAILED_STAGE_NAME = "训练失败"
 CANCELED_STAGE_NAME = "训练已取消"
@@ -112,6 +114,8 @@ MODE_GRADIENT_ACCUMULATION: dict[LLMTrainingMode, int] = {
     "standard": 8,
     "fine": 12,
 }
+DISPLAY_LOG_MAX_BYTES = 32 * 1024
+DISPLAY_LOG_MAX_LINES = 80
 
 _UNSET = object()
 
@@ -222,6 +226,7 @@ class WorkerRuntimePaths:
     gguf_output_dir: Path
     cancel_sentinel_path: Path
     log_path: Path
+    display_log_path: Path
 
     def ensure_directories(self) -> None:
         self.run_root.mkdir(parents=True, exist_ok=True)
@@ -231,6 +236,7 @@ class WorkerRuntimePaths:
         self.gguf_output_dir.mkdir(parents=True, exist_ok=True)
         self.cancel_sentinel_path.parent.mkdir(parents=True, exist_ok=True)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.display_log_path.parent.mkdir(parents=True, exist_ok=True)
 
 
 @dataclass(slots=True)
@@ -323,6 +329,48 @@ def _env_truthy(name: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _append_text_log(path: Path, message: str) -> None:
+    normalized = message.strip()
+    if not normalized:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(f"[{_utc_now()}] {normalized}\n")
+
+
+def _read_text_tail(
+    path: Path,
+    *,
+    max_bytes: int = DISPLAY_LOG_MAX_BYTES,
+    max_lines: int = DISPLAY_LOG_MAX_LINES,
+) -> str | None:
+    if not path.exists() or not path.is_file():
+        return None
+
+    with path.open("rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        size = handle.tell()
+        if size <= 0:
+            return None
+        start = max(size - max_bytes, 0)
+        handle.seek(start)
+        chunk = handle.read()
+
+    if start > 0:
+        newline_index = chunk.find(b"\n")
+        if newline_index >= 0:
+            chunk = chunk[newline_index + 1 :]
+
+    text = chunk.decode("utf-8", errors="replace").strip()
+    if not text:
+        return None
+
+    lines = text.splitlines()
+    if len(lines) > max_lines:
+        lines = lines[-max_lines:]
+    return "\n".join(lines).strip() or None
+
+
 def get_missing_gpu_training_dependencies() -> list[str]:
     """Return missing optional dependencies required by GPU training runtime.
 
@@ -374,9 +422,10 @@ class LLMTrainingService:
 
     def _record_to_dict(self, record: LLMTrainingJobRecord) -> dict[str, Any]:
         payload = record.to_dict()
-        payload["runRoot"] = str(
-            self._runtime_paths(character_id=record.character_id, job_id=record.id).run_root
-        )
+        runtime_paths = self._runtime_paths(character_id=record.character_id, job_id=record.id)
+        payload["runRoot"] = str(runtime_paths.run_root)
+        payload["logPath"] = str(runtime_paths.log_path)
+        payload["logExcerpt"] = self._read_display_log_excerpt(runtime_paths)
         return payload
 
     def _update(
@@ -461,7 +510,36 @@ class LLMTrainingService:
             gguf_output_dir=llm_dirs["llm_models"] / job_id,
             cancel_sentinel_path=run_root / "cancel.sentinel",
             log_path=run_root / "worker.log",
+            display_log_path=run_root / "training.log",
         )
+
+    def _append_display_log(self, runtime_paths: WorkerRuntimePaths, message: str) -> None:
+        _append_text_log(runtime_paths.display_log_path, message)
+
+    def _append_raw_log(self, runtime_paths: WorkerRuntimePaths, message: str) -> None:
+        _append_text_log(runtime_paths.log_path, message)
+
+    def _read_display_log_excerpt(self, runtime_paths: WorkerRuntimePaths) -> str | None:
+        excerpt = _read_text_tail(runtime_paths.display_log_path)
+        if excerpt:
+            return excerpt
+        return self._summarize_raw_worker_log(runtime_paths)
+
+    def _summarize_raw_worker_log(self, runtime_paths: WorkerRuntimePaths) -> str | None:
+        raw_excerpt = _read_text_tail(runtime_paths.log_path)
+        if not raw_excerpt:
+            return None
+
+        lowered = raw_excerpt.lower()
+        if "dll load failed" in lowered or "winerror 126" in lowered or "winerror 127" in lowered:
+            return WORKER_RUNTIME_LOAD_FAILURE_MESSAGE
+        if "cannot find any torch accelerator" in lowered or "you need a gpu" in lowered:
+            return WORKER_GPU_ACCELERATOR_MESSAGE
+        if "out of memory" in lowered or ("cuda" in lowered and "memory" in lowered):
+            return WORKER_ERROR_TRANSLATIONS["out_of_memory"]
+        if "no module named" in lowered or "importerror" in lowered:
+            return WORKER_ERROR_TRANSLATIONS["missing_dependency"]
+        return None
 
     def _write_cancel_sentinel(self, *, character_id: str, job_id: str) -> None:
         runtime_paths = self._runtime_paths(character_id=character_id, job_id=job_id)
@@ -561,7 +639,7 @@ class LLMTrainingService:
             str(worker_entry),
             str(config_path),
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
 
     async def _terminate_worker_process(self, process: asyncio.subprocess.Process) -> None:
@@ -598,6 +676,10 @@ class LLMTrainingService:
         lowered = raw.lower()
         if "out of memory" in lowered or ("cuda" in lowered and "memory" in lowered):
             return WORKER_ERROR_TRANSLATIONS["out_of_memory"]
+        if "dll load failed" in lowered or "winerror 126" in lowered or "winerror 127" in lowered:
+            return WORKER_RUNTIME_LOAD_FAILURE_MESSAGE
+        if "cannot find any torch accelerator" in lowered or "you need a gpu" in lowered:
+            return WORKER_GPU_ACCELERATOR_MESSAGE
         if "no module named" in lowered or "importerror" in lowered:
             return WORKER_ERROR_TRANSLATIONS["missing_dependency"]
         if "gguf" in lowered and ("export" in lowered or "导出" in raw):
@@ -624,6 +706,34 @@ class LLMTrainingService:
                 completed_at=_utc_now(),
             )
             conn.commit()
+
+    async def _pump_worker_stderr(
+        self,
+        *,
+        process: asyncio.subprocess.Process,
+        runtime_paths: WorkerRuntimePaths,
+    ) -> None:
+        stderr = getattr(process, "stderr", None)
+        if stderr is None:
+            return
+
+        while True:
+            try:
+                raw_line = await stderr.readline()
+            except ConnectionResetError:
+                break
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._append_raw_log(runtime_paths, f"[parent] stderr pipe error: {exc}")
+                break
+
+            if not raw_line:
+                break
+
+            line = raw_line.decode("utf-8", errors="replace").rstrip()
+            if line:
+                self._append_raw_log(runtime_paths, line)
 
     def _is_canceled(self, job_id: str) -> bool:
         with self._conn() as conn:
@@ -677,6 +787,7 @@ class LLMTrainingService:
         self,
         *,
         job_id: str,
+        runtime_paths: WorkerRuntimePaths,
         event_payload: dict[str, Any],
         progress_reporter,
     ) -> Literal["continue", "complete", "error"]:
@@ -706,6 +817,7 @@ class LLMTrainingService:
                     error_message=None,
                 )
                 conn.commit()
+            self._append_display_log(runtime_paths, message or stage_name or "训练状态已更新")
             if message:
                 await progress_reporter(int(next_progress * 100), message)
             return "continue"
@@ -747,6 +859,12 @@ class LLMTrainingService:
                     error_message=None,
                 )
                 conn.commit()
+            log_message = f"正在训练 {step}/{total_steps}"
+            if loss_value is not None:
+                log_message += f" loss={loss_value:.4f}"
+            if eta_value is not None:
+                log_message += f" ETA={eta_value}s"
+            self._append_display_log(runtime_paths, log_message)
             await progress_reporter(int(progress * 100), f"训练中 {step}/{total_steps}")
             return "continue"
 
@@ -778,6 +896,7 @@ class LLMTrainingService:
                     error_message=None,
                 )
                 conn.commit()
+            self._append_display_log(runtime_paths, "训练完成，正在注册模型…")
             await progress_reporter(int(registering_progress * 100), "训练完成，正在注册模型…")
             return "complete"
 
@@ -801,6 +920,7 @@ class LLMTrainingService:
                 )
                 conn.commit()
 
+        self._append_display_log(runtime_paths, f"训练失败：{translated_message}")
         await progress_reporter(int(record.progress * 100), translated_message)
         return "error"
 
@@ -819,49 +939,68 @@ class LLMTrainingService:
             state.return_code = await process.wait()
             return state
 
-        while True:
-            if self._is_canceled(job_id):
-                runtime_paths.ensure_directories()
-                runtime_paths.cancel_sentinel_path.write_text("cancel", encoding="utf-8")
-                await self._terminate_worker_process(process)
+        stderr_task: asyncio.Task[None] | None = None
+        if getattr(process, "stderr", None) is not None:
+            stderr_task = asyncio.create_task(
+                self._pump_worker_stderr(process=process, runtime_paths=runtime_paths)
+            )
 
-            try:
-                raw_line = await asyncio.wait_for(stdout.readline(), timeout=0.2)
-            except asyncio.TimeoutError:
-                raw_line = b""
-
-            if raw_line:
-                try:
-                    payload = self._parse_worker_event(raw_line)
-                    outcome = await self._apply_worker_event(
-                        job_id=job_id,
-                        event_payload=payload,
-                        progress_reporter=progress_reporter,
-                    )
-                except ValueError:
-                    state.protocol_error = "worker_protocol_invalid"
+        try:
+            while True:
+                if self._is_canceled(job_id):
+                    runtime_paths.ensure_directories()
+                    runtime_paths.cancel_sentinel_path.write_text("cancel", encoding="utf-8")
                     await self._terminate_worker_process(process)
+
+                try:
+                    raw_line = await asyncio.wait_for(stdout.readline(), timeout=0.2)
+                except asyncio.TimeoutError:
+                    raw_line = b""
+
+                if raw_line:
+                    try:
+                        payload = self._parse_worker_event(raw_line)
+                        outcome = await self._apply_worker_event(
+                            job_id=job_id,
+                            runtime_paths=runtime_paths,
+                            event_payload=payload,
+                            progress_reporter=progress_reporter,
+                        )
+                    except ValueError:
+                        state.protocol_error = "worker_protocol_invalid"
+                        self._append_display_log(runtime_paths, "训练进程输出协议异常，请重试")
+                        await self._terminate_worker_process(process)
+                        continue
+
+                    if outcome == "complete":
+                        state.saw_complete = True
+                    elif outcome == "error":
+                        state.saw_error = True
                     continue
 
-                if outcome == "complete":
-                    state.saw_complete = True
-                elif outcome == "error":
-                    state.saw_error = True
-                continue
+                if process.returncode is not None:
+                    break
 
-            if process.returncode is not None:
-                break
-
-            if stdout.at_eof():
-                break
-
-        state.return_code = await process.wait()
+                if stdout.at_eof():
+                    break
+        finally:
+            state.return_code = await process.wait()
+            if stderr_task is not None:
+                try:
+                    await asyncio.wait_for(stderr_task, timeout=1.0)
+                except asyncio.TimeoutError:
+                    stderr_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await stderr_task
+                except ConnectionResetError:
+                    pass
         return state
 
     async def _finalize_registration_after_worker_complete(
         self,
         *,
         job_id: str,
+        runtime_paths: WorkerRuntimePaths,
         progress_reporter,
     ) -> None:
         record = self._get_record(job_id)
@@ -871,12 +1010,14 @@ class LLMTrainingService:
         gguf_path = str(record.gguf_path or "").strip()
         if not gguf_path:
             failure_message = WORKER_ERROR_TRANSLATIONS["gguf_export_failed"]
+            self._append_display_log(runtime_paths, f"训练失败：{failure_message}")
             self._mark_failed(job_id, failure_message)
             raise RuntimeError(failure_message)
 
         gguf_file = Path(gguf_path).expanduser()
         if not gguf_file.exists() or not gguf_file.is_file():
             failure_message = WORKER_ERROR_TRANSLATIONS["gguf_export_failed"]
+            self._append_display_log(runtime_paths, f"训练失败：{failure_message}")
             self._mark_failed(job_id, failure_message)
             raise RuntimeError(failure_message)
 
@@ -895,6 +1036,7 @@ class LLMTrainingService:
                         completed_at=_utc_now(),
                     )
                     conn.commit()
+            self._append_display_log(runtime_paths, REGISTRATION_PENDING_WARNING)
             await progress_reporter(100, REGISTRATION_PENDING_WARNING)
             return
 
@@ -923,6 +1065,7 @@ class LLMTrainingService:
                         completed_at=_utc_now(),
                     )
                     conn.commit()
+            self._append_display_log(runtime_paths, REGISTRATION_SUCCESS_MESSAGE)
             await progress_reporter(100, REGISTRATION_SUCCESS_MESSAGE)
             return
 
@@ -941,10 +1084,12 @@ class LLMTrainingService:
                         completed_at=_utc_now(),
                     )
                     conn.commit()
+            self._append_display_log(runtime_paths, REGISTRATION_PENDING_WARNING)
             await progress_reporter(100, REGISTRATION_PENDING_WARNING)
             return
 
         failure_message = WORKER_ERROR_TRANSLATIONS["gguf_export_failed"]
+        self._append_display_log(runtime_paths, f"训练失败：{failure_message}")
         self._mark_failed(job_id, failure_message)
         raise RuntimeError(failure_message)
 
@@ -1068,6 +1213,10 @@ class LLMTrainingService:
             if record.status == "canceled":
                 return
 
+            runtime_paths = self._runtime_paths(character_id=record.character_id, job_id=record.id)
+            runtime_paths.ensure_directories()
+            self._append_display_log(runtime_paths, "任务已进入执行阶段")
+
             with self._conn() as conn:
                 self._update(
                     conn,
@@ -1079,6 +1228,7 @@ class LLMTrainingService:
                     error_message=None,
                 )
                 conn.commit()
+            self._append_display_log(runtime_paths, "正在准备训练环境")
             await progress_reporter(2, "正在准备训练环境…")
 
             if self._is_canceled(job_id):
@@ -1087,6 +1237,7 @@ class LLMTrainingService:
             runtime_manager = self._llm_runtime_manager
             if runtime_manager is None:
                 runtime_message = "训练运行时未初始化，请先执行“修复训练环境”后重试。"
+                self._append_display_log(runtime_paths, f"训练失败：{runtime_message}")
                 self._mark_failed(job_id, runtime_message)
                 raise RuntimeError(runtime_message)
 
@@ -1101,17 +1252,17 @@ class LLMTrainingService:
                     or readiness.message
                     or "训练环境尚未就绪，请先修复后重试。"
                 )
+                self._append_display_log(runtime_paths, f"训练失败：{runtime_message}")
                 self._mark_failed(job_id, runtime_message)
                 raise RuntimeError(runtime_message)
 
             try:
                 dataset_paths = self._resolve_dataset_paths(record)
             except LLMTrainingError as exc:
+                self._append_display_log(runtime_paths, f"训练失败：{exc}")
                 self._mark_failed(job_id, str(exc))
                 raise RuntimeError(str(exc)) from exc
 
-            runtime_paths = self._runtime_paths(character_id=record.character_id, job_id=record.id)
-            runtime_paths.ensure_directories()
             worker_payload = self._build_worker_payload(
                 record,
                 runtime_paths=runtime_paths,
@@ -1126,6 +1277,8 @@ class LLMTrainingService:
                 process = await self._launch_worker_process(runtime_paths.config_path)
             except Exception as exc:
                 launch_error = "训练进程启动失败，请稍后重试"
+                self._append_raw_log(runtime_paths, f"[launcher] {exc}")
+                self._append_display_log(runtime_paths, f"训练失败：{launch_error}")
                 self._mark_failed(job_id, launch_error)
                 raise RuntimeError(launch_error) from exc
 
@@ -1142,12 +1295,14 @@ class LLMTrainingService:
 
             if run_state.protocol_error:
                 protocol_message = "训练进程输出协议异常，请重试"
+                self._append_display_log(runtime_paths, f"训练失败：{protocol_message}")
                 self._mark_failed(job_id, protocol_message)
                 raise RuntimeError(protocol_message)
 
             if run_state.saw_complete and run_state.return_code == 0:
                 await self._finalize_registration_after_worker_complete(
                     job_id=job_id,
+                    runtime_paths=runtime_paths,
                     progress_reporter=progress_reporter,
                 )
                 return
@@ -1159,7 +1314,8 @@ class LLMTrainingService:
                 message = latest.error_message or "训练失败，请稍后重试"
                 raise RuntimeError(message)
 
-            crash_message = "训练进程异常退出，请稍后重试"
+            crash_message = self._summarize_raw_worker_log(runtime_paths) or "训练进程异常退出，请稍后重试"
+            self._append_display_log(runtime_paths, f"训练失败：{crash_message}")
             self._mark_failed(job_id, crash_message)
             raise RuntimeError(crash_message)
 

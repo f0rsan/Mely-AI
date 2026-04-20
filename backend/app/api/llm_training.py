@@ -39,6 +39,8 @@ class LLMTrainingJobPayload(BaseModel):
     stageName: str | None
     checkpointPath: str | None
     runRoot: str | None
+    logPath: str | None
+    logExcerpt: str | None
     adapterPath: str | None
     ggufPath: str | None
     errorMessage: str | None

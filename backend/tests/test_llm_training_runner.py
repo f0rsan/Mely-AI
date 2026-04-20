@@ -245,6 +245,7 @@ class _FakeWorkerProcess:
         self._return_code = return_code
         self.terminated = False
         self.killed = False
+        self.stderr = None
         if blocking:
             self.stdout = _FakeBlockingStdout()
         else:
@@ -657,6 +658,9 @@ def test_service_runner_failure_keeps_run_root_and_worker_log(
     assert final_job["status"] == "failed"
     run_root = Path(final_job["runRoot"])
     assert run_root.exists()
+    assert final_job["logPath"].endswith("worker.log")
+    assert "正在训练" in (final_job["logExcerpt"] or "")
+    assert "训练失败" in (final_job["logExcerpt"] or "")
     assert Path(launched["payload"]["logPath"]).exists()
     assert Path(final_job["checkpointPath"]).exists()
 
@@ -721,6 +725,40 @@ def test_service_runner_protocol_anomaly_marked_failed(
     final_job = _wait_terminal(runner_client, job_id)
     assert final_job["status"] == "failed"
     assert "协议异常" in (final_job["errorMessage"] or "")
+
+
+def test_service_runner_crash_without_protocol_still_surfaces_log_excerpt(
+    runner_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    async def fake_launch(_self, config_path: Path):
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+        log_path = Path(payload["logPath"])
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(
+            "ImportError: DLL load failed while importing torch: missing cuda runtime\n",
+            encoding="utf-8",
+        )
+        return _FakeWorkerProcess(lines=[], return_code=1)
+
+    monkeypatch.setattr(
+        "app.services.llm_training.LLMTrainingService._launch_worker_process",
+        fake_launch,
+    )
+
+    character_id, dataset_id = _create_character_and_dataset(runner_client)
+    start_resp = runner_client.post(
+        f"/api/characters/{character_id}/llm-training/start",
+        json={"datasetIds": [dataset_id], "mode": "light"},
+    )
+    assert start_resp.status_code == 202
+    job_id = start_resp.json()["id"]
+
+    final_job = _wait_terminal(runner_client, job_id)
+    assert final_job["status"] == "failed"
+    assert "运行时依赖加载失败" in (final_job["errorMessage"] or "")
+    assert "运行时依赖加载失败" in (final_job["logExcerpt"] or "")
 
 
 def test_service_runner_cancel_terminates_subprocess(
