@@ -5,7 +5,7 @@ use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Child, Command},
     sync::Mutex,
     thread,
     time::Duration,
@@ -20,7 +20,7 @@ const BACKEND_PORT: u16 = 8000;
 const BACKEND_STARTUP_ATTEMPTS: usize = 60;
 const BACKEND_STARTUP_DELAY_MS: u64 = 250;
 const BACKEND_HEALTH_PATH: &str = "/api/health";
-const BACKEND_RUNTIME_PATH: &str = "/api/llm/runtime";
+#[cfg_attr(not(test), allow(dead_code))]
 const BACKEND_READINESS_PATH: &str =
     "/api/llm-runtime/readiness?mode=standard&baseModel=qwen2.5%3A3b&autoFix=false";
 
@@ -66,6 +66,7 @@ fn build_summary_candidate_paths(resource_dir: &Path) -> [PathBuf; 2] {
     ]
 }
 
+#[cfg_attr(debug_assertions, allow(dead_code))]
 fn resolve_backend_exe_from_resource_dir(resource_dir: &Path) -> PathBuf {
     let candidates = backend_candidate_paths(resource_dir);
     candidates
@@ -133,6 +134,7 @@ fn backend_http_response(addr: SocketAddr, path: &str) -> Option<String> {
     Some(String::from_utf8_lossy(&response).into_owned())
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn backend_http_probe_succeeds(addr: SocketAddr, path: &str) -> bool {
     let Some(response) = backend_http_response(addr, path) else {
         return false;
@@ -167,6 +169,7 @@ fn health_response_identifies_mely_backend(response: &str) -> bool {
         .unwrap_or(false)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn runtime_response_exposes_build_version(response: &str) -> bool {
     if !backend_response_is_ok(response) {
         return false;
@@ -250,18 +253,13 @@ fn ensure_backend_port_available(addr: SocketAddr) -> bool {
     }
 }
 
-fn backend_runtime_contract_succeeds(addr: SocketAddr) -> bool {
-    let Some(response) = backend_http_response(addr, BACKEND_RUNTIME_PATH) else {
-        return false;
-    };
-    runtime_response_exposes_build_version(&response)
-}
-
+#[cfg_attr(not(test), allow(dead_code))]
 fn backend_required_api_succeeds(addr: SocketAddr) -> bool {
     backend_http_probe_succeeds(addr, BACKEND_HEALTH_PATH)
         && backend_http_probe_succeeds(addr, BACKEND_READINESS_PATH)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn wait_for_backend_ready(addr: SocketAddr, attempts: usize, delay: Duration) -> bool {
     for attempt in 0..attempts {
         if backend_required_api_succeeds(addr) {
