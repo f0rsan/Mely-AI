@@ -1,3 +1,5 @@
+import { FetchTimeoutError, fetchWithTimeout } from "./http";
+
 const API_BASE = "http://127.0.0.1:8000";
 
 export type LLMCatalogKind = "text" | "vision";
@@ -33,23 +35,41 @@ function extractDetail(body: unknown): string {
 }
 
 export async function fetchLLMCatalog(signal?: AbortSignal): Promise<LLMCatalogResponse> {
-  const resp = await fetch(`${API_BASE}/api/llm/catalog`, { signal });
-  const body = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    throw new Error(extractDetail(body));
+  try {
+    const resp = await fetchWithTimeout(`${API_BASE}/api/llm/catalog`, {
+      signal,
+      timeoutMs: 10_000,
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      throw new Error(extractDetail(body));
+    }
+    return body as LLMCatalogResponse;
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error("加载模型库超时，请稍后重试");
+    }
+    throw err;
   }
-  return body as LLMCatalogResponse;
 }
 
 export async function deleteLLMRuntimeModel(modelName: string, signal?: AbortSignal): Promise<void> {
-  const resp = await fetch(`${API_BASE}/api/llm/models`, {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: modelName }),
-    signal,
-  });
-  if (!resp.ok && resp.status !== 204) {
-    const body = await resp.json().catch(() => ({}));
-    throw new Error(extractDetail(body));
+  try {
+    const resp = await fetchWithTimeout(`${API_BASE}/api/llm/models`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: modelName }),
+      signal,
+      timeoutMs: 10_000,
+    });
+    if (!resp.ok && resp.status !== 204) {
+      const body = await resp.json().catch(() => ({}));
+      throw new Error(extractDetail(body));
+    }
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error("删除基础模型超时，请稍后重试");
+    }
+    throw err;
   }
 }

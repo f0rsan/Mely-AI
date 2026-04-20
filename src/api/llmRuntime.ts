@@ -149,24 +149,40 @@ export async function fetchLLMRuntimeReadiness(
 }
 
 export async function repairLLMRuntime(signal?: AbortSignal): Promise<LLMRuntimeReadiness> {
-  const resp = await fetch(`${API_BASE}/api/llm-runtime/repair`, {
-    method: "POST",
-    signal,
-  });
-  const body = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    throw new Error(extractDetail(body, { status: resp.status }));
+  try {
+    const resp = await fetchWithTimeout(`${API_BASE}/api/llm-runtime/repair`, {
+      method: "POST",
+      signal,
+      timeoutMs: 12_000,
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      throw new Error(extractDetail(body, { status: resp.status }));
+    }
+    return body as LLMRuntimeReadiness;
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error("训练环境修复超时，请稍后重试。");
+    }
+    throw err;
   }
-  return body as LLMRuntimeReadiness;
 }
 
 export async function openLLMRuntime(signal?: AbortSignal): Promise<void> {
-  const resp = await fetch(`${API_BASE}/api/llm/runtime/open`, {
-    method: "POST",
-    signal,
-  });
-  if (!resp.ok && resp.status !== 204) {
-    const body = await resp.json().catch(() => ({}));
-    throw new Error(extractDetail(body, { status: resp.status }));
+  try {
+    const resp = await fetchWithTimeout(`${API_BASE}/api/llm/runtime/open`, {
+      method: "POST",
+      signal,
+      timeoutMs: 8_000,
+    });
+    if (!resp.ok && resp.status !== 204) {
+      const body = await resp.json().catch(() => ({}));
+      throw new Error(extractDetail(body, { status: resp.status }));
+    }
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error("启动语言引擎超时，请稍后重试。");
+    }
+    throw err;
   }
 }

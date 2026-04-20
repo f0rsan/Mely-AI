@@ -1,3 +1,5 @@
+import { FetchTimeoutError, fetchWithTimeout } from "./http";
+
 const API_BASE = "http://127.0.0.1:8000";
 
 export type LLMModelStatus = "pending" | "failed" | "ready" | "deleted";
@@ -43,68 +45,104 @@ export async function registerLLMModel(
   payload: RegisterModelPayload,
   signal?: AbortSignal,
 ): Promise<LLMModel> {
-  const resp = await fetch(
-    `${API_BASE}/api/characters/${encodeURIComponent(characterId)}/llm-models`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal,
-    },
-  );
-  const body = await resp.json();
-  if (!resp.ok) throw new Error(extractDetail(body));
-  return body as LLMModel;
+  try {
+    const resp = await fetchWithTimeout(
+      `${API_BASE}/api/characters/${encodeURIComponent(characterId)}/llm-models`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal,
+        timeoutMs: 15_000,
+      },
+    );
+    const body = await resp.json();
+    if (!resp.ok) throw new Error(extractDetail(body));
+    return body as LLMModel;
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error("注册模型超时，请稍后重试");
+    }
+    throw err;
+  }
 }
 
 export async function listLLMModels(
   characterId: string,
   signal?: AbortSignal,
 ): Promise<LLMModel[]> {
-  const resp = await fetch(
-    `${API_BASE}/api/characters/${encodeURIComponent(characterId)}/llm-models`,
-    { signal },
-  );
-  if (!resp.ok) throw new Error("加载模型列表失败");
-  return (await resp.json()) as LLMModel[];
+  try {
+    const resp = await fetchWithTimeout(
+      `${API_BASE}/api/characters/${encodeURIComponent(characterId)}/llm-models`,
+      { signal, timeoutMs: 10_000 },
+    );
+    if (!resp.ok) throw new Error("加载模型列表失败");
+    return (await resp.json()) as LLMModel[];
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error("加载模型列表超时，请稍后重试");
+    }
+    throw err;
+  }
 }
 
 export async function getLLMModel(
   modelId: string,
   signal?: AbortSignal,
 ): Promise<LLMModel> {
-  const resp = await fetch(
-    `${API_BASE}/api/llm-models/${encodeURIComponent(modelId)}`,
-    { signal },
-  );
-  const body = await resp.json();
-  if (!resp.ok) throw new Error(extractDetail(body));
-  return body as LLMModel;
+  try {
+    const resp = await fetchWithTimeout(
+      `${API_BASE}/api/llm-models/${encodeURIComponent(modelId)}`,
+      { signal, timeoutMs: 10_000 },
+    );
+    const body = await resp.json();
+    if (!resp.ok) throw new Error(extractDetail(body));
+    return body as LLMModel;
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error("读取模型详情超时，请稍后重试");
+    }
+    throw err;
+  }
 }
 
 export async function retryLLMModelRegistration(
   modelId: string,
   signal?: AbortSignal,
 ): Promise<LLMModel> {
-  const resp = await fetch(
-    `${API_BASE}/api/llm-models/${encodeURIComponent(modelId)}/retry-registration`,
-    { method: "POST", signal },
-  );
-  const body = await resp.json();
-  if (!resp.ok) throw new Error(extractDetail(body));
-  return body as LLMModel;
+  try {
+    const resp = await fetchWithTimeout(
+      `${API_BASE}/api/llm-models/${encodeURIComponent(modelId)}/retry-registration`,
+      { method: "POST", signal, timeoutMs: 15_000 },
+    );
+    const body = await resp.json();
+    if (!resp.ok) throw new Error(extractDetail(body));
+    return body as LLMModel;
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error("重试注册超时，请稍后重试");
+    }
+    throw err;
+  }
 }
 
 export async function deleteLLMModel(
   modelId: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  const resp = await fetch(
-    `${API_BASE}/api/llm-models/${encodeURIComponent(modelId)}`,
-    { method: "DELETE", signal },
-  );
-  if (!resp.ok && resp.status !== 204) {
-    const body = await resp.json().catch(() => ({}));
-    throw new Error(extractDetail(body));
+  try {
+    const resp = await fetchWithTimeout(
+      `${API_BASE}/api/llm-models/${encodeURIComponent(modelId)}`,
+      { method: "DELETE", signal, timeoutMs: 10_000 },
+    );
+    if (!resp.ok && resp.status !== 204) {
+      const body = await resp.json().catch(() => ({}));
+      throw new Error(extractDetail(body));
+    }
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error("删除模型超时，请稍后重试");
+    }
+    throw err;
   }
 }

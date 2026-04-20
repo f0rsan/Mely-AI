@@ -132,6 +132,30 @@ test("rechecks runtime when user clicks refresh", async () => {
   await screen.findByText("语言引擎已就绪");
 });
 
+test("keeps the last runtime state visible while refresh is still running", async () => {
+  const user = userEvent.setup();
+  let resolveRefresh: ((value: ReturnType<typeof buildRuntime>) => void) | null = null;
+  const refreshPromise = new Promise<ReturnType<typeof buildRuntime>>((resolve) => {
+    resolveRefresh = resolve;
+  });
+
+  vi.mocked(fetchLLMRuntime)
+    .mockResolvedValueOnce(buildRuntime())
+    .mockReturnValueOnce(refreshPromise);
+
+  render(<LLMWorkspace characterId="char-1" characterName="角色A" />);
+
+  await screen.findByText("语言引擎已就绪");
+  await user.click(screen.getByRole("button", { name: "重新检测" }));
+
+  expect(screen.getByText("语言引擎已就绪")).toBeInTheDocument();
+
+  resolveRefresh?.(buildRuntime());
+  await waitFor(() => {
+    expect(fetchLLMRuntime).toHaveBeenCalledTimes(2);
+  });
+});
+
 test("passes disabled reason to chat panel when runtime is not running", async () => {
   vi.mocked(fetchLLMRuntime).mockResolvedValueOnce(
     buildRuntime({

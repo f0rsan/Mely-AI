@@ -30,14 +30,25 @@ export async function fetchWithTimeout(
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timeoutId = globalThis.setTimeout(() => {
-      controller.abort();
       reject(new FetchTimeoutError());
+      controller.abort();
     }, timeoutMs);
+  });
+
+  const fetchPromise = fetch(input, {
+    ...init,
+    cache,
+    signal: controller.signal,
+  }).catch((error) => {
+    if (controller.signal.aborted) {
+      return new Promise<Response>(() => {});
+    }
+    throw error;
   });
 
   try {
     return await Promise.race([
-      fetch(input, { ...init, cache, signal: controller.signal }),
+      fetchPromise,
       timeout,
     ]);
   } finally {

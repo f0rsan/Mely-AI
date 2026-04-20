@@ -1,3 +1,5 @@
+import { FetchTimeoutError, fetchWithTimeout } from "./http";
+
 const API_BASE = "http://127.0.0.1:8000";
 
 export type LLMTrainingMode = "light" | "standard" | "fine";
@@ -59,30 +61,46 @@ export async function startLLMTraining(
   payload: StartTrainingPayload,
   signal?: AbortSignal,
 ): Promise<LLMTrainingJob> {
-  const resp = await fetch(
-    `${API_BASE}/api/characters/${encodeURIComponent(characterId)}/llm-training/start`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal,
-    },
-  );
-  const body = await resp.json();
-  if (!resp.ok) throw new Error(extractDetail(body));
-  return body as LLMTrainingJob;
+  try {
+    const resp = await fetchWithTimeout(
+      `${API_BASE}/api/characters/${encodeURIComponent(characterId)}/llm-training/start`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal,
+        timeoutMs: 15_000,
+      },
+    );
+    const body = await resp.json();
+    if (!resp.ok) throw new Error(extractDetail(body));
+    return body as LLMTrainingJob;
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error("启动训练超时，请稍后重试");
+    }
+    throw err;
+  }
 }
 
 export async function getLLMTrainingJob(
   jobId: string,
   signal?: AbortSignal,
 ): Promise<LLMTrainingJob> {
-  const resp = await fetch(`${API_BASE}/api/llm-training/${encodeURIComponent(jobId)}`, {
-    signal,
-  });
-  const body = await resp.json();
-  if (!resp.ok) throw new Error(extractDetail(body));
-  return body as LLMTrainingJob;
+  try {
+    const resp = await fetchWithTimeout(`${API_BASE}/api/llm-training/${encodeURIComponent(jobId)}`, {
+      signal,
+      timeoutMs: 10_000,
+    });
+    const body = await resp.json();
+    if (!resp.ok) throw new Error(extractDetail(body));
+    return body as LLMTrainingJob;
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error("读取训练任务超时，请稍后重试");
+    }
+    throw err;
+  }
 }
 
 export async function listLLMTrainingJobs(
@@ -92,39 +110,60 @@ export async function listLLMTrainingJobs(
   const url = characterId
     ? `${API_BASE}/api/llm-training?characterId=${encodeURIComponent(characterId)}`
     : `${API_BASE}/api/llm-training`;
-  const resp = await fetch(url, { signal });
-  if (!resp.ok) throw new Error("加载训练任务列表失败");
-  return (await resp.json()) as LLMTrainingJob[];
+  try {
+    const resp = await fetchWithTimeout(url, { signal, timeoutMs: 10_000 });
+    if (!resp.ok) throw new Error("加载训练任务列表失败");
+    return (await resp.json()) as LLMTrainingJob[];
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error("加载训练任务列表超时，请稍后重试");
+    }
+    throw err;
+  }
 }
 
 export async function cancelLLMTrainingJob(
   jobId: string,
   signal?: AbortSignal,
 ): Promise<LLMTrainingJob> {
-  const resp = await fetch(
-    `${API_BASE}/api/llm-training/${encodeURIComponent(jobId)}/cancel`,
-    { method: "POST", signal },
-  );
-  const body = await resp.json();
-  if (!resp.ok) throw new Error(extractDetail(body));
-  return body as LLMTrainingJob;
+  try {
+    const resp = await fetchWithTimeout(
+      `${API_BASE}/api/llm-training/${encodeURIComponent(jobId)}/cancel`,
+      { method: "POST", signal, timeoutMs: 10_000 },
+    );
+    const body = await resp.json();
+    if (!resp.ok) throw new Error(extractDetail(body));
+    return body as LLMTrainingJob;
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error("取消训练超时，请稍后重试");
+    }
+    throw err;
+  }
 }
 
 export async function openLLMTrainingRunRoot(
   jobId: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  const resp = await fetch(
-    `${API_BASE}/api/llm-training/${encodeURIComponent(jobId)}/open-run-root`,
-    { method: "POST", signal },
-  );
-  if (resp.ok) return;
-
-  let body: unknown = null;
   try {
-    body = await resp.json();
-  } catch {
-    body = null;
+    const resp = await fetchWithTimeout(
+      `${API_BASE}/api/llm-training/${encodeURIComponent(jobId)}/open-run-root`,
+      { method: "POST", signal, timeoutMs: 10_000 },
+    );
+    if (resp.ok) return;
+
+    let body: unknown = null;
+    try {
+      body = await resp.json();
+    } catch {
+      body = null;
+    }
+    throw new Error(extractDetail(body));
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error("打开运行目录超时，请稍后重试");
+    }
+    throw err;
   }
-  throw new Error(extractDetail(body));
 }

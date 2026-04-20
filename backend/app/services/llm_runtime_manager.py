@@ -13,7 +13,14 @@ from pathlib import Path
 from typing import Any, Literal
 
 from app.services.llm_base_models import DEFAULT_TRAINING_BASE_MODEL, get_training_base_model
-from app.services.ollama_service import check_ollama_runtime
+from app.services.llm_catalog import MIN_OLLAMA_VERSION
+from app.services.ollama_service import (
+    OllamaAPIError,
+    OllamaRuntimeStatus,
+    check_ollama_runtime,
+    current_platform,
+    is_ollama_installed,
+)
 
 LLMTrainingMode = Literal["light", "standard", "fine"]
 LLMRuntimeReadinessState = Literal[
@@ -46,6 +53,7 @@ MIN_DRIVER_VERSION = (531, 79)
 MIN_FREE_DISK_GB = 12.0
 NVIDIA_SMI_TIMEOUT_SECONDS = 2.0
 ALLOW_NON_WINDOWS_TRAINING_ENV = "MELY_LLM_ALLOW_NON_WINDOWS_TRAINING"
+OLLAMA_RUNTIME_PROBE_TIMEOUT_SECONDS = 4.0
 
 
 def _utc_now() -> str:
@@ -57,6 +65,19 @@ def _env_flag(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _fallback_ollama_runtime(hint: str) -> OllamaRuntimeStatus:
+    installed = is_ollama_installed()
+    return OllamaRuntimeStatus(
+        installed=installed,
+        running=False,
+        version=None,
+        minimum_version=MIN_OLLAMA_VERSION,
+        platform=current_platform(),
+        models=[],
+        hint=hint if installed else "未检测到语言引擎，请先安装 Ollama。",
+    )
 
 
 def _parse_version(version: str | None) -> tuple[int, ...] | None:
@@ -1051,7 +1072,15 @@ class LLMRuntimeManager:
                 checks=checks,
             )
 
-        ollama_runtime = await check_ollama_runtime()
+        try:
+            ollama_runtime = await asyncio.wait_for(
+                check_ollama_runtime(),
+                timeout=OLLAMA_RUNTIME_PROBE_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            ollama_runtime = _fallback_ollama_runtime("语言引擎状态检测超时，请稍后重试。")
+        except OllamaAPIError:
+            ollama_runtime = _fallback_ollama_runtime("语言引擎状态读取失败，请稍后重试。")
         checks["ollama"] = {
             "installed": bool(ollama_runtime.installed),
             "running": bool(ollama_runtime.running),

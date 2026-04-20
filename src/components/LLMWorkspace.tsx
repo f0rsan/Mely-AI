@@ -49,6 +49,7 @@ function resolveBaseModelChatDisabledReason(
 
 function RuntimeBanner({
   loading,
+  refreshing,
   runtime,
   busyOpening,
   startError,
@@ -56,6 +57,7 @@ function RuntimeBanner({
   onRefresh,
 }: {
   loading: boolean;
+  refreshing: boolean;
   runtime: LLMRuntimeStatus | null;
   busyOpening: boolean;
   startError: string | null;
@@ -144,6 +146,12 @@ function RuntimeBanner({
         {runtime.version && <span className="text-green-800 font-mono">v{runtime.version}</span>}
         <span className="text-zinc-700">·</span>
         <span className="text-zinc-400">已安装模型 {runtime.models.length} 个</span>
+        {refreshing && (
+          <>
+            <span className="text-zinc-700">·</span>
+            <span className="text-zinc-500">重新检测中…</span>
+          </>
+        )}
       </div>
       {(runtime.buildVersion || runtime.releaseSummaryPath) && (
         <p className="text-[11px] text-zinc-500 leading-relaxed">
@@ -179,16 +187,26 @@ export function LLMWorkspace({ characterId, characterName, initialSubTab }: Prop
   const [subTab, setSubTab] = useState<LLMSubTab>(initialSubTab ?? "datasets");
   const [runtimeStatus, setRuntimeStatus] = useState<LLMRuntimeStatus | null>(null);
   const [runtimeLoading, setRuntimeLoading] = useState(true);
+  const [runtimeRefreshing, setRuntimeRefreshing] = useState(false);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [openingRuntime, setOpeningRuntime] = useState(false);
   // selectedModel flows: 私有模型 tab → 角色对话 tab
   const [selectedModel, setSelectedModel] = useState<LLMModel | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const runtimeStatusRef = useRef<LLMRuntimeStatus | null>(null);
+
+  useEffect(() => {
+    runtimeStatusRef.current = runtimeStatus;
+  }, [runtimeStatus]);
 
   const checkRuntime = useCallback(async () => {
     try {
-      setRuntimeLoading(true);
+      if (runtimeStatusRef.current === null) {
+        setRuntimeLoading(true);
+      } else {
+        setRuntimeRefreshing(true);
+      }
       const status = await fetchLLMRuntime();
       setRuntimeStatus(status);
       setRuntimeError(null);
@@ -206,6 +224,7 @@ export function LLMWorkspace({ characterId, characterName, initialSubTab }: Prop
       setRuntimeError(message);
     } finally {
       setRuntimeLoading(false);
+      setRuntimeRefreshing(false);
     }
   }, []);
 
@@ -243,6 +262,7 @@ export function LLMWorkspace({ characterId, characterName, initialSubTab }: Prop
     <div className="flex flex-col gap-4 min-h-0 h-full">
       <RuntimeBanner
         loading={runtimeLoading}
+        refreshing={runtimeRefreshing}
         runtime={runtimeStatus}
         busyOpening={openingRuntime}
         startError={runtimeError}

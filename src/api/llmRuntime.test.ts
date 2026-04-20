@@ -6,6 +6,19 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function createAbortablePendingFetch() {
+  return vi.fn().mockImplementation((_input: unknown, init?: RequestInit) => {
+    return new Promise((_resolve, reject) => {
+      const abort = () => {
+        const error = new Error("Aborted");
+        error.name = "AbortError";
+        reject(error);
+      };
+      init?.signal?.addEventListener("abort", abort, { once: true });
+    });
+  });
+}
+
 test("maps readiness 404 to a packaged-backend mismatch message", async () => {
   vi.stubGlobal(
     "fetch",
@@ -36,20 +49,20 @@ test("preserves explicit backend detail for readiness errors", async () => {
 
 test("fails fast when runtime status fetch stalls", async () => {
   vi.useFakeTimers();
-  vi.stubGlobal("fetch", vi.fn().mockImplementation(() => new Promise(() => {})));
+  vi.stubGlobal("fetch", createAbortablePendingFetch());
 
   const promise = fetchLLMRuntime();
+  const expectation = expect(promise).rejects.toThrow("语言引擎状态检测超时，请稍后重试。");
   await vi.advanceTimersByTimeAsync(8_100);
-
-  await expect(promise).rejects.toThrow("语言引擎状态检测超时，请稍后重试。");
+  await expectation;
 });
 
 test("fails fast when readiness fetch stalls", async () => {
   vi.useFakeTimers();
-  vi.stubGlobal("fetch", vi.fn().mockImplementation(() => new Promise(() => {})));
+  vi.stubGlobal("fetch", createAbortablePendingFetch());
 
   const promise = fetchLLMRuntimeReadiness();
+  const expectation = expect(promise).rejects.toThrow("训练环境状态检测超时，请稍后重试。");
   await vi.advanceTimersByTimeAsync(12_100);
-
-  await expect(promise).rejects.toThrow("训练环境状态检测超时，请稍后重试。");
+  await expectation;
 });

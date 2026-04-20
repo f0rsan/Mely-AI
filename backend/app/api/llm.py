@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.services.llm_catalog import get_llm_catalog as get_catalog_items
+from app.services.llm_catalog import MIN_OLLAMA_VERSION, get_llm_catalog as get_catalog_items
 from app.services.ollama_service import (
     OllamaAPIError,
     OllamaModelNotFoundError,
@@ -26,6 +26,7 @@ from app.services.ollama_service import (
 )
 
 router = APIRouter(prefix="/llm", tags=["llm"])
+LLM_RUNTIME_PROBE_TIMEOUT_SECONDS = 4.0
 
 
 # ── Response models ────────────────────────────────────────────────────────────
@@ -122,6 +123,20 @@ def _runtime_to_payload(s: OllamaRuntimeStatus) -> LLMRuntimePayload:
     )
 
 
+def _fallback_runtime_payload(hint: str) -> LLMRuntimePayload:
+    installed = is_ollama_installed()
+    runtime = OllamaRuntimeStatus(
+        installed=installed,
+        running=False,
+        version=None,
+        minimum_version=MIN_OLLAMA_VERSION,
+        platform=current_platform(),
+        models=[],
+        hint=hint if installed else "未检测到语言引擎，请先安装 Ollama。",
+    )
+    return _runtime_to_payload(runtime)
+
+
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
@@ -176,24 +191,15 @@ async def get_llm_health(_request: Request) -> LLMHealthPayload:
 @router.get("/runtime", response_model=LLMRuntimePayload)
 async def get_llm_runtime(_request: Request) -> LLMRuntimePayload:
     try:
-        runtime = await check_ollama_runtime()
+        runtime = await asyncio.wait_for(
+            check_ollama_runtime(),
+            timeout=LLM_RUNTIME_PROBE_TIMEOUT_SECONDS,
+        )
         return _runtime_to_payload(runtime)
     except asyncio.TimeoutError:
-        # Runtime probe timed out — degrade gracefully so the UI can still render.
-        installed = is_ollama_installed()
-        return LLMRuntimePayload(
-            installed=installed,
-            running=False,
-            version=None,
-            minimumVersion="0.1.0",
-            platform=current_platform(),
-            models=[],
-            hint="语言引擎状态检测超时，请稍后重试。",
-            buildVersion=os.getenv("MELY_DESKTOP_BUILD_VERSION"),
-            backendExecutable=os.getenv("MELY_BACKEND_EXECUTABLE"),
-            runtimeResourceRoot=os.getenv("MELY_LLM_RUNTIME_RESOURCE_ROOT"),
-            releaseSummaryPath=os.getenv("MELY_WINDOWS_BUILD_SUMMARY_PATH"),
-        )
+        return _fallback_runtime_payload("语言引擎状态检测超时，请稍后重试。")
+    except OllamaAPIError:
+        return _fallback_runtime_payload("语言引擎状态读取失败，请稍后重试。")
 
 
 @router.post("/runtime/open", status_code=status.HTTP_204_NO_CONTENT)

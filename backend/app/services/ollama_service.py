@@ -16,6 +16,7 @@ from app.services.llm_catalog import MIN_OLLAMA_VERSION
 
 OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_TIMEOUT = httpx.Timeout(connect=5.0, read=120.0, write=30.0, pool=5.0)
+OLLAMA_STATUS_TIMEOUT = httpx.Timeout(connect=1.5, read=3.0, write=5.0, pool=1.0)
 
 
 class OllamaRetryableError(Exception):
@@ -165,14 +166,17 @@ async def open_ollama_runtime() -> None:
 async def check_ollama_status() -> OllamaStatus:
     """Ping Ollama and return status including available models."""
     try:
-        async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=OLLAMA_STATUS_TIMEOUT, trust_env=False) as client:
             version_resp = await client.get(f"{OLLAMA_BASE_URL}/api/version")
             version_resp.raise_for_status()
             version = version_resp.json().get("version")
 
-            tags_resp = await client.get(f"{OLLAMA_BASE_URL}/api/tags")
-            tags_resp.raise_for_status()
-            raw_models = tags_resp.json().get("models", [])
+            try:
+                tags_resp = await client.get(f"{OLLAMA_BASE_URL}/api/tags")
+                tags_resp.raise_for_status()
+                raw_models = tags_resp.json().get("models", [])
+            except (httpx.ConnectError, httpx.TimeoutException):
+                return OllamaStatus(running=True, version=version, models=[])
 
         models = [
             OllamaModelInfo(

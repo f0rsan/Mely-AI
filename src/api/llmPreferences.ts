@@ -1,3 +1,5 @@
+import { FetchTimeoutError, fetchWithTimeout } from "./http";
+
 const API_BASE = "http://127.0.0.1:8000";
 
 export type CharacterLLMPreferences = {
@@ -21,15 +23,22 @@ export async function fetchCharacterLLMPreferences(
   characterId: string,
   signal?: AbortSignal,
 ): Promise<CharacterLLMPreferences> {
-  const resp = await fetch(
-    `${API_BASE}/api/characters/${encodeURIComponent(characterId)}/llm-preferences`,
-    { signal },
-  );
-  const body = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    throw new Error(extractDetail(body));
+  try {
+    const resp = await fetchWithTimeout(
+      `${API_BASE}/api/characters/${encodeURIComponent(characterId)}/llm-preferences`,
+      { signal, timeoutMs: 10_000 },
+    );
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      throw new Error(extractDetail(body));
+    }
+    return body as CharacterLLMPreferences;
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error("读取默认模型配置超时，请稍后重试");
+    }
+    throw err;
   }
-  return body as CharacterLLMPreferences;
 }
 
 export async function updateCharacterLLMPreferences(
@@ -37,18 +46,26 @@ export async function updateCharacterLLMPreferences(
   payload: { defaultBaseModelName: string | null },
   signal?: AbortSignal,
 ): Promise<CharacterLLMPreferences> {
-  const resp = await fetch(
-    `${API_BASE}/api/characters/${encodeURIComponent(characterId)}/llm-preferences`,
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal,
-    },
-  );
-  const body = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    throw new Error(extractDetail(body));
+  try {
+    const resp = await fetchWithTimeout(
+      `${API_BASE}/api/characters/${encodeURIComponent(characterId)}/llm-preferences`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal,
+        timeoutMs: 10_000,
+      },
+    );
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      throw new Error(extractDetail(body));
+    }
+    return body as CharacterLLMPreferences;
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error("设置默认模型超时，请稍后重试");
+    }
+    throw err;
   }
-  return body as CharacterLLMPreferences;
 }
