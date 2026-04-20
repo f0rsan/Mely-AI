@@ -6,7 +6,12 @@ build/
 
 src-tauri/target/
 src-tauri/gen/
-src-tauri/resources/
+src-tauri/resources/*
+!src-tauri/resources/llm-runtime/
+src-tauri/resources/llm-runtime/*
+!src-tauri/resources/llm-runtime/.gitkeep
+!src-tauri/resources/windows-training-release-artifacts.txt
+src-tauri/resources/mely-backend/
 
 backend/.pytest_cache/
 backend/.mypy_cache/

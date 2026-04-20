@@ -1,0 +1,3 @@
+timestamp=placeholder
+build_version=0.0.0
+note=This placeholder is overwritten by scripts/build_windows.sh during Windows packaging.

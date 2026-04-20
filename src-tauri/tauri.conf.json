@@ -36,7 +36,9 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "resources": "resources"
+      "resources/mely-backend": "mely-backend",
+      "resources/llm-runtime": "llm-runtime",
+      "resources/windows-training-release-artifacts.txt": "windows-training-release-artifacts.txt"
     }
   },
   "plugins": {

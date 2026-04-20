@@ -42,27 +42,27 @@ fn backend_executable_name() -> &'static str {
 fn backend_candidate_paths(resource_dir: &Path) -> [PathBuf; 2] {
     let exe_name = backend_executable_name();
     [
+        resource_dir.join("mely-backend").join(exe_name),
         resource_dir
             .join("resources")
             .join("mely-backend")
             .join(exe_name),
-        resource_dir.join("mely-backend").join(exe_name),
     ]
 }
 
 fn llm_runtime_candidate_paths(resource_dir: &Path) -> [PathBuf; 2] {
     [
-        resource_dir.join("resources").join("llm-runtime"),
         resource_dir.join("llm-runtime"),
+        resource_dir.join("resources").join("llm-runtime"),
     ]
 }
 
 fn build_summary_candidate_paths(resource_dir: &Path) -> [PathBuf; 2] {
     [
+        resource_dir.join("windows-training-release-artifacts.txt"),
         resource_dir
             .join("resources")
             .join("windows-training-release-artifacts.txt"),
-        resource_dir.join("windows-training-release-artifacts.txt"),
     ]
 }
 
@@ -488,21 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn resolves_nested_resource_bundle_path() {
-        let root = unique_temp_dir("nested");
-        let nested_dir = root.join("resources").join("mely-backend");
-        fs::create_dir_all(&nested_dir).expect("create nested dir");
-        let nested_exe = nested_dir.join(backend_executable_name());
-        fs::write(&nested_exe, b"test").expect("write executable");
-
-        let resolved = resolve_backend_exe_from_resource_dir(&root);
-
-        assert_eq!(resolved, nested_exe);
-        fs::remove_dir_all(root).expect("cleanup temp dir");
-    }
-
-    #[test]
-    fn falls_back_to_direct_resource_bundle_path() {
+    fn resolves_direct_resource_bundle_path() {
         let root = unique_temp_dir("direct");
         let direct_dir = root.join("mely-backend");
         fs::create_dir_all(&direct_dir).expect("create direct dir");
@@ -516,7 +502,21 @@ mod tests {
     }
 
     #[test]
-    fn prefers_nested_resource_bundle_when_both_paths_exist() {
+    fn falls_back_to_nested_resource_bundle_path() {
+        let root = unique_temp_dir("nested");
+        let nested_dir = root.join("resources").join("mely-backend");
+        fs::create_dir_all(&nested_dir).expect("create nested dir");
+        let nested_exe = nested_dir.join(backend_executable_name());
+        fs::write(&nested_exe, b"test").expect("write executable");
+
+        let resolved = resolve_backend_exe_from_resource_dir(&root);
+
+        assert_eq!(resolved, nested_exe);
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn prefers_direct_resource_bundle_when_both_paths_exist() {
         let root = unique_temp_dir("both-backend-paths");
         let direct_dir = root.join("mely-backend");
         let nested_dir = root.join("resources").join("mely-backend");
@@ -529,24 +529,12 @@ mod tests {
 
         let resolved = resolve_backend_exe_from_resource_dir(&root);
 
-        assert_eq!(resolved, nested_exe);
+        assert_eq!(resolved, direct_exe);
         fs::remove_dir_all(root).expect("cleanup temp dir");
     }
 
     #[test]
-    fn resolves_nested_llm_runtime_resource_path() {
-        let root = unique_temp_dir("llm-runtime-nested");
-        let nested_dir = root.join("resources").join("llm-runtime");
-        fs::create_dir_all(&nested_dir).expect("create nested runtime dir");
-
-        let resolved = resolve_llm_runtime_root_from_resource_dir(&root);
-
-        assert_eq!(resolved, nested_dir);
-        fs::remove_dir_all(root).expect("cleanup temp dir");
-    }
-
-    #[test]
-    fn falls_back_to_direct_llm_runtime_resource_path() {
+    fn resolves_direct_llm_runtime_resource_path() {
         let root = unique_temp_dir("llm-runtime-direct");
         let direct_dir = root.join("llm-runtime");
         fs::create_dir_all(&direct_dir).expect("create direct runtime dir");
@@ -558,11 +546,9 @@ mod tests {
     }
 
     #[test]
-    fn prefers_nested_llm_runtime_resource_when_both_paths_exist() {
-        let root = unique_temp_dir("llm-runtime-both-paths");
-        let direct_dir = root.join("llm-runtime");
+    fn falls_back_to_nested_llm_runtime_resource_path() {
+        let root = unique_temp_dir("llm-runtime-nested");
         let nested_dir = root.join("resources").join("llm-runtime");
-        fs::create_dir_all(&direct_dir).expect("create direct runtime dir");
         fs::create_dir_all(&nested_dir).expect("create nested runtime dir");
 
         let resolved = resolve_llm_runtime_root_from_resource_dir(&root);
@@ -572,7 +558,33 @@ mod tests {
     }
 
     #[test]
-    fn resolves_nested_build_summary_path() {
+    fn prefers_direct_llm_runtime_resource_when_both_paths_exist() {
+        let root = unique_temp_dir("llm-runtime-both-paths");
+        let direct_dir = root.join("llm-runtime");
+        let nested_dir = root.join("resources").join("llm-runtime");
+        fs::create_dir_all(&direct_dir).expect("create direct runtime dir");
+        fs::create_dir_all(&nested_dir).expect("create nested runtime dir");
+
+        let resolved = resolve_llm_runtime_root_from_resource_dir(&root);
+
+        assert_eq!(resolved, direct_dir);
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn resolves_direct_build_summary_path() {
+        let root = unique_temp_dir("build-summary-direct");
+        let direct_path = root.join("windows-training-release-artifacts.txt");
+        fs::write(&direct_path, b"summary").expect("write direct summary");
+
+        let resolved = resolve_build_summary_path_from_resource_dir(&root);
+
+        assert_eq!(resolved, Some(direct_path));
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn falls_back_to_nested_build_summary_path_when_direct_missing() {
         let root = unique_temp_dir("build-summary-nested");
         let nested_path = root
             .join("resources")
@@ -587,19 +599,7 @@ mod tests {
     }
 
     #[test]
-    fn resolves_direct_build_summary_path_when_nested_missing() {
-        let root = unique_temp_dir("build-summary-direct");
-        let direct_path = root.join("windows-training-release-artifacts.txt");
-        fs::write(&direct_path, b"summary").expect("write direct summary");
-
-        let resolved = resolve_build_summary_path_from_resource_dir(&root);
-
-        assert_eq!(resolved, Some(direct_path));
-        fs::remove_dir_all(root).expect("cleanup temp dir");
-    }
-
-    #[test]
-    fn prefers_nested_build_summary_path_when_both_exist() {
+    fn prefers_direct_build_summary_path_when_both_exist() {
         let root = unique_temp_dir("build-summary-both");
         let nested_path = root
             .join("resources")
@@ -611,7 +611,7 @@ mod tests {
 
         let resolved = resolve_build_summary_path_from_resource_dir(&root);
 
-        assert_eq!(resolved, Some(nested_path));
+        assert_eq!(resolved, Some(direct_path));
         fs::remove_dir_all(root).expect("cleanup temp dir");
     }
 
