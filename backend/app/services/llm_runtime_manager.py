@@ -135,6 +135,14 @@ def _with_repair_guidance(message: str) -> str:
     return f"{normalized} 请先执行“修复训练环境”后重试。"
 
 
+def _is_repair_recoverable(message: str) -> bool:
+    normalized = message.strip()
+    if not normalized:
+        return True
+    unrecoverable_snippets = ("重新安装应用", "安装包缺少")
+    return not any(snippet in normalized for snippet in unrecoverable_snippets)
+
+
 def detect_missing_runtime_dependencies() -> list[str]:
     missing: list[str] = []
     for module in GPU_TRAINING_RUNTIME_DEPENDENCIES:
@@ -1271,7 +1279,8 @@ class LLMRuntimeManager:
         if runtime_health_details is not None:
             checks["runtimeHealth"] = runtime_health_details
         if broken_reason:
-            if auto_fix:
+            can_repair = _is_repair_recoverable(broken_reason)
+            if auto_fix and can_repair:
                 await self._ensure_install_task(reason="auto_repair", force_repair=True)
                 return LLMRuntimeReadiness(
                     state="installing_runtime",
@@ -1294,8 +1303,8 @@ class LLMRuntimeManager:
                 ready=False,
                 message="训练运行时损坏，需要修复。",
                 blocking_reason=blocking_reason,
-                repairable=True,
-                actions=self._build_state_actions(state),
+                repairable=can_repair,
+                actions=self._build_state_actions(state) if can_repair else [],
                 install_progress=self._install_progress,
                 hardware=hardware,
                 checks=checks,
