@@ -50,8 +50,9 @@ RUNTIME_HEALTH_SCRIPT_RELATIVE = Path("tools/verify_runtime_health.py")
 
 MIN_VRAM_GB = 8.0
 FINE_TRAINING_MIN_VRAM_GB = 12.0
-MIN_CUDA_VERSION = (12, 1)
-MIN_DRIVER_VERSION = (531, 79)
+DEFAULT_LLM_RUNTIME_ID = "llm-win-cu130-py311-v1"
+MIN_CUDA_VERSION = (13, 0)
+MIN_DRIVER_VERSION = (580, 0)
 MIN_FREE_DISK_GB = 12.0
 NVIDIA_SMI_TIMEOUT_SECONDS = 2.0
 ALLOW_NON_WINDOWS_TRAINING_ENV = "MELY_LLM_ALLOW_NON_WINDOWS_TRAINING"
@@ -267,7 +268,7 @@ class LLMRuntimeManager:
 
         self._data_root = data_root
         self._runtime_resource_root = resolved_resource_root
-        self._runtime_id = os.getenv("MELY_LLM_RUNTIME_ID", "llm-win-cu121-py311-v1")
+        self._runtime_id = os.getenv("MELY_LLM_RUNTIME_ID", DEFAULT_LLM_RUNTIME_ID)
         self._runtime_root = data_root / "runtimes" / "llm" / self._runtime_id
         self._runtime_manifest_path = self._runtime_root / "manifest.runtime.json"
         self._runtime_install_dir = self._runtime_root / "install"
@@ -1199,7 +1200,7 @@ class LLMRuntimeManager:
         if self._strict_enforcement:
             if hardware.cuda_compatibility == "incompatible":
                 blocking = (
-                    f"CUDA 版本不兼容（当前 {hardware.cuda_version or '未知'}，需要 >= 12.1）。"
+                    f"CUDA 版本不兼容（当前 {hardware.cuda_version or '未知'}，需要 >= 13.0）。"
                 )
                 return LLMRuntimeReadiness(
                     state="unsupported",
@@ -1216,7 +1217,7 @@ class LLMRuntimeManager:
             if hardware.driver_compatibility == "incompatible":
                 blocking = (
                     f"NVIDIA 驱动版本不兼容（当前 {hardware.driver_version or '未知'}，"
-                    "需要 >= 531.79）。"
+                    "需要 >= 580.0）。"
                 )
                 return LLMRuntimeReadiness(
                     state="unsupported",

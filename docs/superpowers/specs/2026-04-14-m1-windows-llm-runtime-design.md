@@ -70,7 +70,7 @@ MelyAI/
       python/
         python-3.11.x-embed-amd64.zip     # 嵌入式 Python（或等价离线 Python 分发）
       wheelhouse/
-        win_amd64_cu121/
+        win_amd64_cu130/
           *.whl                           # torch/unsloth/datasets/transformers/trl 及闭包依赖
           SHA256SUMS.txt
       tools/
@@ -84,7 +84,7 @@ MelyAI/
 %USERPROFILE%\.mely/
   runtimes/
     llm/
-      llm-win-cu121-py311-v1/
+      llm-win-cu130-py311-v1/
         python/                           # 实际可执行 python
         venv/
           Scripts/python.exe              # 训练 worker 专用解释器
@@ -113,19 +113,19 @@ manifest 作为训练 runtime 的单一真相来源（SSOT），由 Runtime Mana
 ```json
 {
   "schemaVersion": 1,
-  "runtimeId": "llm-win-cu121-py311-v1",
+  "runtimeId": "llm-win-cu130-py311-v1",
   "platform": {
     "os": "windows",
     "arch": "x86_64",
-    "cuda": "12.1"
+    "cuda": "13.0"
   },
   "python": {
     "version": "3.11.9",
-    "exePath": "%USERPROFILE%/.mely/runtimes/llm/llm-win-cu121-py311-v1/venv/Scripts/python.exe"
+    "exePath": "%USERPROFILE%/.mely/runtimes/llm/llm-win-cu130-py311-v1/venv/Scripts/python.exe"
   },
   "dependencySet": {
     "lockFile": "requirements-lock.txt",
-    "wheelhouse": "win_amd64_cu121",
+    "wheelhouse": "win_amd64_cu130",
     "packages": [
       {"name": "torch", "version": "locked", "wheel": "torch-*.whl", "sha256": "required"},
       {"name": "unsloth", "version": "locked", "wheel": "unsloth-*.whl", "sha256": "required"},

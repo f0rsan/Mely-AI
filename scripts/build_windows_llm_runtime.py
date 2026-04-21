@@ -10,6 +10,7 @@ Output contract (seed package):
       unsloth_worker.py
       bootstrap_runtime.py
       verify_import_chain.py
+      verify_runtime_health.py
       prepare_hf_snapshot.py
     manifest.json
     SHA256SUMS.txt
@@ -29,14 +30,16 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_RUNTIME_ID = "llm-win-cu121-py311-v1"
-DEFAULT_LOCKFILE_REL = Path("backend/runtime/windows-llm-gpu/requirements.windows-py311-cu121.lock")
+DEFAULT_RUNTIME_ID = "llm-win-cu130-py311-v1"
+DEFAULT_CUDA_VERSION = "13.0"
+DEFAULT_CUDA_TAG = "cu130"
+DEFAULT_LOCKFILE_REL = Path("backend/runtime/windows-llm-gpu/requirements.windows-py311-cu130.lock")
 DEFAULT_WORKER_SOURCE_REL = Path("backend/app/services/unsloth_worker.py")
 DEFAULT_RUNTIME_TOOLS_REL = Path("backend/runtime/windows-llm-gpu/tools")
 DEFAULT_MANIFEST_TEMPLATE_REL = Path("backend/runtime/windows-llm-gpu/runtime-manifest.template.json")
 DEFAULT_OUTPUT_REL = Path("build/windows-llm-runtime")
 DEFAULT_STAGE_REL = Path("src-tauri/resources/llm-runtime")
-DEFAULT_TORCH_INDEX_URL = "https://download.pytorch.org/whl/cu121"
+DEFAULT_TORCH_INDEX_URL = f"https://download.pytorch.org/whl/{DEFAULT_CUDA_TAG}"
 IMPORT_MODULES = ("torch", "unsloth", "datasets", "transformers", "trl")
 
 
@@ -243,11 +246,42 @@ def build_wheelhouse(
     wheels = sorted(wheelhouse_dir.glob("*.whl"))
     if not wheels:
         raise RuntimeError("wheelhouse build produced no wheels")
+    validate_cuda_torch_wheel(wheelhouse_dir=wheelhouse_dir, torch_index_url=torch_index_url)
 
     return {
         "wheelCount": len(wheels),
         "totalSizeBytes": directory_size(wheelhouse_dir),
     }
+
+
+def expected_cuda_tag_from_index(torch_index_url: str) -> str | None:
+    normalized = torch_index_url.rstrip("/").split("/")[-1].strip().lower()
+    if normalized.startswith("cu") and normalized[2:].isdigit():
+        return normalized
+    return None
+
+
+def validate_cuda_torch_wheel(*, wheelhouse_dir: Path, torch_index_url: str) -> None:
+    expected_cuda_tag = expected_cuda_tag_from_index(torch_index_url)
+    if expected_cuda_tag is None:
+        return
+
+    torch_wheels = sorted(
+        path for path in wheelhouse_dir.glob("torch-*.whl")
+        if not path.name.lower().startswith("torchvision-")
+        and not path.name.lower().startswith("torchao-")
+    )
+    if not torch_wheels:
+        raise RuntimeError("wheelhouse 缺少 torch wheel，无法构建训练运行时。")
+
+    torch_wheel_name = torch_wheels[0].name.lower()
+    if f"+{expected_cuda_tag}" not in torch_wheel_name:
+        raise RuntimeError(
+            "wheelhouse 中的 torch 不是目标 CUDA 构建："
+            f"{torch_wheels[0].name}。请确认 --torch-index-url 指向 "
+            f"https://download.pytorch.org/whl/{expected_cuda_tag}，"
+            "且 lockfile 中的 torch 版本在该 CUDA index 中存在。"
+        )
 
 
 def venv_python(venv_dir: Path) -> Path:
@@ -382,7 +416,7 @@ def write_manifest(
             "os": "windows",
             "arch": "x86_64",
             "pythonVersion": str(python_meta.get("version") or ""),
-            "cuda": "12.1",
+            "cuda": DEFAULT_CUDA_VERSION,
         },
         "python": {
             "version": str(python_meta.get("version") or ""),

@@ -6,13 +6,13 @@ It is intentionally separated from the backend sidecar bundle.
 ## Locked target matrix
 
 - OS: Windows (`win_amd64`)
-- CUDA wheel source: `cu121` index
+- CUDA wheel source: `cu130` index
 - Python ABI for wheels: `cp311`
 - Runtime roots: `torch`, `unsloth`, `datasets`, `transformers`, `trl`
 
 ## Source files
 
-- `requirements.windows-py311-cu121.lock`
+- `requirements.windows-py311-cu130.lock`
   - Full transitive lockfile for the runtime roots.
 - `runtime-manifest.template.json`
   - Contract template for runtime install/readiness.
@@ -51,6 +51,7 @@ llm-runtime/
     unsloth_worker.py
     bootstrap_runtime.py
     verify_import_chain.py
+    verify_runtime_health.py
     prepare_hf_snapshot.py
   requirements-lock.txt
   manifest.json

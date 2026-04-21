@@ -118,8 +118,8 @@ function makeReadiness(
     hardware: {
       gpuModel: "NVIDIA RTX 3070",
       vramGB: 12,
-      driverVersion: "551.86",
-      cudaVersion: "12.1",
+      driverVersion: "580.95",
+      cudaVersion: "13.2",
       driverCompatibility: "ok",
       cudaCompatibility: "ok",
       diskFreeGB: 100,
@@ -322,8 +322,8 @@ test("disables fine mode on 8GB and shows reason", async () => {
       hardware: {
         gpuModel: "NVIDIA RTX 3070",
         vramGB: 8,
-        driverVersion: "551.86",
-        cudaVersion: "12.1",
+        driverVersion: "580.95",
+        cudaVersion: "13.2",
         driverCompatibility: "ok",
         cudaCompatibility: "ok",
         diskFreeGB: 100,

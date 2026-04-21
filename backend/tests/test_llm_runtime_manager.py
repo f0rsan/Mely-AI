@@ -14,14 +14,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.services.llm_runtime_manager import LLMRuntimeManager
+from app.services.llm_runtime_manager import DEFAULT_LLM_RUNTIME_ID, LLMRuntimeManager
 
 
 def _seed_runtime_manifest(data_root: Path, *, worker_script: Path) -> None:
-    runtime_root = data_root / "runtimes" / "llm" / "llm-win-cu121-py311-v1"
+    runtime_root = data_root / "runtimes" / "llm" / DEFAULT_LLM_RUNTIME_ID
     runtime_root.mkdir(parents=True, exist_ok=True)
     payload = {
-        "runtimeId": "llm-win-cu121-py311-v1",
+        "runtimeId": DEFAULT_LLM_RUNTIME_ID,
         "python": {"exePath": sys.executable},
         "worker": {"entryScript": str(worker_script)},
         "readiness": {"state": "READY"},
@@ -91,7 +91,7 @@ def _seed_runtime_resources(resource_root: Path) -> None:
             "target_root = Path(args.target_root)\n"
             "target_root.mkdir(parents=True, exist_ok=True)\n"
             "payload = {\n"
-            "  'runtimeId': 'llm-win-cu121-py311-v1',\n"
+            f"  'runtimeId': '{DEFAULT_LLM_RUNTIME_ID}',\n"
             "  'python': {'exePath': sys.executable},\n"
             "  'worker': {'entryScript': str(seed_root / 'tools' / 'unsloth_worker.py')},\n"
             "  'readiness': {'state': 'READY'}\n"
@@ -117,8 +117,8 @@ def runtime_manager(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MELY_LLM_RUNTIME_RESOURCE_ROOT", str(resource_root))
     monkeypatch.setenv("MELY_GPU_NAME", "NVIDIA RTX 3070")
     monkeypatch.setenv("MELY_GPU_VRAM_GB", "12")
-    monkeypatch.setenv("MELY_GPU_DRIVER_VERSION", "551.86")
-    monkeypatch.setenv("MELY_CUDA_VERSION", "12.1")
+    monkeypatch.setenv("MELY_GPU_DRIVER_VERSION", "580.95")
+    monkeypatch.setenv("MELY_CUDA_VERSION", "13.2")
 
     manager = LLMRuntimeManager(data_root=data_root)
     return manager, data_root
@@ -384,7 +384,7 @@ async def test_readiness_runtime_broken_then_repair(runtime_manager, monkeypatch
     )
     _seed_training_snapshot(data_root)
     broken_flag = (
-        data_root / "runtimes" / "llm" / "llm-win-cu121-py311-v1" / "install" / "runtime-broken.json"
+        data_root / "runtimes" / "llm" / DEFAULT_LLM_RUNTIME_ID / "install" / "runtime-broken.json"
     )
     broken_flag.parent.mkdir(parents=True, exist_ok=True)
     broken_flag.write_text(json.dumps({"reason": "训练运行时依赖缺失。"}), encoding="utf-8")
@@ -633,8 +633,8 @@ def test_llm_runtime_api_returns_readiness(monkeypatch, temp_data_root, tmp_path
     monkeypatch.setenv("MELY_LLM_RUNTIME_RESOURCE_ROOT", str(resource_root))
     monkeypatch.setenv("MELY_GPU_NAME", "NVIDIA RTX 3070")
     monkeypatch.setenv("MELY_GPU_VRAM_GB", "12")
-    monkeypatch.setenv("MELY_GPU_DRIVER_VERSION", "551.86")
-    monkeypatch.setenv("MELY_CUDA_VERSION", "12.1")
+    monkeypatch.setenv("MELY_GPU_DRIVER_VERSION", "580.95")
+    monkeypatch.setenv("MELY_CUDA_VERSION", "13.2")
     monkeypatch.setattr("app.services.llm_runtime_manager.detect_missing_runtime_dependencies", lambda: [])
 
     async def fake_check_ollama_runtime():

@@ -46,13 +46,13 @@ src-tauri/resources/llm-runtime/
 ```bash
 python tools/bootstrap_runtime.py \
   --seed-root "src-tauri/resources/llm-runtime" \
-  --target-root "%USERPROFILE%/.mely/runtimes/llm/llm-win-cu121-py311-v1"
+  --target-root "%USERPROFILE%/.mely/runtimes/llm/llm-win-cu130-py311-v1"
 ```
 
 安装完成后生成：
 
 ```text
-%USERPROFILE%/.mely/runtimes/llm/llm-win-cu121-py311-v1/manifest.runtime.json
+%USERPROFILE%/.mely/runtimes/llm/llm-win-cu130-py311-v1/manifest.runtime.json
 ```
 
 其中必须包含：

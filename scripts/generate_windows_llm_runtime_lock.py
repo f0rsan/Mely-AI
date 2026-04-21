@@ -25,6 +25,8 @@ except Exception as exc:  # pragma: no cover - packaging is expected in dev env
 
 
 DEFAULT_ROOT_PACKAGES = ("torch", "unsloth", "datasets", "transformers", "trl")
+DEFAULT_CUDA_VERSION = "13.0"
+DEFAULT_CUDA_TAG = "cu130"
 
 
 @dataclass(frozen=True)
@@ -110,7 +112,7 @@ def generate_lockfile(
     )
 
     lines = [
-        "# Windows LLM GPU runtime lock (Python 3.11, win_amd64, CUDA 12.1 runtime packaging)",
+        f"# Windows LLM GPU runtime lock (Python 3.11, win_amd64, CUDA {DEFAULT_CUDA_VERSION} runtime packaging)",
         "# Generated from backend/uv.lock filtered to the transitive closure of:",
         "# " + ", ".join(roots),
         "",
@@ -139,7 +141,7 @@ def build_parser() -> argparse.ArgumentParser:
             / "backend"
             / "runtime"
             / "windows-llm-gpu"
-            / "requirements.windows-py311-cu121.lock"
+            / f"requirements.windows-py311-{DEFAULT_CUDA_TAG}.lock"
         ),
         help="Output lockfile path",
     )

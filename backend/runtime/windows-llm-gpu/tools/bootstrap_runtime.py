@@ -54,7 +54,7 @@ def resolve_target_root(seed_root: Path, provided_target: str | None) -> Path:
         return Path(provided_target).expanduser().resolve()
 
     manifest = read_manifest(seed_root)
-    runtime_id = str(manifest.get("runtimeId") or "llm-win-cu121-py311-v1")
+    runtime_id = str(manifest.get("runtimeId") or "llm-win-cu130-py311-v1")
     default_root = Path.home() / ".mely" / "runtimes" / "llm" / runtime_id
     return default_root.resolve()
 

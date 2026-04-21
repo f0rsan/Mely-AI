@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
-  "runtimeId": "llm-win-cu121-py311-v1",
+  "runtimeId": "llm-win-cu130-py311-v1",
   "platform": {
     "os": "windows",
     "arch": "x86_64",
-    "cuda": "12.1"
+    "cuda": "13.0"
   },
   "python": {
     "version": "3.11.x",
     "runtimeDir": "python-runtime",
     "runtimeExecutable": "python-runtime/python.exe",
-    "exePath": "%USERPROFILE%/.mely/runtimes/llm/llm-win-cu121-py311-v1/venv/Scripts/python.exe"
+    "exePath": "%USERPROFILE%/.mely/runtimes/llm/llm-win-cu130-py311-v1/venv/Scripts/python.exe"
   },
   "dependencySet": {
     "lockFile": "requirements-lock.txt",

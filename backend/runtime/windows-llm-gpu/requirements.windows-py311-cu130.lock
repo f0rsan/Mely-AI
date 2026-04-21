@@ -1,4 +1,4 @@
-# Windows LLM GPU runtime lock (Python 3.11, win_amd64, CUDA 12.1 runtime packaging)
+# Windows LLM GPU runtime lock (Python 3.11, win_amd64, CUDA 13.0 runtime packaging)
 # Generated from backend/uv.lock filtered to the transitive closure of:
 # torch, unsloth, datasets, transformers, trl
 

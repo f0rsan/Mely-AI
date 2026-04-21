@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.services.llm_runtime_manager import DEFAULT_LLM_RUNTIME_ID
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -19,10 +20,10 @@ WORKER_SCRIPT = REPO_ROOT / "backend" / "app" / "services" / "unsloth_worker.py"
 
 
 def _seed_runtime_manifest(data_root: Path) -> None:
-    runtime_root = data_root / "runtimes" / "llm" / "llm-win-cu121-py311-v1"
+    runtime_root = data_root / "runtimes" / "llm" / DEFAULT_LLM_RUNTIME_ID
     runtime_root.mkdir(parents=True, exist_ok=True)
     payload = {
-        "runtimeId": "llm-win-cu121-py311-v1",
+        "runtimeId": DEFAULT_LLM_RUNTIME_ID,
         "python": {"exePath": sys.executable},
         "worker": {"entryScript": str(WORKER_SCRIPT)},
         "readiness": {"state": "READY"},
@@ -76,8 +77,8 @@ def client(temp_data_root, ollama_runtime_stub, monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("MELY_LLM_ALLOW_NON_WINDOWS_TRAINING", "1")
     monkeypatch.setenv("MELY_GPU_NAME", "NVIDIA RTX 3070")
     monkeypatch.setenv("MELY_GPU_VRAM_GB", "16")
-    monkeypatch.setenv("MELY_GPU_DRIVER_VERSION", "551.86")
-    monkeypatch.setenv("MELY_CUDA_VERSION", "12.1")
+    monkeypatch.setenv("MELY_GPU_DRIVER_VERSION", "580.95")
+    monkeypatch.setenv("MELY_CUDA_VERSION", "13.2")
     app = create_app()
     with TestClient(app) as c:
         yield c
@@ -280,7 +281,7 @@ class TestStartTraining:
             temp_data_root
             / "runtimes"
             / "llm"
-            / "llm-win-cu121-py311-v1"
+            / DEFAULT_LLM_RUNTIME_ID
             / "install"
             / "runtime-broken.json"
         )
@@ -323,8 +324,8 @@ def test_start_training_blocks_when_runtime_missing(
     monkeypatch.setenv("MELY_LLM_RUNTIME_RESOURCE_ROOT", str(resource_root))
     monkeypatch.setenv("MELY_GPU_NAME", "NVIDIA RTX 3070")
     monkeypatch.setenv("MELY_GPU_VRAM_GB", "12")
-    monkeypatch.setenv("MELY_GPU_DRIVER_VERSION", "551.86")
-    monkeypatch.setenv("MELY_CUDA_VERSION", "12.1")
+    monkeypatch.setenv("MELY_GPU_DRIVER_VERSION", "580.95")
+    monkeypatch.setenv("MELY_CUDA_VERSION", "13.2")
 
     app = create_app()
     with TestClient(app) as client:
