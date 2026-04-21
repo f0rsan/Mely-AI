@@ -16,6 +16,9 @@
 # Optional:
 #   - set MELY_LLM_RUNTIME_PYTHON to pin the independent runtime interpreter
 #     used by scripts/build_windows_llm_runtime.py (recommended).
+#   - set MELY_WINDOWS_BUNDLE_TARGETS to override the installer bundle target.
+#     Defaults to "msi" because the full offline training runtime is too large
+#     for reliable NSIS packaging. Use "nsis" only for smaller builds.
 #
 # Usage:
 #   bash scripts/build_windows.sh
@@ -33,6 +36,7 @@ RELEASE_SUMMARY_PATH="$REPO_ROOT/build/windows-training-release-artifacts.txt"
 BUILD_TAURI_CONFIG_PATH="$REPO_ROOT/build/windows-tauri.build.json"
 CARGO_MANIFEST_PATH="$REPO_ROOT/src-tauri/Cargo.toml"
 CARGO_MANIFEST_BACKUP_PATH="$REPO_ROOT/build/windows-cargo.toml.backup"
+WINDOWS_BUNDLE_TARGETS="${MELY_WINDOWS_BUNDLE_TARGETS:-msi}"
 HOST_UNAME="$(uname -s)"
 
 is_wsl() {
@@ -90,6 +94,20 @@ validate_semver_version() {
     echo "ERROR: Invalid build version '$version'. Expected MAJOR.MINOR.PATCH." >&2
     exit 1
   fi
+}
+
+validate_windows_bundle_targets() {
+  local targets="$1"
+  case "$targets" in
+    msi|nsis|msi,nsis|nsis,msi)
+      return 0
+      ;;
+    *)
+      echo "ERROR: Unsupported MELY_WINDOWS_BUNDLE_TARGETS='$targets'." >&2
+      echo "Use one of: msi, nsis, msi,nsis, nsis,msi." >&2
+      exit 1
+      ;;
+  esac
 }
 
 write_tauri_build_config() {
@@ -344,10 +362,15 @@ rm -rf "$REPO_ROOT/src-tauri/target/release/bundle/nsis" \
 # tauri build will:
 #   1. Run `python scripts/prepare_tauri_backend.py --require-source-fresh --verify-api-compatibility && npm run build`
 #   2. Compile the Rust shell
-#   3. Bundle everything into an NSIS installer at:
-#      src-tauri/target/release/bundle/nsis/Mely AI_0.1.0_x64-setup.exe
+#   3. Bundle everything into the selected Windows installer target.
+#
+# The full training build includes a multi-GB offline wheelhouse. NSIS can fail
+# with an internal mmapping/datablock compiler error on that payload, so MSI is
+# the default release target. NSIS remains opt-in for smaller/non-training builds
+# via MELY_WINDOWS_BUNDLE_TARGETS=nsis.
 BUILD_VERSION="$(resolve_windows_build_version)"
 validate_semver_version "$BUILD_VERSION"
+validate_windows_bundle_targets "$WINDOWS_BUNDLE_TARGETS"
 write_tauri_build_config "$REPO_ROOT/src-tauri/tauri.conf.json" "$BUILD_TAURI_CONFIG_PATH" "$BUILD_VERSION"
 mkdir -p "$(dirname "$CARGO_MANIFEST_BACKUP_PATH")"
 cp "$CARGO_MANIFEST_PATH" "$CARGO_MANIFEST_BACKUP_PATH"
@@ -360,7 +383,8 @@ mkdir -p "$(dirname "$STAGED_RELEASE_SUMMARY_PATH")"
   echo "note=Bundled pre-build summary. Full release summary is generated under build/ after packaging."
 } > "$STAGED_RELEASE_SUMMARY_PATH"
 echo "Using Windows installer version: $BUILD_VERSION"
-npx tauri build --bundles nsis,msi --config "$BUILD_TAURI_CONFIG_PATH"
+echo "Using Windows bundle target(s): $WINDOWS_BUNDLE_TARGETS"
+npx tauri build --bundles "$WINDOWS_BUNDLE_TARGETS" --config "$BUILD_TAURI_CONFIG_PATH"
 restore_cargo_manifest_if_needed
 trap - EXIT
 
@@ -377,6 +401,12 @@ echo ""
 echo "=== [6/6] Collect artifact summary ==="
 INSTALLER=$(find "$REPO_ROOT/src-tauri/target/release/bundle/nsis" -name "*.exe" 2>/dev/null | head -1)
 MSI=$(find "$REPO_ROOT/src-tauri/target/release/bundle/msi" -name "*.msi" 2>/dev/null | head -1)
+
+if [ -z "${INSTALLER:-}" ] && [ -z "${MSI:-}" ]; then
+  echo "ERROR: No Windows installer artifact was produced." >&2
+  echo "Checked bundle targets: $WINDOWS_BUNDLE_TARGETS" >&2
+  exit 1
+fi
 
 if [ -n "$INSTALLER" ]; then
   SIZE=$(du -h "$INSTALLER" | cut -f1)

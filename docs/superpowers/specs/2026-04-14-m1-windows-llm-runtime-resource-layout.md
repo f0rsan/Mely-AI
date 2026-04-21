@@ -2,7 +2,7 @@
 
 ## 1. 目标
 
-在 Windows 构建机上产出可直接打进 Tauri/NSIS 的独立训练 runtime 资源目录，满足：
+在 Windows 构建机上产出可直接打进 Tauri/MSI 的独立训练 runtime 资源目录，满足：
 
 1. 不把 `torch/unsloth` 打进主 sidecar。
 2. 训练依赖离线化（wheelhouse）。

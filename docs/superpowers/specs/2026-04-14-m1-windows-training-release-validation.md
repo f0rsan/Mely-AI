@@ -21,13 +21,17 @@
    - sidecar 重依赖隔离检查
    - backend 资源 staging
    - 训练 runtime 资源构建与 staging
-   - Tauri NSIS/MSI 打包
+   - Tauri MSI 打包（默认）
    - 产物清单汇总
 2. 新增 sidecar 依赖隔离守卫：
    - 若在 sidecar 中发现 `torch/unsloth/datasets/transformers/trl/...` 等训练依赖路径，直接失败退出。
 3. 新增训练版产物清单输出：
    - `build/windows-training-release-artifacts.txt`
-   - 记录主应用、runtime、NSIS/MSI 路径与体积。
+   - 记录主应用、runtime、MSI 路径与体积；NSIS 为小体积构建的显式可选项。
+4. 训练版安装包默认只生成 MSI：
+   - 完整训练 runtime 含约 2GB 离线 wheelhouse。
+   - NSIS 在该体积下可能触发内部 datablock/mmapping 错误，导致构建中断。
+   - 如需小体积 NSIS 构建，可设置 `MELY_WINDOWS_BUNDLE_TARGETS=nsis`。
 
 ### 2.2 Runtime 资源校验脚本（新增 `scripts/verify_tauri_runtime_resources.py`）
 
@@ -66,7 +70,7 @@ Tauri 资源采用 `resources -> resources` 整体映射，因此 Windows 构建
 
 - 主应用（backend sidecar）
 - 训练 runtime 资源（`build/windows-llm-runtime/llm-runtime` + `src-tauri/resources/llm-runtime`）
-- 最终安装包（NSIS/MSI）
+- 最终安装包（MSI 默认；NSIS 仅小体积构建显式启用）
 
 ### B. torch 不进入主 backend sidecar
 
@@ -142,10 +146,10 @@ Tauri 资源采用 `resources -> resources` 整体映射，因此 Windows 构建
    - `build/windows-llm-runtime/llm-runtime/`
 3. 训练 runtime 资源（staged）
    - `src-tauri/resources/llm-runtime/`
-4. NSIS 安装包
-   - `src-tauri/target/release/bundle/nsis/Mely AI_0.1.0_x64-setup.exe`
-5. MSI 安装包
+4. MSI 安装包
    - `src-tauri/target/release/bundle/msi/`
+5. NSIS 安装包（仅设置 `MELY_WINDOWS_BUNDLE_TARGETS=nsis` 或 `nsis,msi` 时）
+   - `src-tauri/target/release/bundle/nsis/Mely AI_0.1.0_x64-setup.exe`
 6. 产物清单（含体积）
    - `build/windows-training-release-artifacts.txt`
 
