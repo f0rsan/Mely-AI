@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import random
 import sys
 import tempfile
@@ -113,6 +114,8 @@ class WorkerConfig:
     gguf_output_dir: Path
     cancel_sentinel_path: Path
     log_path: Path
+    hf_cache_dir: Path | None
+    force_offline: bool
     max_steps: int
     checkpoint_every_steps: int
     max_seq_len: int
@@ -180,6 +183,11 @@ class WorkerConfig:
         log_path = _normalize_path(
             str(_pick(payload, "logPath", "log_path", default=output_dir / "worker.stderr.log"))
         )
+        raw_hf_cache_dir = str(
+            _pick(payload, "hfCacheDir", "hf_cache_dir", default="")
+        ).strip()
+        hf_cache_dir = _normalize_path(raw_hf_cache_dir) if raw_hf_cache_dir else None
+        force_offline = bool(_pick(payload, "forceOffline", "force_offline", default=True))
 
         dry_run = bool(_pick(payload, "dryRun", "dry_run", default=False)) or force_dry_run
 
@@ -195,6 +203,8 @@ class WorkerConfig:
             gguf_output_dir=gguf_output_dir,
             cancel_sentinel_path=cancel_sentinel_path,
             log_path=log_path,
+            hf_cache_dir=hf_cache_dir,
+            force_offline=force_offline,
             max_steps=_to_int(_pick(payload, "maxSteps", "max_steps", default=400), field="maxSteps"),
             checkpoint_every_steps=_to_int(
                 _pick(payload, "checkpointEverySteps", "checkpoint_every_steps", default=100),
@@ -250,6 +260,21 @@ class WorkerConfig:
         self.gguf_output_dir.mkdir(parents=True, exist_ok=True)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.cancel_sentinel_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.hf_cache_dir is not None:
+            self.hf_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def apply_hf_environment(self) -> None:
+        if self.hf_cache_dir is None:
+            return
+        cache_root = str(self.hf_cache_dir)
+        os.environ["MELY_HF_CACHE_ROOT"] = cache_root
+        os.environ["HF_HUB_CACHE"] = cache_root
+        os.environ["HUGGINGFACE_HUB_CACHE"] = cache_root
+        os.environ["TRANSFORMERS_CACHE"] = cache_root
+        os.environ["HF_DATASETS_CACHE"] = str(self.hf_cache_dir / "datasets")
+        if self.force_offline:
+            os.environ["HF_HUB_OFFLINE"] = "1"
+            os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 
 class ProtocolEmitter:
@@ -257,7 +282,13 @@ class ProtocolEmitter:
 
     def __init__(self, *, job_id: str) -> None:
         self._job_id = job_id
-        self._out = sys.__stdout__
+        stream = sys.__stdout__ if sys.__stdout__ is not None else sys.stdout
+        if stream is None:
+            try:
+                stream = os.fdopen(1, "w", encoding="utf-8", errors="replace", buffering=1, closefd=False)
+            except OSError as exc:
+                raise WorkerConfigError("训练进程缺少可用输出通道") from exc
+        self._out = stream
 
     def emit(self, event: str, **payload: Any) -> None:
         if event not in SUPPORTED_EVENTS:
@@ -537,22 +568,43 @@ def _run_unsloth_training(config: WorkerConfig, emitter: ProtocolEmitter) -> Non
         message="正在加载基础模型",
         stage_name="加载基础模型",
     )
+    model_load_kwargs: dict[str, Any] = {
+        "model_name": config.unsloth_model_name,
+        "max_seq_length": config.max_seq_len,
+        "dtype": None,
+        "load_in_4bit": True,
+    }
+    if config.hf_cache_dir is not None:
+        model_load_kwargs["cache_dir"] = str(config.hf_cache_dir)
     try:
-        model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=config.unsloth_model_name,
-            max_seq_length=config.max_seq_len,
-            dtype=None,
-            load_in_4bit=True,
-        )
-    except RuntimeError as exc:
+        model, tokenizer = FastLanguageModel.from_pretrained(**model_load_kwargs)
+    except Exception as exc:
         error_text = str(exc).lower()
-        if "out of memory" in error_text or "cuda" in error_text and "memory" in error_text:
+        if "out of memory" in error_text or ("cuda" in error_text and "memory" in error_text):
             raise WorkerRuntimeError(
                 code="out_of_memory",
                 message="显存不足，请尝试轻量模式或关闭其他程序",
                 retryable=True,
             ) from exc
-        raise
+        if (
+            "offline mode" in error_text
+            or "localentrynotfounderror" in error_text
+            or "couldn't find" in error_text
+            or "does not appear to have" in error_text
+            or "revision" in error_text
+            or "snapshot" in error_text
+            or "404 client error" in error_text
+        ):
+            raise WorkerRuntimeError(
+                code="base_model_unavailable",
+                message="训练基础模型未就绪，请先执行“修复训练环境”后重试",
+                retryable=False,
+            ) from exc
+        raise WorkerRuntimeError(
+            code="base_model_load_failed",
+            message="训练基础模型加载失败，请先执行“修复训练环境”后重试",
+            retryable=False,
+        ) from exc
 
     model = FastLanguageModel.get_peft_model(
         model,
@@ -744,6 +796,7 @@ def _run_unsloth_training(config: WorkerConfig, emitter: ProtocolEmitter) -> Non
 
 def _run(config: WorkerConfig, emitter: ProtocolEmitter) -> None:
     config.prepare_dirs()
+    config.apply_hf_environment()
     if config.cancel_sentinel_path.exists():
         try:
             config.cancel_sentinel_path.unlink()

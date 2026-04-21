@@ -81,6 +81,8 @@ STATUS_PROGRESS_HINT: dict[str, float] = {
 WORKER_ERROR_TRANSLATIONS = {
     "out_of_memory": "显存不足，请尝试轻量模式或关闭其他程序",
     "missing_dependency": "训练运行时依赖异常，请先执行“修复训练环境”后重试",
+    "base_model_unavailable": "训练基础模型未就绪，请先执行“修复训练环境”后重试",
+    "base_model_load_failed": "训练基础模型加载失败，请先执行“修复训练环境”后重试",
     "gguf_export_failed": "模型导出失败，请稍后重试",
     "gguf_export_oom": "模型导出失败：内存不足，请关闭其他程序后重试",
     "worker_crash": "训练进程异常退出，请稍后重试",
@@ -596,9 +598,11 @@ class LLMTrainingService:
         base_model_config = get_training_base_model(record.base_model)
         if base_model_config is None:
             raise LLMTrainingError(build_unsupported_model_error(record.base_model))
+        runtime_manager = self._llm_runtime_manager
+        hf_cache_root = str(runtime_manager.get_hf_cache_root()) if runtime_manager is not None else None
 
         mode = record.mode
-        return {
+        payload = {
             "jobId": record.id,
             "mode": mode,
             "baseModel": record.base_model,
@@ -624,6 +628,9 @@ class LLMTrainingService:
             "dryRun": _env_truthy("MELY_LLM_WORKER_DRY_RUN"),
             "dryRunStepDelaySeconds": 0.01,
         }
+        if hf_cache_root:
+            payload["hfCacheDir"] = hf_cache_root
+        return payload
 
     async def _launch_worker_process(
         self,
@@ -633,6 +640,8 @@ class LLMTrainingService:
         if runtime_manager is None:
             raise RuntimeError("训练运行时管理器未初始化，请先执行“修复训练环境”后重试。")
         worker_python, worker_entry = runtime_manager.resolve_worker_launch()
+        env = os.environ.copy()
+        env.update(runtime_manager.build_worker_environment())
 
         return await asyncio.create_subprocess_exec(
             str(worker_python),
@@ -640,6 +649,7 @@ class LLMTrainingService:
             str(config_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
 
     async def _terminate_worker_process(self, process: asyncio.subprocess.Process) -> None:

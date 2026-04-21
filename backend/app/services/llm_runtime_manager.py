@@ -301,8 +301,39 @@ class LLMRuntimeManager:
     def _hf_cache_root(self) -> Path:
         return Path(os.getenv("MELY_HF_CACHE_ROOT", str(self._data_root / "cache" / "hf"))).expanduser()
 
+    def get_hf_cache_root(self) -> Path:
+        """Expose the resolved HF cache root for worker launch payload/env."""
+        return self._hf_cache_root().resolve()
+
     def _hf_snapshot_path(self, huggingface_model_id: str) -> Path:
         return self._hf_cache_root() / self._snapshot_name_for_model(huggingface_model_id)
+
+    def _snapshot_has_required_files(self, snapshot_root: Path) -> bool:
+        """Validate snapshot structure to avoid false-ready on partial cache folders."""
+        snapshots_dir = snapshot_root / "snapshots"
+        if not snapshots_dir.exists() or not snapshots_dir.is_dir():
+            return False
+
+        for snapshot_dir in snapshots_dir.iterdir():
+            if not snapshot_dir.is_dir():
+                continue
+
+            config_path = snapshot_dir / "config.json"
+            if not config_path.exists():
+                continue
+
+            if (snapshot_dir / "model.safetensors.index.json").exists():
+                return True
+            if (snapshot_dir / "pytorch_model.bin.index.json").exists():
+                return True
+            if (snapshot_dir / "pytorch_model.bin").exists():
+                return True
+            if any(snapshot_dir.glob("*.safetensors")):
+                return True
+            if any(snapshot_dir.glob("*.bin")):
+                return True
+
+        return False
 
     def _snapshot_ready(self, huggingface_model_id: str) -> bool:
         if _env_flag("MELY_LLM_FORCE_MISSING_TRAINING_SNAPSHOT"):
@@ -310,7 +341,7 @@ class LLMRuntimeManager:
         snapshot_path = self._hf_snapshot_path(huggingface_model_id)
         if not snapshot_path.exists() or not snapshot_path.is_dir():
             return False
-        return any(snapshot_path.rglob("*"))
+        return self._snapshot_has_required_files(snapshot_path)
 
     def _runtime_exists(self) -> bool:
         return self._runtime_manifest_path.exists()
@@ -395,6 +426,22 @@ class LLMRuntimeManager:
         if not worker_path.exists():
             raise RuntimeError(f"训练 worker 入口不存在：{worker_path}")
         return python_path, worker_path
+
+    def build_worker_environment(self) -> dict[str, str]:
+        """Build deterministic HF cache/offline env for training workers."""
+        cache_root = self.get_hf_cache_root()
+        datasets_cache = cache_root / "datasets"
+        return {
+            "MELY_HF_CACHE_ROOT": str(cache_root),
+            "HF_HUB_CACHE": str(cache_root),
+            "HUGGINGFACE_HUB_CACHE": str(cache_root),
+            "TRANSFORMERS_CACHE": str(cache_root),
+            "HF_DATASETS_CACHE": str(datasets_cache),
+            # Snapshot must be prepared by readiness/repair flow before training.
+            "HF_HUB_OFFLINE": "1",
+            "TRANSFORMERS_OFFLINE": "1",
+            "HF_HUB_DISABLE_TELEMETRY": "1",
+        }
 
     def _runtime_in_installation(self) -> bool:
         task = self._install_task

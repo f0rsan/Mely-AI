@@ -38,6 +38,7 @@ def _seed_training_snapshot(data_root: Path) -> None:
     )
     snapshot_root.mkdir(parents=True, exist_ok=True)
     (snapshot_root / "config.json").write_text("{}", encoding="utf-8")
+    (snapshot_root / "model-00001-of-00001.safetensors").write_text("stub", encoding="utf-8")
 
 
 def _seed_runtime_resources(resource_root: Path) -> None:
@@ -59,6 +60,7 @@ def _seed_runtime_resources(resource_root: Path) -> None:
             "target = Path(args.cache_dir) / ('models--' + args.repo_id.replace('/', '--')) / 'snapshots' / 'local'\n"
             "target.mkdir(parents=True, exist_ok=True)\n"
             "(target / 'config.json').write_text('{}', encoding='utf-8')\n"
+            "(target / 'model-00001-of-00001.safetensors').write_text('stub', encoding='utf-8')\n"
         ),
         encoding="utf-8",
     )
@@ -106,6 +108,21 @@ def runtime_manager(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     manager = LLMRuntimeManager(data_root=data_root)
     return manager, data_root
+
+
+def test_build_worker_environment_points_to_runtime_cache(runtime_manager):
+    manager, data_root = runtime_manager
+    env = manager.build_worker_environment()
+    expected_cache_root = str((data_root / "cache" / "hf").resolve())
+    expected_datasets_cache = str((data_root / "cache" / "hf" / "datasets").resolve())
+
+    assert env["MELY_HF_CACHE_ROOT"] == expected_cache_root
+    assert env["HF_HUB_CACHE"] == expected_cache_root
+    assert env["HUGGINGFACE_HUB_CACHE"] == expected_cache_root
+    assert env["TRANSFORMERS_CACHE"] == expected_cache_root
+    assert env["HF_DATASETS_CACHE"] == expected_datasets_cache
+    assert env["HF_HUB_OFFLINE"] == "1"
+    assert env["TRANSFORMERS_OFFLINE"] == "1"
 
 
 @pytest.mark.asyncio
@@ -247,6 +264,36 @@ async def test_readiness_missing_training_base_snapshot(runtime_manager, monkeyp
     assert readiness.state == "missing_training_base_snapshot"
     assert readiness.blocking_reason is not None
     assert "训练基础快照" in readiness.blocking_reason
+
+
+@pytest.mark.asyncio
+async def test_readiness_rejects_incomplete_training_snapshot(runtime_manager, monkeypatch):
+    manager, data_root = runtime_manager
+    _seed_runtime_manifest(
+        data_root,
+        worker_script=Path(os.environ["MELY_LLM_RUNTIME_RESOURCE_ROOT"]) / "tools" / "unsloth_worker.py",
+    )
+    incomplete_snapshot = (
+        data_root / "cache" / "hf" / "models--Qwen--Qwen2.5-3B-Instruct" / "snapshots" / "partial"
+    )
+    incomplete_snapshot.mkdir(parents=True, exist_ok=True)
+    (incomplete_snapshot / "config.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr("app.services.llm_runtime_manager.detect_missing_runtime_dependencies", lambda: [])
+    monkeypatch.setattr(
+        "app.services.llm_runtime_manager.check_ollama_runtime",
+        lambda: asyncio.sleep(
+            0,
+            result=SimpleNamespace(
+                installed=True,
+                running=True,
+                models=[SimpleNamespace(name="qwen2.5:3b")],
+                hint=None,
+            ),
+        ),
+    )
+
+    readiness = await manager.get_readiness(base_model="qwen2.5:3b")
+    assert readiness.state == "missing_training_base_snapshot"
 
 
 @pytest.mark.asyncio

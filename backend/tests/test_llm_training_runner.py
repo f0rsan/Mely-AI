@@ -383,6 +383,21 @@ async def test_launch_worker_process_uses_runtime_manager_launch_paths(tmp_path:
         def resolve_worker_launch(self) -> tuple[Path, Path]:
             return self.python_path, self.worker_entry
 
+        def get_hf_cache_root(self) -> Path:
+            return self.worker_entry.parent / "hf-cache"
+
+        def build_worker_environment(self) -> dict[str, str]:
+            cache_root = str(self.get_hf_cache_root())
+            return {
+                "MELY_HF_CACHE_ROOT": cache_root,
+                "HF_HUB_CACHE": cache_root,
+                "HUGGINGFACE_HUB_CACHE": cache_root,
+                "TRANSFORMERS_CACHE": cache_root,
+                "HF_DATASETS_CACHE": str(self.get_hf_cache_root() / "datasets"),
+                "HF_HUB_OFFLINE": "1",
+                "TRANSFORMERS_OFFLINE": "1",
+            }
+
     db_path = tmp_path / "db.sqlite3"
     data_root = tmp_path / ".mely"
     manager = _RuntimeManagerStub(
@@ -408,9 +423,12 @@ async def test_launch_worker_process_uses_runtime_manager_launch_paths(tmp_path:
 
     assert process is fake_process
     args = mocked_exec.await_args.args
+    kwargs = mocked_exec.await_args.kwargs
     assert args[0] == str(manager.python_path)
     assert args[1] == str(manager.worker_entry)
     assert args[2] == str(config_path)
+    assert kwargs["env"]["HF_HUB_CACHE"] == str(manager.get_hf_cache_root())
+    assert kwargs["env"]["TRANSFORMERS_OFFLINE"] == "1"
 
 
 def test_service_runner_success_updates_db_and_worker_payload(
@@ -496,6 +514,7 @@ def test_service_runner_success_updates_db_and_worker_payload(
     assert payload["baseModel"] == "qwen2.5:3b"
     assert payload["unslothModelName"] == "Qwen/Qwen2.5-3B-Instruct"
     assert payload["datasetPaths"] and payload["datasetPaths"][0].endswith(".jsonl")
+    assert Path(payload["hfCacheDir"]).name == "hf"
     assert "llm_training_runs" in payload["outputDir"]
 
 
