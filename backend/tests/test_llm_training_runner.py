@@ -780,6 +780,101 @@ def test_service_runner_crash_without_protocol_still_surfaces_log_excerpt(
     assert "运行时依赖加载失败" in (final_job["logExcerpt"] or "")
 
 
+def test_service_runner_crash_triggers_runtime_repair_then_retry_success(
+    runner_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    launch_count = {"value": 0}
+    adapter_path = tmp_path / "repair-retry-adapter.safetensors"
+    adapter_path.write_text("adapter", encoding="utf-8")
+    gguf_path = tmp_path / "repair-retry-model.gguf"
+    gguf_path.write_bytes(b"GGUF")
+
+    async def fake_launch(_self, _config_path: Path):
+        launch_count["value"] += 1
+        if launch_count["value"] == 1:
+            return _FakeWorkerProcess(lines=[], return_code=1)
+        lines = [
+            json.dumps({"event": "status", "status": "training", "message": "正在训练"}),
+            json.dumps(
+                {
+                    "event": "complete",
+                    "status": "completed",
+                    "adapterPath": str(adapter_path),
+                    "ggufPath": str(gguf_path),
+                    "finalLoss": 0.6789,
+                }
+            ),
+        ]
+        return _FakeWorkerProcess(lines=lines, return_code=0)
+
+    repair_calls = {"value": 0}
+
+    async def fake_repair_runtime(_self):
+        repair_calls["value"] += 1
+        return LLMRuntimeReadiness(
+            state="ready",
+            ready=True,
+            message="训练环境已就绪。",
+            blocking_reason=None,
+            repairable=False,
+            actions=[],
+            install_progress=RuntimeInstallProgress(
+                active=False,
+                percent=100.0,
+                stage="completed",
+                message="训练运行时已就绪。",
+            ),
+            hardware=None,
+            checks={"runtimeEnforced": True},
+        )
+
+    monkeypatch.setattr(
+        "app.services.llm_training.LLMTrainingService._launch_worker_process",
+        fake_launch,
+    )
+    monkeypatch.setattr(
+        "app.services.llm_runtime_manager.LLMRuntimeManager.repair_runtime",
+        fake_repair_runtime,
+    )
+
+    character_id, dataset_id = _create_character_and_dataset(runner_client)
+    with patch(
+        "app.services.llm_model_service.ollama_create_model",
+        new_callable=AsyncMock,
+    ):
+        start_resp = runner_client.post(
+            f"/api/characters/{character_id}/llm-training/start",
+            json={"datasetIds": [dataset_id], "mode": "light"},
+        )
+        assert start_resp.status_code == 202
+        job_id = start_resp.json()["id"]
+        final_job = _wait_terminal(runner_client, job_id)
+
+    assert final_job["status"] == "completed"
+    assert launch_count["value"] == 2
+    assert repair_calls["value"] == 1
+
+
+def test_summarize_raw_worker_log_maps_missing_worker_entry(tmp_path: Path):
+    service = LLMTrainingService(
+        db_path=tmp_path / "db.sqlite3",
+        data_root=tmp_path / ".mely",
+        queue=TaskQueue(),
+    )
+    runtime_paths = service._runtime_paths(character_id="char-log", job_id="job-log")
+    runtime_paths.ensure_directories()
+    runtime_paths.log_path.write_text(
+        "python.exe: can't open file 'C:\\\\runtime\\\\tools\\\\unsloth_worker.py': [Errno 2] No such file or directory\n",
+        encoding="utf-8",
+    )
+
+    summary = service._summarize_raw_worker_log(runtime_paths)
+    assert summary is not None
+    assert "入口文件缺失" in summary
+
+
 def test_service_runner_cancel_terminates_subprocess(
     runner_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

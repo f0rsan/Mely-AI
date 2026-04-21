@@ -13,6 +13,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import time
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -118,6 +119,8 @@ MODE_GRADIENT_ACCUMULATION: dict[LLMTrainingMode, int] = {
 }
 DISPLAY_LOG_MAX_BYTES = 32 * 1024
 DISPLAY_LOG_MAX_LINES = 80
+AUTO_REPAIR_RETRY_WAIT_SECONDS = 300
+AUTO_REPAIR_RETRY_POLL_INTERVAL_SECONDS = 1.5
 
 _UNSET = object()
 
@@ -533,6 +536,12 @@ class LLMTrainingService:
             return None
 
         lowered = raw_excerpt.lower()
+        if "can't open file" in lowered and "unsloth_worker.py" in lowered:
+            return "训练运行时入口文件缺失，请先执行“修复训练环境”后重试。"
+        if "permission denied" in lowered or "access is denied" in lowered:
+            return "训练运行目录权限不足，请以管理员权限运行或调整目录权限后重试。"
+        if "fatal python error" in lowered:
+            return "训练运行时解释器异常退出，请先执行“修复训练环境”后重试。"
         if "dll load failed" in lowered or "winerror 126" in lowered or "winerror 127" in lowered:
             return WORKER_RUNTIME_LOAD_FAILURE_MESSAGE
         if "cannot find any torch accelerator" in lowered or "you need a gpu" in lowered:
@@ -754,6 +763,64 @@ class LLMTrainingService:
             if status is None:
                 return False
             return str(status["status"]) == "canceled"
+
+    async def _wait_runtime_ready_for_retry(
+        self,
+        *,
+        record: LLMTrainingJobRecord,
+    ) -> tuple[bool, str]:
+        runtime_manager = self._llm_runtime_manager
+        if runtime_manager is None:
+            return False, "训练运行时未初始化，请先执行“修复训练环境”后重试。"
+
+        deadline = time.monotonic() + AUTO_REPAIR_RETRY_WAIT_SECONDS
+        last_message = "训练运行时修复未完成，请稍后重试。"
+        while time.monotonic() < deadline:
+            readiness = await runtime_manager.get_readiness(
+                mode=record.mode,
+                base_model=record.base_model,
+                auto_fix=False,
+            )
+            if readiness.ready:
+                return True, ""
+            last_message = (
+                readiness.blocking_reason
+                or readiness.message
+                or "训练运行时修复未完成，请稍后重试。"
+            )
+            if readiness.state not in {"installing_runtime", "preparing_training_base_snapshot"}:
+                break
+            await asyncio.sleep(AUTO_REPAIR_RETRY_POLL_INTERVAL_SECONDS)
+        return False, last_message
+
+    async def _attempt_runtime_repair_and_retry(
+        self,
+        *,
+        record: LLMTrainingJobRecord,
+        runtime_paths: WorkerRuntimePaths,
+        progress_reporter,
+    ) -> tuple[WorkerRunState | None, str | None]:
+        runtime_manager = self._llm_runtime_manager
+        if runtime_manager is None:
+            return None, None
+
+        self._append_display_log(runtime_paths, "检测到训练进程启动异常，正在自动修复训练环境…")
+        await progress_reporter(2, "检测到训练环境异常，正在自动修复…")
+        await runtime_manager.repair_runtime()
+        ready, message = await self._wait_runtime_ready_for_retry(record=record)
+        if not ready:
+            return None, message
+
+        self._append_display_log(runtime_paths, "训练环境修复完成，正在重试训练进程…")
+        await progress_reporter(2, "训练环境修复完成，正在重试训练…")
+        process = await self._launch_worker_process(runtime_paths.config_path)
+        run_state = await self._consume_worker_stream(
+            job_id=record.id,
+            process=process,
+            runtime_paths=runtime_paths,
+            progress_reporter=progress_reporter,
+        )
+        return run_state, None
 
     def recover_interrupted_jobs(self) -> int:
         """Mark interrupted in-flight jobs as failed during app startup."""
@@ -1324,7 +1391,54 @@ class LLMTrainingService:
                 message = latest.error_message or "训练失败，请稍后重试"
                 raise RuntimeError(message)
 
-            crash_message = self._summarize_raw_worker_log(runtime_paths) or "训练进程异常退出，请稍后重试"
+            should_retry_after_repair = (
+                run_state.return_code not in (None, 0)
+                and not run_state.saw_complete
+                and not run_state.saw_error
+                and final_record.current_step <= 0
+            )
+            if should_retry_after_repair:
+                try:
+                    retry_state, retry_failure = await self._attempt_runtime_repair_and_retry(
+                        record=record,
+                        runtime_paths=runtime_paths,
+                        progress_reporter=progress_reporter,
+                    )
+                except Exception as exc:
+                    retry_state = None
+                    retry_failure = str(exc) or "训练环境修复失败，请稍后重试。"
+                if retry_state is not None:
+                    run_state = retry_state
+                    final_record = self._get_record(job_id)
+                    if run_state.protocol_error:
+                        protocol_message = "训练进程输出协议异常，请重试"
+                        self._append_display_log(runtime_paths, f"训练失败：{protocol_message}")
+                        self._mark_failed(job_id, protocol_message)
+                        raise RuntimeError(protocol_message)
+                    if run_state.saw_complete and run_state.return_code == 0:
+                        await self._finalize_registration_after_worker_complete(
+                            job_id=job_id,
+                            runtime_paths=runtime_paths,
+                            progress_reporter=progress_reporter,
+                        )
+                        return
+                    if run_state.saw_error:
+                        latest = self._get_record(job_id)
+                        if latest.status == "canceled":
+                            return
+                        message = latest.error_message or "训练失败，请稍后重试"
+                        raise RuntimeError(message)
+                elif retry_failure:
+                    self._append_display_log(runtime_paths, f"训练失败：{retry_failure}")
+                    self._mark_failed(job_id, retry_failure)
+                    raise RuntimeError(retry_failure)
+
+            crash_message = self._summarize_raw_worker_log(runtime_paths)
+            if crash_message is None:
+                if run_state.return_code not in (None, 0):
+                    crash_message = f"训练进程异常退出（退出码 {run_state.return_code}），请执行“修复训练环境”后重试。"
+                else:
+                    crash_message = "训练进程异常退出，请稍后重试"
             self._append_display_log(runtime_paths, f"训练失败：{crash_message}")
             self._mark_failed(job_id, crash_message)
             raise RuntimeError(crash_message)
