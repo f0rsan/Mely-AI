@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from importlib.util import find_spec
@@ -45,6 +46,7 @@ GPU_TRAINING_RUNTIME_DEPENDENCIES: tuple[str, ...] = (
 RUNTIME_WORKER_ENTRY_RELATIVE = Path("tools/unsloth_worker.py")
 RUNTIME_BOOTSTRAP_SCRIPT_RELATIVE = Path("tools/bootstrap_runtime.py")
 RUNTIME_HF_SNAPSHOT_SCRIPT_RELATIVE = Path("tools/prepare_hf_snapshot.py")
+RUNTIME_HEALTH_SCRIPT_RELATIVE = Path("tools/verify_runtime_health.py")
 
 MIN_VRAM_GB = 8.0
 FINE_TRAINING_MIN_VRAM_GB = 12.0
@@ -54,6 +56,19 @@ MIN_FREE_DISK_GB = 12.0
 NVIDIA_SMI_TIMEOUT_SECONDS = 2.0
 ALLOW_NON_WINDOWS_TRAINING_ENV = "MELY_LLM_ALLOW_NON_WINDOWS_TRAINING"
 OLLAMA_RUNTIME_PROBE_TIMEOUT_SECONDS = 4.0
+RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS = 45.0
+DEFAULT_RUNTIME_HEALTH_CACHE_TTL_SECONDS = 60.0
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value >= 0 else default
 
 
 def _utc_now() -> str:
@@ -113,6 +128,8 @@ def _with_repair_guidance(message: str) -> str:
     normalized = message.strip()
     if not normalized:
         return "训练运行时异常，请先执行“修复训练环境”后重试。"
+    if "重新安装应用" in normalized or "安装包缺少" in normalized:
+        return normalized
     if "修复" in normalized:
         return normalized
     return f"{normalized} 请先执行“修复训练环境”后重试。"
@@ -195,6 +212,14 @@ class RuntimeHardwareStatus:
 
 
 @dataclass(slots=True)
+class RuntimeHealthCache:
+    signature: str
+    expires_at_monotonic: float
+    reason: str | None
+    details: dict[str, Any]
+
+
+@dataclass(slots=True)
 class LLMRuntimeReadiness:
     state: LLMRuntimeReadinessState
     ready: bool
@@ -245,6 +270,12 @@ class LLMRuntimeManager:
         self._install_lock = asyncio.Lock()
         self._install_task: asyncio.Task[None] | None = None
         self._install_progress = RuntimeInstallProgress()
+        self._runtime_health_lock = asyncio.Lock()
+        self._runtime_health_cache: RuntimeHealthCache | None = None
+        self._runtime_health_cache_ttl_seconds = _env_float(
+            "MELY_LLM_RUNTIME_HEALTH_CACHE_SECONDS",
+            DEFAULT_RUNTIME_HEALTH_CACHE_TTL_SECONDS,
+        )
 
     @property
     def is_enforced(self) -> bool:
@@ -447,6 +478,9 @@ class LLMRuntimeManager:
         task = self._install_task
         return task is not None and not task.done()
 
+    def _invalidate_runtime_health_cache(self) -> None:
+        self._runtime_health_cache = None
+
     def _runtime_broken_reason(self) -> str | None:
         if _env_flag("MELY_LLM_FORCE_RUNTIME_BROKEN"):
             return "检测到训练运行时损坏，请执行修复。"
@@ -465,6 +499,145 @@ class LLMRuntimeManager:
             except RuntimeError as exc:
                 return str(exc)
         return None
+
+    def _runtime_manifest_signature(self) -> str:
+        try:
+            stat = self._runtime_manifest_path.stat()
+            return f"{stat.st_mtime_ns}:{stat.st_size}"
+        except OSError:
+            return "missing"
+
+    @staticmethod
+    def _extract_runtime_health_error(payload: dict[str, Any]) -> str:
+        message = str(payload.get("message") or "").strip()
+        if message:
+            return message
+        failed_modules = payload.get("failed")
+        if isinstance(failed_modules, list):
+            for item in failed_modules:
+                if not isinstance(item, dict):
+                    continue
+                item_message = str(item.get("message") or item.get("error") or "").strip()
+                if item_message:
+                    return item_message
+        return ""
+
+    async def _probe_runtime_health(self) -> tuple[str | None, dict[str, Any]]:
+        try:
+            runtime_python, _worker_entry = self.resolve_worker_launch()
+        except RuntimeError as exc:
+            message = str(exc).strip() or "训练运行时入口无效，请先执行“修复训练环境”后重试。"
+            return message, {
+                "status": "failed",
+                "reason": "invalid_worker_launch",
+                "message": message,
+            }
+
+        health_script = self._runtime_resource_root / RUNTIME_HEALTH_SCRIPT_RELATIVE
+        if not health_script.exists():
+            message = f"安装包缺少训练运行时健康检测脚本：{health_script}。请重新安装应用。"
+            return message, {
+                "status": "failed",
+                "reason": "missing_runtime_health_script",
+                "message": message,
+            }
+
+        command = [str(runtime_python), str(health_script), "--json"]
+        try:
+            process = await asyncio.to_thread(
+                subprocess.run,
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            message = "训练运行时健康检测超时，请先执行“修复训练环境”后重试。"
+            return message, {
+                "status": "failed",
+                "reason": "health_probe_timeout",
+                "message": message,
+            }
+
+        stdout = process.stdout.strip()
+        stderr = process.stderr.strip()
+        details: dict[str, Any] = {
+            "status": "ok" if process.returncode == 0 else "failed",
+            "returnCode": process.returncode,
+            "pythonPath": str(runtime_python),
+            "scriptPath": str(health_script),
+        }
+        if stderr:
+            details["stderr"] = stderr
+
+        payload: dict[str, Any] | None = None
+        if stdout:
+            try:
+                parsed = json.loads(stdout)
+            except json.JSONDecodeError:
+                details["stdout"] = stdout
+            else:
+                if isinstance(parsed, dict):
+                    payload = parsed
+                    details["payload"] = parsed
+                else:
+                    details["stdout"] = stdout
+
+        if process.returncode == 0 and payload is not None and str(payload.get("status") or "").lower() == "ok":
+            details["status"] = "ok"
+            details["message"] = str(payload.get("message") or "运行时健康检测通过。")
+            return None, details
+
+        payload_message = self._extract_runtime_health_error(payload or {})
+        message = payload_message or stderr or stdout
+        if not message:
+            message = f"训练运行时健康检测失败（退出码 {process.returncode}）。"
+        details["status"] = "failed"
+        details["message"] = message
+        return message, details
+
+    async def _runtime_health_issue(self) -> tuple[str | None, dict[str, Any] | None]:
+        if not self._strict_enforcement or not self._runtime_exists():
+            return None, None
+        if not sys.platform.startswith("win"):
+            return None, {
+                "status": "skipped",
+                "reason": "non_windows_host",
+                "message": "当前主机不是 Windows，跳过运行时 GPU 健康探测。",
+            }
+
+        now = time.monotonic()
+        signature = self._runtime_manifest_signature()
+        cached = self._runtime_health_cache
+        if (
+            cached is not None
+            and cached.signature == signature
+            and now < cached.expires_at_monotonic
+        ):
+            details = {**cached.details, "cached": True}
+            return cached.reason, details
+
+        async with self._runtime_health_lock:
+            now = time.monotonic()
+            cached = self._runtime_health_cache
+            if (
+                cached is not None
+                and cached.signature == signature
+                and now < cached.expires_at_monotonic
+            ):
+                details = {**cached.details, "cached": True}
+                return cached.reason, details
+
+            reason, details = await self._probe_runtime_health()
+            details = {**details, "cached": False}
+            self._runtime_health_cache = RuntimeHealthCache(
+                signature=signature,
+                expires_at_monotonic=now + self._runtime_health_cache_ttl_seconds,
+                reason=reason,
+                details=details,
+            )
+            return reason, details
 
     def _detect_hardware(self) -> RuntimeHardwareStatus:
         gpu_model = os.getenv("MELY_GPU_NAME")
@@ -633,6 +806,7 @@ class LLMRuntimeManager:
                         return
                 else:
                     return
+            self._invalidate_runtime_health_cache()
             self._install_progress.attempt += 1
             started_at = _utc_now()
             if "snapshot" in reason:
@@ -660,6 +834,7 @@ class LLMRuntimeManager:
     def _clear_broken_flag(self) -> None:
         if self._broken_flag_path.exists():
             self._broken_flag_path.unlink()
+        self._invalidate_runtime_health_cache()
 
     def _restore_hf_snapshot_from_bundle(self, *, huggingface_model_id: str) -> bool:
         local_snapshot = self._local_hf_snapshot_root / huggingface_model_id.replace("/", "--")
@@ -1088,6 +1263,13 @@ class LLMRuntimeManager:
             )
 
         broken_reason = self._runtime_broken_reason() if self._strict_enforcement else None
+        runtime_health_details: dict[str, Any] | None = None
+        if broken_reason is None:
+            runtime_health_reason, runtime_health_details = await self._runtime_health_issue()
+            if runtime_health_reason:
+                broken_reason = runtime_health_reason
+        if runtime_health_details is not None:
+            checks["runtimeHealth"] = runtime_health_details
         if broken_reason:
             if auto_fix:
                 await self._ensure_install_task(reason="auto_repair", force_repair=True)

@@ -49,6 +49,20 @@ def _seed_runtime_resources(resource_root: Path) -> None:
     worker_path = tools_dir / "unsloth_worker.py"
     worker_path.write_text("print('worker placeholder')\n", encoding="utf-8")
     (tools_dir / "verify_import_chain.py").write_text("print('verify placeholder')\n", encoding="utf-8")
+    (tools_dir / "verify_runtime_health.py").write_text(
+        (
+            "import argparse, json\n"
+            "parser = argparse.ArgumentParser()\n"
+            "parser.add_argument('--json', action='store_true')\n"
+            "args = parser.parse_args()\n"
+            "payload = {'status': 'ok', 'message': 'runtime health ok', 'checks': []}\n"
+            "if args.json:\n"
+            "    print(json.dumps(payload, ensure_ascii=False))\n"
+            "else:\n"
+            "    print('[ok] runtime-health')\n"
+        ),
+        encoding="utf-8",
+    )
     (tools_dir / "prepare_hf_snapshot.py").write_text(
         (
             "import argparse\n"
@@ -405,6 +419,88 @@ async def test_readiness_runtime_broken_then_repair(runtime_manager, monkeypatch
 
     assert ready_state.state == "ready"
     assert ready_state.install_progress.stage in {"completed", "idle"}
+
+
+@pytest.mark.asyncio
+async def test_readiness_blocks_when_runtime_health_probe_fails(runtime_manager, monkeypatch):
+    manager, data_root = runtime_manager
+    resource_root = Path(os.environ["MELY_LLM_RUNTIME_RESOURCE_ROOT"])
+    monkeypatch.setattr("app.services.llm_runtime_manager.sys.platform", "win32")
+    _seed_runtime_manifest(
+        data_root,
+        worker_script=resource_root / "tools" / "unsloth_worker.py",
+    )
+    _seed_training_snapshot(data_root)
+    (resource_root / "tools" / "verify_runtime_health.py").write_text(
+        (
+            "import argparse, json\n"
+            "parser = argparse.ArgumentParser()\n"
+            "parser.add_argument('--json', action='store_true')\n"
+            "parser.parse_args()\n"
+            "payload = {\n"
+            "  'status': 'failed',\n"
+            "  'message': '未检测到可用 CUDA 加速器，无法启动训练。',\n"
+            "  'failed': [{'message': '未检测到可用 CUDA 加速器，无法启动训练。'}]\n"
+            "}\n"
+            "print(json.dumps(payload, ensure_ascii=False))\n"
+            "raise SystemExit(1)\n"
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "app.services.llm_runtime_manager.check_ollama_runtime",
+        lambda: asyncio.sleep(
+            0,
+            result=SimpleNamespace(
+                installed=True,
+                running=True,
+                models=[SimpleNamespace(name="qwen2.5:3b")],
+                hint=None,
+            ),
+        ),
+    )
+
+    readiness = await manager.get_readiness(base_model="qwen2.5:3b")
+    assert readiness.state == "runtime_broken"
+    assert readiness.blocking_reason is not None
+    assert "CUDA 加速器" in readiness.blocking_reason
+
+
+@pytest.mark.asyncio
+async def test_runtime_health_probe_is_cached_between_readiness_polls(runtime_manager, monkeypatch):
+    manager, data_root = runtime_manager
+    monkeypatch.setattr("app.services.llm_runtime_manager.sys.platform", "win32")
+    _seed_runtime_manifest(
+        data_root,
+        worker_script=Path(os.environ["MELY_LLM_RUNTIME_RESOURCE_ROOT"]) / "tools" / "unsloth_worker.py",
+    )
+    _seed_training_snapshot(data_root)
+    monkeypatch.setattr(
+        "app.services.llm_runtime_manager.check_ollama_runtime",
+        lambda: asyncio.sleep(
+            0,
+            result=SimpleNamespace(
+                installed=True,
+                running=True,
+                models=[SimpleNamespace(name="qwen2.5:3b")],
+                hint=None,
+            ),
+        ),
+    )
+    calls = {"count": 0}
+
+    async def fake_probe_runtime_health():
+        calls["count"] += 1
+        return None, {"status": "ok", "message": "runtime health ok"}
+
+    monkeypatch.setattr(manager, "_probe_runtime_health", fake_probe_runtime_health)
+
+    first = await manager.get_readiness(base_model="qwen2.5:3b")
+    second = await manager.get_readiness(base_model="qwen2.5:3b")
+
+    assert first.state == "ready"
+    assert second.state == "ready"
+    assert calls["count"] == 1
 
 
 @pytest.mark.asyncio

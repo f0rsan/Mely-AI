@@ -191,7 +191,12 @@ def copy_runtime_tools(*, tools_source_dir: Path, runtime_tools_dir: Path, worke
         raise RuntimeError(f"runtime tools source not found: {tools_source_dir}")
 
     runtime_tools_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("bootstrap_runtime.py", "verify_import_chain.py", "prepare_hf_snapshot.py"):
+    for name in (
+        "bootstrap_runtime.py",
+        "verify_import_chain.py",
+        "verify_runtime_health.py",
+        "prepare_hf_snapshot.py",
+    ):
         shutil.copy2(tools_source_dir / name, runtime_tools_dir / name)
     worker_dest = runtime_tools_dir / "unsloth_worker.py"
     shutil.copy2(worker_source, worker_dest)

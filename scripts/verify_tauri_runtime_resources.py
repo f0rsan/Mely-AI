@@ -18,6 +18,7 @@ REQUIRED_FILES = (
     "SHA256SUMS.txt",
     "tools/bootstrap_runtime.py",
     "tools/verify_import_chain.py",
+    "tools/verify_runtime_health.py",
     "tools/prepare_hf_snapshot.py",
     "tools/unsloth_worker.py",
 )
