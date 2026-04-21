@@ -41,6 +41,12 @@ python scripts/build_windows_llm_runtime.py \
   --stage-dir src-tauri/resources/llm-runtime
 ```
 
+The runtime builder copies only the Python runtime files required for
+first-launch repair (`python.exe`, core DLLs, `DLLs`, and `Lib`). It does not
+copy the source machine's `Scripts`, `share`, or `Lib/site-packages` folders, so
+local Jupyter or development packages cannot leak into the installer or trip
+Windows path-length limits.
+
 ## Expected runtime seed structure
 
 ```text

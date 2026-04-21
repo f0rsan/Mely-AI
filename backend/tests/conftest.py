@@ -9,6 +9,12 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 
+@pytest.fixture(autouse=True)
+def stable_runtime_disk_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Keep runtime-readiness tests independent from the host machine's free disk.
+    monkeypatch.setenv("MELY_LLM_RUNTIME_MIN_DISK_GB", "0.01")
+
+
 @pytest.fixture()
 def temp_data_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     data_root = tmp_path / ".mely-test"

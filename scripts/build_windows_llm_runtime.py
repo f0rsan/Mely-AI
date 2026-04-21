@@ -42,6 +42,29 @@ DEFAULT_STAGE_REL = Path("src-tauri/resources/llm-runtime")
 DEFAULT_TORCH_INDEX_URL = f"https://download.pytorch.org/whl/{DEFAULT_CUDA_TAG}"
 IMPORT_MODULES = ("torch", "unsloth", "datasets", "transformers", "trl")
 
+PYTHON_RUNTIME_ROOT_FILE_SUFFIXES = (".dll", ".exe", ".zip", "._pth")
+PYTHON_RUNTIME_ROOT_FILES = {"pyvenv.cfg"}
+PYTHON_RUNTIME_DIRS = ("DLLs", "Lib")
+PYTHON_RUNTIME_EXCLUDE_NAMES = {
+    "__pycache__",
+    "site-packages",
+    "dist-packages",
+    "share",
+    "Scripts",
+    "script",
+    "Doc",
+    "docs",
+    "Tools",
+    "tcl",
+    "idlelib",
+    "tkinter",
+    "turtledemo",
+    "test",
+    "tests",
+}
+PYTHON_RUNTIME_EXCLUDE_NAMES_LOWER = {name.lower() for name in PYTHON_RUNTIME_EXCLUDE_NAMES}
+PYTHON_RUNTIME_EXCLUDE_SUFFIXES = (".pyc", ".pyo")
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -149,6 +172,57 @@ def python_info(python_exe: Path) -> dict[str, Any]:
     return data
 
 
+def should_copy_python_root_file(path: Path) -> bool:
+    name = path.name
+    lower_name = name.lower()
+    return lower_name in PYTHON_RUNTIME_ROOT_FILES or lower_name.endswith(
+        PYTHON_RUNTIME_ROOT_FILE_SUFFIXES
+    )
+
+
+def python_runtime_ignore(_directory: str, names: list[str]) -> set[str]:
+    ignored: set[str] = set()
+    for name in names:
+        lower_name = name.lower()
+        if lower_name in PYTHON_RUNTIME_EXCLUDE_NAMES_LOWER:
+            ignored.add(name)
+            continue
+        if lower_name.endswith(PYTHON_RUNTIME_EXCLUDE_SUFFIXES):
+            ignored.add(name)
+    return ignored
+
+
+def copy_required_python_runtime_files(*, base_prefix: Path, destination: Path) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+
+    copied_root_file = False
+    for child in base_prefix.iterdir():
+        if child.is_file() and should_copy_python_root_file(child):
+            shutil.copy2(child, destination / child.name)
+            copied_root_file = True
+
+    if not copied_root_file:
+        raise RuntimeError(f"python runtime has no copyable root executables or DLLs: {base_prefix}")
+
+    missing_required_dirs: list[str] = []
+    for dirname in PYTHON_RUNTIME_DIRS:
+        source_dir = base_prefix / dirname
+        if not source_dir.exists():
+            missing_required_dirs.append(dirname)
+            continue
+        if not source_dir.is_dir():
+            raise RuntimeError(f"python runtime required path is not a directory: {source_dir}")
+        shutil.copytree(
+            source_dir,
+            destination / dirname,
+            ignore=python_runtime_ignore,
+        )
+
+    if missing_required_dirs:
+        missing_text = ", ".join(missing_required_dirs)
+        raise RuntimeError(f"python runtime missing required directories: {missing_text}")
+
+
 def copy_python_runtime(*, python_exe: Path, destination: Path) -> dict[str, Any]:
     info = python_info(python_exe)
     base_prefix = Path(str(info["base_prefix"])).expanduser().resolve()
@@ -157,9 +231,9 @@ def copy_python_runtime(*, python_exe: Path, destination: Path) -> dict[str, Any
     if destination.exists():
         shutil.rmtree(destination)
 
-    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
-    shutil.copytree(base_prefix, destination, ignore=ignore)
-    copied_python = destination / ("python.exe" if os.name == "nt" else "bin/python")
+    copy_required_python_runtime_files(base_prefix=base_prefix, destination=destination)
+    runtime_platform = str(info.get("platform") or "").strip().lower()
+    copied_python = destination / ("python.exe" if runtime_platform == "win32" else "bin/python")
     if not copied_python.exists():
         fallback_python = destination / ("python.exe" if destination.joinpath("python.exe").exists() else "python")
         if fallback_python.exists():
