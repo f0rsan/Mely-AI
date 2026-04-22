@@ -36,6 +36,7 @@
    - 外置 CAB 回退会复用 Tauri 生成的 `.wxl` 本地化文件；若构建目录未保留该文件，会生成最小 fallback，避免 `!(loc...)` 变量导致 `light.exe` 二次失败。
    - 外置 CAB 模式下，`.msi` 与同目录 `.cab` 文件必须一起分发。
    - 产物汇总阶段允许 `nsis/` 目录不存在；默认 MSI-only 构建不会因此失败。
+   - 构建前不再删除整个 `bundle/msi` 或 `bundle/nsis` 目录，避免 Windows 安装器/资源管理器占用旧目录时触发 `Device or resource busy`。
 5. Windows 构建入口会先检查本地 `main` 是否落后于 `origin/main`：
    - 避免构建机继续运行旧版 `build_windows_llm_runtime.py`。
    - 如需离线或本地分支构建，可设置 `MELY_SKIP_GIT_SYNC_CHECK=1`。

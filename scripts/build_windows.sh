@@ -73,7 +73,7 @@ path_size_human() {
   echo "N/A"
 }
 
-find_first_file() {
+find_current_build_file() {
   local search_dir="$1"
   local pattern="$2"
   if [ ! -d "$search_dir" ]; then
@@ -160,6 +160,27 @@ windows_env_path_to_shell_path() {
     return 0
   fi
   echo "$raw_path"
+}
+
+prepare_windows_bundle_output_dirs() {
+  local build_version="$1"
+  local nsis_bundle_dir="$REPO_ROOT/src-tauri/target/release/bundle/nsis"
+  local msi_bundle_dir="$REPO_ROOT/src-tauri/target/release/bundle/msi"
+  local expected_nsis="$nsis_bundle_dir/Mely AI_${build_version}_x64-setup.exe"
+  local expected_msi="$msi_bundle_dir/Mely AI_${build_version}_x64_en-US.msi"
+
+  mkdir -p "$nsis_bundle_dir" "$msi_bundle_dir"
+
+  # Do not remove the bundle directories themselves. On Windows they can be
+  # held open by Explorer or msiexec after a manual install test, and deleting
+  # the directory makes the build fail before Tauri even starts.
+  for artifact in "$expected_nsis" "$expected_msi"; do
+    if [ -e "$artifact" ] && ! rm -f "$artifact"; then
+      echo "WARNING: Could not remove existing artifact because it is busy:" >&2
+      echo "  $artifact" >&2
+      echo "Close any installer windows or Explorer tabs using it if this build cannot overwrite it." >&2
+    fi
+  done
 }
 
 assert_release_checkout_current() {
@@ -541,11 +562,6 @@ npm ci
 
 echo ""
 echo "=== [5/6] Build Tauri Windows installer ==="
-# Remove previous release bundle outputs so the final installer path always
-# points to the current build rather than a stale artifact left in target/.
-rm -rf "$REPO_ROOT/src-tauri/target/release/bundle/nsis" \
-       "$REPO_ROOT/src-tauri/target/release/bundle/msi"
-
 # tauri build will:
 #   1. Run `python scripts/prepare_tauri_backend.py --require-source-fresh --verify-api-compatibility && npm run build`
 #   2. Compile the Rust shell
@@ -558,6 +574,7 @@ rm -rf "$REPO_ROOT/src-tauri/target/release/bundle/nsis" \
 BUILD_VERSION="$(resolve_windows_build_version)"
 validate_semver_version "$BUILD_VERSION"
 validate_windows_bundle_targets "$WINDOWS_BUNDLE_TARGETS"
+prepare_windows_bundle_output_dirs "$BUILD_VERSION"
 write_tauri_build_config "$REPO_ROOT/src-tauri/tauri.conf.json" "$BUILD_TAURI_CONFIG_PATH" "$BUILD_VERSION"
 mkdir -p "$(dirname "$CARGO_MANIFEST_BACKUP_PATH")"
 cp "$CARGO_MANIFEST_PATH" "$CARGO_MANIFEST_BACKUP_PATH"
@@ -598,8 +615,8 @@ echo ""
 echo "=== [6/6] Collect artifact summary ==="
 NSIS_BUNDLE_DIR="$REPO_ROOT/src-tauri/target/release/bundle/nsis"
 MSI_BUNDLE_DIR="$REPO_ROOT/src-tauri/target/release/bundle/msi"
-INSTALLER=$(find_first_file "$NSIS_BUNDLE_DIR" "*.exe")
-MSI=$(find_first_file "$MSI_BUNDLE_DIR" "*.msi")
+INSTALLER=$(find_current_build_file "$NSIS_BUNDLE_DIR" "Mely AI_${BUILD_VERSION}_x64-setup.exe")
+MSI=$(find_current_build_file "$MSI_BUNDLE_DIR" "Mely AI_${BUILD_VERSION}_x64_en-US.msi")
 CAB_COUNT=$(count_matching_files "$MSI_BUNDLE_DIR" "*.cab")
 CAB_SIZE=$(matching_files_total_size_human "$MSI_BUNDLE_DIR" "*.cab")
 
