@@ -19,6 +19,8 @@
 #   - set MELY_WINDOWS_BUNDLE_TARGETS to override the installer bundle target.
 #     Defaults to "msi" because the full offline training runtime is too large
 #     for reliable NSIS packaging. Use "nsis" only for smaller builds.
+#   - set MELY_SKIP_GIT_SYNC_CHECK=1 only when intentionally building a local
+#     branch or offline checkout.
 #
 # Usage:
 #   bash scripts/build_windows.sh
@@ -108,6 +110,45 @@ validate_windows_bundle_targets() {
       exit 1
       ;;
   esac
+}
+
+assert_release_checkout_current() {
+  if [ "${MELY_SKIP_GIT_SYNC_CHECK:-}" = "1" ]; then
+    echo "WARNING: Skipping git sync check because MELY_SKIP_GIT_SYNC_CHECK=1"
+    return 0
+  fi
+
+  if ! git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local current_branch
+  current_branch=$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+  if [ "$current_branch" != "main" ]; then
+    echo "WARNING: Building from branch '$current_branch'; main sync check is skipped."
+    return 0
+  fi
+
+  if ! git -C "$REPO_ROOT" remote get-url origin >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! git -C "$REPO_ROOT" fetch --quiet origin main >/dev/null 2>&1; then
+    echo "WARNING: Could not refresh origin/main. Continuing with local checkout." >&2
+    return 0
+  fi
+
+  if ! git -C "$REPO_ROOT" rev-parse --verify origin/main >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! git -C "$REPO_ROOT" merge-base --is-ancestor origin/main HEAD; then
+    echo "ERROR: Local main is behind origin/main." >&2
+    echo "This Windows build would run stale packaging code. Please run:" >&2
+    echo "  git pull --ff-only origin main" >&2
+    echo "Then rerun: bash scripts/build_windows.sh" >&2
+    exit 1
+  fi
 }
 
 write_tauri_build_config() {
@@ -231,6 +272,8 @@ if ! is_native_windows_shell; then
   echo "Use Git Bash, PowerShell, or CMD on Windows." >&2
   exit 1
 fi
+
+assert_release_checkout_current
 
 echo "=== [1/6] Build Python backend sidecar with PyInstaller ==="
 cd "$BACKEND_DIR"

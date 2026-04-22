@@ -33,3 +33,12 @@ def test_windows_training_installer_requires_an_artifact_after_build():
 
     assert "No Windows installer artifact was produced" in script
     assert "Checked bundle targets: $WINDOWS_BUNDLE_TARGETS" in script
+
+
+def test_windows_training_installer_blocks_stale_main_checkout():
+    script = _script_text()
+
+    assert "assert_release_checkout_current" in script
+    assert "git -C \"$REPO_ROOT\" fetch --quiet origin main" in script
+    assert "Local main is behind origin/main" in script
+    assert "MELY_SKIP_GIT_SYNC_CHECK" in script

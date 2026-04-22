@@ -8,6 +8,8 @@
 2. 训练依赖离线化（wheelhouse）。
 3. 训练 worker 可脱离源码工作区调用。
 4. 产物自带 `manifest.json` 与 `SHA256SUMS.txt`，可做完整性校验与修复。
+5. `python-runtime` 只包含独立 Python 启动、标准库和 venv 必需文件，不复制构建机用户环境中的
+   `share/`、`Scripts/`、`site-packages/`、Jupyter 或 GUI/test payload。
 
 ## 2. 构建命令
 

@@ -62,6 +62,11 @@ def test_copy_python_runtime_excludes_user_environment_payload(
     (source / "DLLs" / "_sqlite3.pyd").write_text("pyd", encoding="utf-8")
     (source / "Lib" / "venv").mkdir(parents=True)
     (source / "Lib" / "venv" / "__init__.py").write_text("", encoding="utf-8")
+    (source / "Lib" / "venv" / "scripts" / "common").mkdir(parents=True)
+    (source / "Lib" / "venv" / "scripts" / "common" / "activate").write_text(
+        "activate",
+        encoding="utf-8",
+    )
     (source / "Lib" / "ensurepip" / "_bundled").mkdir(parents=True)
     (source / "Lib" / "ensurepip" / "_bundled" / "pip.whl").write_text(
         "pip",
@@ -77,6 +82,10 @@ def test_copy_python_runtime_excludes_user_environment_payload(
         "map",
         encoding="utf-8",
     )
+    (source / "Lib" / "tkinter").mkdir()
+    (source / "Lib" / "tkinter" / "__init__.py").write_text("", encoding="utf-8")
+    (source / "Lib" / "test").mkdir()
+    (source / "Lib" / "test" / "test_json.py").write_text("", encoding="utf-8")
     (source / "Scripts").mkdir()
     (source / "Scripts" / "pip.exe").write_text("pip", encoding="utf-8")
 
@@ -101,8 +110,11 @@ def test_copy_python_runtime_excludes_user_environment_payload(
     assert (destination / "python311.dll").exists()
     assert (destination / "DLLs" / "_sqlite3.pyd").exists()
     assert (destination / "Lib" / "venv" / "__init__.py").exists()
+    assert (destination / "Lib" / "venv" / "scripts" / "common" / "activate").exists()
     assert (destination / "Lib" / "ensurepip" / "_bundled" / "pip.whl").exists()
     assert not (destination / "Lib" / "site-packages").exists()
+    assert not (destination / "Lib" / "tkinter").exists()
+    assert not (destination / "Lib" / "test").exists()
     assert not (destination / "share").exists()
     assert not (destination / "Scripts").exists()
     assert metadata["copiedExecutable"] == str(destination / "python.exe")
@@ -133,3 +145,10 @@ def test_copy_python_runtime_requires_stdlib_directories(
             python_exe=source / "python.exe",
             destination=tmp_path / "runtime" / "python-runtime",
         )
+
+
+def test_runtime_builder_does_not_copy_whole_python_installation():
+    script = BUILD_SCRIPT.read_text(encoding="utf-8")
+
+    assert "shutil.copytree(base_prefix, destination" not in script
+    assert "assert_python_runtime_copy_contract" in script

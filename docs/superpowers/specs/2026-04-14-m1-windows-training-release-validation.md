@@ -32,6 +32,9 @@
    - 完整训练 runtime 含约 2GB 离线 wheelhouse。
    - NSIS 在该体积下可能触发内部 datablock/mmapping 错误，导致构建中断。
    - 如需小体积 NSIS 构建，可设置 `MELY_WINDOWS_BUNDLE_TARGETS=nsis`。
+5. Windows 构建入口会先检查本地 `main` 是否落后于 `origin/main`：
+   - 避免构建机继续运行旧版 `build_windows_llm_runtime.py`。
+   - 如需离线或本地分支构建，可设置 `MELY_SKIP_GIT_SYNC_CHECK=1`。
 
 ### 2.2 Runtime 资源校验脚本（新增 `scripts/verify_tauri_runtime_resources.py`）
 

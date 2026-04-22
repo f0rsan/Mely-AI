@@ -45,24 +45,16 @@ IMPORT_MODULES = ("torch", "unsloth", "datasets", "transformers", "trl")
 PYTHON_RUNTIME_ROOT_FILE_SUFFIXES = (".dll", ".exe", ".zip", "._pth")
 PYTHON_RUNTIME_ROOT_FILES = {"pyvenv.cfg"}
 PYTHON_RUNTIME_DIRS = ("DLLs", "Lib")
-PYTHON_RUNTIME_EXCLUDE_NAMES = {
-    "__pycache__",
-    "site-packages",
-    "dist-packages",
-    "share",
-    "Scripts",
-    "script",
-    "Doc",
-    "docs",
-    "Tools",
-    "tcl",
-    "idlelib",
-    "tkinter",
-    "turtledemo",
-    "test",
-    "tests",
+PYTHON_RUNTIME_ALWAYS_EXCLUDE_NAMES = {"__pycache__"}
+PYTHON_RUNTIME_FORBIDDEN_RELATIVE_DIRS = {
+    ("lib", "dist-packages"),
+    ("lib", "idlelib"),
+    ("lib", "site-packages"),
+    ("lib", "test"),
+    ("lib", "tests"),
+    ("lib", "tkinter"),
+    ("lib", "turtledemo"),
 }
-PYTHON_RUNTIME_EXCLUDE_NAMES_LOWER = {name.lower() for name in PYTHON_RUNTIME_EXCLUDE_NAMES}
 PYTHON_RUNTIME_EXCLUDE_SUFFIXES = (".pyc", ".pyo")
 
 
@@ -180,16 +172,58 @@ def should_copy_python_root_file(path: Path) -> bool:
     )
 
 
-def python_runtime_ignore(_directory: str, names: list[str]) -> set[str]:
+def is_forbidden_python_runtime_path(path: Path, *, base_prefix: Path) -> bool:
+    try:
+        relative_parts = path.relative_to(base_prefix).parts
+    except ValueError:
+        return False
+
+    normalized_parts = tuple(part.lower() for part in relative_parts)
+    if not normalized_parts:
+        return False
+    if normalized_parts[-1] in PYTHON_RUNTIME_ALWAYS_EXCLUDE_NAMES:
+        return True
+    return normalized_parts in PYTHON_RUNTIME_FORBIDDEN_RELATIVE_DIRS
+
+
+def python_runtime_ignore(base_prefix: Path, directory: str, names: list[str]) -> set[str]:
     ignored: set[str] = set()
+    directory_path = Path(directory)
     for name in names:
         lower_name = name.lower()
-        if lower_name in PYTHON_RUNTIME_EXCLUDE_NAMES_LOWER:
-            ignored.add(name)
-            continue
         if lower_name.endswith(PYTHON_RUNTIME_EXCLUDE_SUFFIXES):
             ignored.add(name)
+            continue
+        child_path = directory_path / name
+        if is_forbidden_python_runtime_path(child_path, base_prefix=base_prefix):
+            ignored.add(name)
     return ignored
+
+
+def assert_python_runtime_copy_contract(destination: Path) -> None:
+    forbidden_paths = [
+        destination / "share",
+        destination / "Scripts",
+        destination / "script",
+        destination / "Doc",
+        destination / "docs",
+        destination / "Tools",
+        destination / "tcl",
+        destination / "Lib" / "dist-packages",
+        destination / "Lib" / "idlelib",
+        destination / "Lib" / "site-packages",
+        destination / "Lib" / "test",
+        destination / "Lib" / "tests",
+        destination / "Lib" / "tkinter",
+        destination / "Lib" / "turtledemo",
+    ]
+    leaked_paths = [path for path in forbidden_paths if path.exists()]
+    if leaked_paths:
+        leaked_text = ", ".join(str(path) for path in leaked_paths)
+        raise RuntimeError(
+            "python runtime copy included user-environment or GUI payload: "
+            f"{leaked_text}"
+        )
 
 
 def copy_required_python_runtime_files(*, base_prefix: Path, destination: Path) -> None:
@@ -215,12 +249,13 @@ def copy_required_python_runtime_files(*, base_prefix: Path, destination: Path) 
         shutil.copytree(
             source_dir,
             destination / dirname,
-            ignore=python_runtime_ignore,
+            ignore=lambda directory, names: python_runtime_ignore(base_prefix, directory, names),
         )
 
     if missing_required_dirs:
         missing_text = ", ".join(missing_required_dirs)
         raise RuntimeError(f"python runtime missing required directories: {missing_text}")
+    assert_python_runtime_copy_contract(destination)
 
 
 def copy_python_runtime(*, python_exe: Path, destination: Path) -> dict[str, Any]:
