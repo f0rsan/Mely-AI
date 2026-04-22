@@ -32,6 +32,8 @@
    - 完整训练 runtime 含约 2GB 离线 wheelhouse。
    - NSIS 在该体积下可能触发内部 datablock/mmapping 错误，导致构建中断。
    - 如需小体积 NSIS 构建，可设置 `MELY_WINDOWS_BUNDLE_TARGETS=nsis`。
+   - 如果 WiX 的 `light.exe` 因自包含 MSI 过大失败，构建脚本会自动切换到外置分卷 CAB 模式并重新生成 MSI。
+   - 外置 CAB 模式下，`.msi` 与同目录 `.cab` 文件必须一起分发。
 5. Windows 构建入口会先检查本地 `main` 是否落后于 `origin/main`：
    - 避免构建机继续运行旧版 `build_windows_llm_runtime.py`。
    - 如需离线或本地分支构建，可设置 `MELY_SKIP_GIT_SYNC_CHECK=1`。
@@ -151,6 +153,7 @@ Tauri 资源采用 `resources -> resources` 整体映射，因此 Windows 构建
    - `src-tauri/resources/llm-runtime/`
 4. MSI 安装包
    - `src-tauri/target/release/bundle/msi/`
+   - 若生成 `.cab` 文件，必须与 `.msi` 保持在同一目录一起发布。
 5. NSIS 安装包（仅设置 `MELY_WINDOWS_BUNDLE_TARGETS=nsis` 或 `nsis,msi` 时）
    - `src-tauri/target/release/bundle/nsis/Mely AI_0.1.0_x64-setup.exe`
 6. 产物清单（含体积）

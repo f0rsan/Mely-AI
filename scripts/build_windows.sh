@@ -112,6 +112,21 @@ validate_windows_bundle_targets() {
   esac
 }
 
+windows_bundle_targets_include() {
+  local target="$1"
+  local targets=",$WINDOWS_BUNDLE_TARGETS,"
+  [[ "$targets" == *",$target,"* ]]
+}
+
+windows_env_path_to_shell_path() {
+  local raw_path="$1"
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -u "$raw_path"
+    return 0
+  fi
+  echo "$raw_path"
+}
+
 assert_release_checkout_current() {
   if [ "${MELY_SKIP_GIT_SYNC_CHECK:-}" = "1" ]; then
     echo "WARNING: Skipping git sync check because MELY_SKIP_GIT_SYNC_CHECK=1"
@@ -149,6 +164,76 @@ assert_release_checkout_current() {
     echo "Then rerun: bash scripts/build_windows.sh" >&2
     exit 1
   fi
+}
+
+rerun_wix_with_external_cabs() {
+  local build_version="$1"
+  local wix_arch="x64"
+  local wix_work_dir="$REPO_ROOT/src-tauri/target/release/wix/$wix_arch"
+  local wxs_path="$wix_work_dir/main.wxs"
+  local wix_tools_root="${LOCALAPPDATA:-}"
+  local wix_tools_dir
+  local candle_exe
+  local light_exe
+  local msi_dir="$REPO_ROOT/src-tauri/target/release/bundle/msi"
+  local msi_path="$msi_dir/Mely AI_${build_version}_${wix_arch}_en-US.msi"
+  local light_args
+
+  if [ ! -f "$wxs_path" ]; then
+    echo "ERROR: Tauri MSI build failed before generating WiX source: $wxs_path" >&2
+    return 1
+  fi
+
+  if [ -z "$wix_tools_root" ]; then
+    echo "ERROR: LOCALAPPDATA is not set; cannot locate Tauri WiX tools." >&2
+    return 1
+  fi
+
+  wix_tools_dir="$(windows_env_path_to_shell_path "$wix_tools_root")/tauri/WixTools314"
+  candle_exe="$wix_tools_dir/candle.exe"
+  light_exe="$wix_tools_dir/light.exe"
+  if [ ! -x "$candle_exe" ] || [ ! -x "$light_exe" ]; then
+    echo "ERROR: WiX tools not found under $wix_tools_dir" >&2
+    return 1
+  fi
+
+  echo "Tauri MSI bundling failed. Retrying WiX with external CAB files for the large training runtime."
+  python scripts/patch_wix_for_external_cabs.py "$wxs_path"
+  mkdir -p "$msi_dir"
+  rm -f "$msi_dir"/*.msi "$msi_dir"/*.cab "$wix_work_dir"/*.wixobj "$wix_work_dir"/*.wixpdb "$wix_work_dir"/*.cab
+
+  "$candle_exe" \
+    -arch "$wix_arch" \
+    -ext WixUtilExtension \
+    -ext WixUIExtension \
+    -out "$wix_work_dir/main.wixobj" \
+    "$wxs_path"
+
+  light_args=(
+    -ext WixUtilExtension
+    -ext WixUIExtension
+    -cultures:en-us
+    -spdb
+    -b "$wix_work_dir"
+    -out "$msi_path"
+    "$wix_work_dir/main.wixobj"
+  )
+  if [ -f "$wix_work_dir/en-US.wxl" ]; then
+    light_args=(-loc "$wix_work_dir/en-US.wxl" "${light_args[@]}")
+  fi
+
+  "$light_exe" "${light_args[@]}"
+
+  find "$wix_work_dir" -maxdepth 1 -name "*.cab" -exec cp "{}" "$msi_dir/" \;
+  if [ ! -f "$msi_path" ]; then
+    echo "ERROR: External-CAB MSI was not produced at $msi_path" >&2
+    return 1
+  fi
+  if ! find "$msi_dir" -maxdepth 1 -name "*.cab" | grep -q .; then
+    echo "ERROR: External-CAB MSI was produced without CAB payload files." >&2
+    return 1
+  fi
+  echo "External-CAB MSI produced: $msi_path"
 }
 
 write_tauri_build_config() {
@@ -427,7 +512,17 @@ mkdir -p "$(dirname "$STAGED_RELEASE_SUMMARY_PATH")"
 } > "$STAGED_RELEASE_SUMMARY_PATH"
 echo "Using Windows installer version: $BUILD_VERSION"
 echo "Using Windows bundle target(s): $WINDOWS_BUNDLE_TARGETS"
+set +e
 npx tauri build --bundles "$WINDOWS_BUNDLE_TARGETS" --config "$BUILD_TAURI_CONFIG_PATH"
+TAURI_BUILD_STATUS=$?
+set -e
+if [ "$TAURI_BUILD_STATUS" -ne 0 ]; then
+  if windows_bundle_targets_include "msi"; then
+    rerun_wix_with_external_cabs "$BUILD_VERSION"
+  else
+    exit "$TAURI_BUILD_STATUS"
+  fi
+fi
 restore_cargo_manifest_if_needed
 trap - EXIT
 
@@ -444,6 +539,8 @@ echo ""
 echo "=== [6/6] Collect artifact summary ==="
 INSTALLER=$(find "$REPO_ROOT/src-tauri/target/release/bundle/nsis" -name "*.exe" 2>/dev/null | head -1)
 MSI=$(find "$REPO_ROOT/src-tauri/target/release/bundle/msi" -name "*.msi" 2>/dev/null | head -1)
+CAB_COUNT=$(find "$REPO_ROOT/src-tauri/target/release/bundle/msi" -name "*.cab" 2>/dev/null | wc -l | tr -d ' ')
+CAB_SIZE=$(find "$REPO_ROOT/src-tauri/target/release/bundle/msi" -name "*.cab" -print0 2>/dev/null | du -ch --files0-from=- 2>/dev/null | tail -1 | cut -f1 || true)
 
 if [ -z "${INSTALLER:-}" ] && [ -z "${MSI:-}" ]; then
   echo "ERROR: No Windows installer artifact was produced." >&2
@@ -458,6 +555,10 @@ fi
 if [ -n "$MSI" ]; then
   SIZE=$(du -h "$MSI" | cut -f1)
   echo "MSI installer:  $MSI ($SIZE)"
+  if [ "${CAB_COUNT:-0}" != "0" ]; then
+    echo "MSI CAB files:  $CAB_COUNT (${CAB_SIZE:-N/A})"
+    echo "IMPORTANT: keep the .cab files next to the .msi when distributing this build."
+  fi
 fi
 
 mkdir -p "$(dirname "$RELEASE_SUMMARY_PATH")"
@@ -479,8 +580,12 @@ mkdir -p "$(dirname "$RELEASE_SUMMARY_PATH")"
   echo "msi_installer=${MSI:-N/A}"
   if [ -n "${MSI:-}" ]; then
     echo "msi_installer_size=$(path_size_human "$MSI")"
+    echo "msi_cab_count=${CAB_COUNT:-0}"
+    echo "msi_cab_total_size=${CAB_SIZE:-N/A}"
   else
     echo "msi_installer_size=N/A"
+    echo "msi_cab_count=0"
+    echo "msi_cab_total_size=N/A"
   fi
 } > "$RELEASE_SUMMARY_PATH"
 

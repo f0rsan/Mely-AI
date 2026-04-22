@@ -42,3 +42,12 @@ def test_windows_training_installer_blocks_stale_main_checkout():
     assert "git -C \"$REPO_ROOT\" fetch --quiet origin main" in script
     assert "Local main is behind origin/main" in script
     assert "MELY_SKIP_GIT_SYNC_CHECK" in script
+
+
+def test_windows_training_installer_retries_large_msi_with_external_cabs():
+    script = _script_text()
+
+    assert "rerun_wix_with_external_cabs" in script
+    assert "patch_wix_for_external_cabs.py" in script
+    assert "External-CAB MSI produced" in script
+    assert "keep the .cab files next to the .msi" in script
