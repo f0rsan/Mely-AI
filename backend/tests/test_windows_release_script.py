@@ -49,5 +49,9 @@ def test_windows_training_installer_retries_large_msi_with_external_cabs():
 
     assert "rerun_wix_with_external_cabs" in script
     assert "patch_wix_for_external_cabs.py" in script
+    assert "resolve_wix_localization.py" in script
+    assert "--fallback-path \"$wix_work_dir/mely-tauri-fallback.en-US.wxl\"" in script
+    assert '> "$wix_locale_list"' in script
+    assert 'light_args+=(-loc "$wix_locale_file")' in script
     assert "External-CAB MSI produced" in script
     assert "keep the .cab files next to the .msi" in script

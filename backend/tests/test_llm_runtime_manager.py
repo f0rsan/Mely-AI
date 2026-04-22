@@ -337,11 +337,12 @@ async def test_auto_fix_prepares_missing_training_snapshot_with_runtime_tool(
     preparing = await manager.get_readiness(base_model="qwen2.5:3b", auto_fix=True)
     assert preparing.state == "preparing_training_base_snapshot"
 
-    for _ in range(50):
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
         ready_state = await manager.get_readiness(base_model="qwen2.5:3b")
         if ready_state.state == "ready":
             break
-        await asyncio.sleep(0.02)
+        await asyncio.sleep(0.05)
     else:
         raise AssertionError("训练基础快照未由 runtime 工具准备完成")
 

@@ -178,6 +178,9 @@ rerun_wix_with_external_cabs() {
   local msi_dir="$REPO_ROOT/src-tauri/target/release/bundle/msi"
   local msi_path="$msi_dir/Mely AI_${build_version}_${wix_arch}_en-US.msi"
   local light_args
+  local wix_locale_files=()
+  local wix_locale_file
+  local wix_locale_list="$wix_work_dir/mely-wix-locales.txt"
 
   if [ ! -f "$wxs_path" ]; then
     echo "ERROR: Tauri MSI build failed before generating WiX source: $wxs_path" >&2
@@ -202,6 +205,26 @@ rerun_wix_with_external_cabs() {
   mkdir -p "$msi_dir"
   rm -f "$msi_dir"/*.msi "$msi_dir"/*.cab "$wix_work_dir"/*.wixobj "$wix_work_dir"/*.wixpdb "$wix_work_dir"/*.cab
 
+  python scripts/resolve_wix_localization.py \
+    --wxs "$wxs_path" \
+    --search-dir "$wix_work_dir" \
+    --search-dir "$REPO_ROOT/src-tauri/target/release/wix" \
+    --fallback-path "$wix_work_dir/mely-tauri-fallback.en-US.wxl" \
+    --product-name "Mely AI" \
+    > "$wix_locale_list"
+  while IFS= read -r wix_locale_file; do
+    if [ -n "$wix_locale_file" ]; then
+      wix_locale_files+=("$wix_locale_file")
+    fi
+  done < "$wix_locale_list"
+  rm -f "$wix_locale_list"
+  if [ "${#wix_locale_files[@]}" -gt 0 ]; then
+    echo "Using WiX localization file(s):"
+    for wix_locale_file in "${wix_locale_files[@]}"; do
+      echo "  - $wix_locale_file"
+    done
+  fi
+
   "$candle_exe" \
     -arch "$wix_arch" \
     -ext WixUtilExtension \
@@ -209,7 +232,11 @@ rerun_wix_with_external_cabs() {
     -out "$wix_work_dir/main.wixobj" \
     "$wxs_path"
 
-  light_args=(
+  light_args=()
+  for wix_locale_file in "${wix_locale_files[@]}"; do
+    light_args+=(-loc "$wix_locale_file")
+  done
+  light_args+=(
     -ext WixUtilExtension
     -ext WixUIExtension
     -cultures:en-us
@@ -218,9 +245,6 @@ rerun_wix_with_external_cabs() {
     -out "$msi_path"
     "$wix_work_dir/main.wixobj"
   )
-  if [ -f "$wix_work_dir/en-US.wxl" ]; then
-    light_args=(-loc "$wix_work_dir/en-US.wxl" "${light_args[@]}")
-  fi
 
   "$light_exe" "${light_args[@]}"
 

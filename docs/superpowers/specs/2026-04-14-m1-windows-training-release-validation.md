@@ -33,6 +33,7 @@
    - NSIS 在该体积下可能触发内部 datablock/mmapping 错误，导致构建中断。
    - 如需小体积 NSIS 构建，可设置 `MELY_WINDOWS_BUNDLE_TARGETS=nsis`。
    - 如果 WiX 的 `light.exe` 因自包含 MSI 过大失败，构建脚本会自动切换到外置分卷 CAB 模式并重新生成 MSI。
+   - 外置 CAB 回退会复用 Tauri 生成的 `.wxl` 本地化文件；若构建目录未保留该文件，会生成最小 fallback，避免 `!(loc...)` 变量导致 `light.exe` 二次失败。
    - 外置 CAB 模式下，`.msi` 与同目录 `.cab` 文件必须一起分发。
 5. Windows 构建入口会先检查本地 `main` 是否落后于 `origin/main`：
    - 避免构建机继续运行旧版 `build_windows_llm_runtime.py`。
