@@ -1,6 +1,7 @@
 import { FetchTimeoutError, fetchWithTimeout } from "./http";
 
 const API_BASE = "http://127.0.0.1:8000";
+const LLM_RUNTIME_READINESS_TIMEOUT_MS = 60_000;
 
 export type LLMRuntimeReadinessState =
   | "unsupported"
@@ -133,7 +134,7 @@ export async function fetchLLMRuntimeReadiness(
   try {
     const resp = await fetchWithTimeout(
       `${API_BASE}/api/llm-runtime/readiness?${query.toString()}`,
-      { signal, timeoutMs: 12_000 },
+      { signal, timeoutMs: LLM_RUNTIME_READINESS_TIMEOUT_MS },
     );
     const body = await resp.json().catch(() => ({}));
     if (!resp.ok) {
@@ -153,7 +154,7 @@ export async function repairLLMRuntime(signal?: AbortSignal): Promise<LLMRuntime
     const resp = await fetchWithTimeout(`${API_BASE}/api/llm-runtime/repair`, {
       method: "POST",
       signal,
-      timeoutMs: 12_000,
+      timeoutMs: LLM_RUNTIME_READINESS_TIMEOUT_MS,
     });
     const body = await resp.json().catch(() => ({}));
     if (!resp.ok) {

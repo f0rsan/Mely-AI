@@ -63,6 +63,6 @@ test("fails fast when readiness fetch stalls", async () => {
 
   const promise = fetchLLMRuntimeReadiness();
   const expectation = expect(promise).rejects.toThrow("训练环境状态检测超时，请稍后重试。");
-  await vi.advanceTimersByTimeAsync(12_100);
+  await vi.advanceTimersByTimeAsync(60_100);
   await expectation;
 });

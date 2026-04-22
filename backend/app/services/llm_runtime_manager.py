@@ -531,6 +531,26 @@ class LLMRuntimeManager:
                     return item_message
         return ""
 
+    @staticmethod
+    def _parse_runtime_health_payload(stdout: str) -> tuple[dict[str, Any] | None, str | None]:
+        if not stdout:
+            return None, None
+        try:
+            parsed = json.loads(stdout)
+        except json.JSONDecodeError:
+            start = stdout.find("{")
+            end = stdout.rfind("}")
+            if start == -1 or end == -1 or end <= start:
+                return None, None
+            try:
+                parsed = json.loads(stdout[start : end + 1])
+            except json.JSONDecodeError:
+                return None, None
+            noise = (stdout[:start] + stdout[end + 1 :]).strip()
+        else:
+            noise = None
+        return (parsed, noise) if isinstance(parsed, dict) else (None, None)
+
     async def _probe_runtime_health(self) -> tuple[str | None, dict[str, Any]]:
         try:
             runtime_python, _worker_entry = self.resolve_worker_launch()
@@ -582,16 +602,14 @@ class LLMRuntimeManager:
 
         payload: dict[str, Any] | None = None
         if stdout:
-            try:
-                parsed = json.loads(stdout)
-            except json.JSONDecodeError:
-                details["stdout"] = stdout
+            parsed, stdout_noise = self._parse_runtime_health_payload(stdout)
+            if parsed is not None:
+                payload = parsed
+                details["payload"] = parsed
+                if stdout_noise:
+                    details["stdoutNoise"] = stdout_noise
             else:
-                if isinstance(parsed, dict):
-                    payload = parsed
-                    details["payload"] = parsed
-                else:
-                    details["stdout"] = stdout
+                details["stdout"] = stdout
 
         if process.returncode == 0 and payload is not None and str(payload.get("status") or "").lower() == "ok":
             details["status"] = "ok"

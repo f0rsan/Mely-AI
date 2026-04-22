@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import importlib
 import json
 from datetime import datetime, timezone
+from typing import Callable
 
 
 FOLLOWUP_MODULES = ("datasets", "transformers", "trl")
@@ -38,6 +41,25 @@ def _failed(name: str, code: str, message: str, *, error: str | None = None) -> 
     if error:
         payload["error"] = error
     return payload
+
+
+def _clean_output(value: str) -> str:
+    return "\n".join(line.rstrip() for line in value.splitlines() if line.strip())
+
+
+def _with_captured_output(check: Callable[[], dict[str, str]]) -> dict[str, str]:
+    stdout_buffer = io.StringIO()
+    stderr_buffer = io.StringIO()
+    with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(stderr_buffer):
+        result = check()
+
+    stdout = _clean_output(stdout_buffer.getvalue())
+    stderr = _clean_output(stderr_buffer.getvalue())
+    if stdout:
+        result["stdout"] = stdout
+    if stderr:
+        result["stderr"] = stderr
+    return result
 
 
 def _check_torch() -> dict[str, str]:
@@ -86,31 +108,30 @@ def _check_unsloth() -> dict[str, str]:
     return _ok("unsloth")
 
 
-def _check_followup_modules() -> list[dict[str, str]]:
-    items: list[dict[str, str]] = []
-    for module_name in FOLLOWUP_MODULES:
-        try:
-            importlib.import_module(module_name)
-        except Exception as exc:
-            items.append(
-                _failed(
-                    module_name,
-                    "module_import_failed",
-                    f"训练运行时缺少依赖 {module_name}，请先执行“修复训练环境”后重试。",
-                    error=f"{exc.__class__.__name__}: {exc}",
-                )
-            )
-        else:
-            items.append(_ok(module_name))
-    return items
+def _check_followup_module(module_name: str) -> dict[str, str]:
+    try:
+        importlib.import_module(module_name)
+    except Exception as exc:
+        return _failed(
+            module_name,
+            "module_import_failed",
+            f"训练运行时缺少依赖 {module_name}，请先执行“修复训练环境”后重试。",
+            error=f"{exc.__class__.__name__}: {exc}",
+        )
+    return _ok(module_name)
 
 
 def build_payload() -> dict[str, object]:
     checks: list[dict[str, str]] = []
-    checks.append(_check_torch())
+    checks.append(_with_captured_output(_check_torch))
     if checks[-1]["status"] == "ok":
-        checks.append(_check_unsloth())
-    checks.extend(_check_followup_modules())
+        checks.append(_with_captured_output(_check_unsloth))
+    for module_name in FOLLOWUP_MODULES:
+        checks.append(
+            _with_captured_output(
+                lambda module_name=module_name: _check_followup_module(module_name)
+            )
+        )
 
     failed = [item for item in checks if item.get("status") == "failed"]
     if failed:

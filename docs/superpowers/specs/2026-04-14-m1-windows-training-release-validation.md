@@ -39,6 +39,10 @@
 5. Windows 构建入口会先检查本地 `main` 是否落后于 `origin/main`：
    - 避免构建机继续运行旧版 `build_windows_llm_runtime.py`。
    - 如需离线或本地分支构建，可设置 `MELY_SKIP_GIT_SYNC_CHECK=1`。
+6. 安装后的训练环境健康检测：
+   - `verify_runtime_health.py --json` 会捕获 torch/unsloth 导入时写到 stdout/stderr 的 Windows 提示，避免污染 JSON 返回。
+   - 后端兼容“前置噪音 + JSON”的旧输出格式，避免把 PyTorch 非致命提示当成训练环境损坏。
+   - 前端训练环境检测等待时间为 60 秒，避免首次导入重依赖时被 12 秒超时提前中断。
 
 ### 2.2 Runtime 资源校验脚本（新增 `scripts/verify_tauri_runtime_resources.py`）
 
