@@ -33,6 +33,12 @@ def test_windows_training_installer_requires_an_artifact_after_build():
 
     assert "No Windows installer artifact was produced" in script
     assert "Checked bundle targets: $WINDOWS_BUNDLE_TARGETS" in script
+    assert "find_first_file" in script
+    assert 'INSTALLER=$(find_first_file "$NSIS_BUNDLE_DIR" "*.exe")' in script
+    assert 'MSI=$(find_first_file "$MSI_BUNDLE_DIR" "*.msi")' in script
+    assert 'CAB_COUNT=$(count_matching_files "$MSI_BUNDLE_DIR" "*.cab")' in script
+    assert 'CAB_SIZE=$(matching_files_total_size_human "$MSI_BUNDLE_DIR" "*.cab")' in script
+    assert 'INSTALLER=$(find "$REPO_ROOT/src-tauri/target/release/bundle/nsis"' not in script
 
 
 def test_windows_training_installer_blocks_stale_main_checkout():

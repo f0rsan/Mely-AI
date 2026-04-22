@@ -73,6 +73,41 @@ path_size_human() {
   echo "N/A"
 }
 
+find_first_file() {
+  local search_dir="$1"
+  local pattern="$2"
+  if [ ! -d "$search_dir" ]; then
+    return 0
+  fi
+  find "$search_dir" -maxdepth 1 -type f -name "$pattern" -print -quit 2>/dev/null
+}
+
+count_matching_files() {
+  local search_dir="$1"
+  local pattern="$2"
+  if [ ! -d "$search_dir" ]; then
+    echo "0"
+    return 0
+  fi
+  find "$search_dir" -maxdepth 1 -type f -name "$pattern" 2>/dev/null | wc -l | tr -d ' '
+}
+
+matching_files_total_size_human() {
+  local search_dir="$1"
+  local pattern="$2"
+  local total_size
+  if [ ! -d "$search_dir" ]; then
+    echo "N/A"
+    return 0
+  fi
+  total_size=$(find "$search_dir" -maxdepth 1 -type f -name "$pattern" -exec du -ch "{}" + 2>/dev/null | tail -1 | cut -f1 || true)
+  if [ -n "$total_size" ]; then
+    echo "$total_size"
+  else
+    echo "N/A"
+  fi
+}
+
 resolve_windows_build_version() {
   local explicit_version="${MELY_BUILD_VERSION:-}"
   if [ -n "$explicit_version" ]; then
@@ -561,10 +596,12 @@ python scripts/verify_windows_desktop_backend.py --executable "$DESKTOP_EXE"
 
 echo ""
 echo "=== [6/6] Collect artifact summary ==="
-INSTALLER=$(find "$REPO_ROOT/src-tauri/target/release/bundle/nsis" -name "*.exe" 2>/dev/null | head -1)
-MSI=$(find "$REPO_ROOT/src-tauri/target/release/bundle/msi" -name "*.msi" 2>/dev/null | head -1)
-CAB_COUNT=$(find "$REPO_ROOT/src-tauri/target/release/bundle/msi" -name "*.cab" 2>/dev/null | wc -l | tr -d ' ')
-CAB_SIZE=$(find "$REPO_ROOT/src-tauri/target/release/bundle/msi" -name "*.cab" -print0 2>/dev/null | du -ch --files0-from=- 2>/dev/null | tail -1 | cut -f1 || true)
+NSIS_BUNDLE_DIR="$REPO_ROOT/src-tauri/target/release/bundle/nsis"
+MSI_BUNDLE_DIR="$REPO_ROOT/src-tauri/target/release/bundle/msi"
+INSTALLER=$(find_first_file "$NSIS_BUNDLE_DIR" "*.exe")
+MSI=$(find_first_file "$MSI_BUNDLE_DIR" "*.msi")
+CAB_COUNT=$(count_matching_files "$MSI_BUNDLE_DIR" "*.cab")
+CAB_SIZE=$(matching_files_total_size_human "$MSI_BUNDLE_DIR" "*.cab")
 
 if [ -z "${INSTALLER:-}" ] && [ -z "${MSI:-}" ]; then
   echo "ERROR: No Windows installer artifact was produced." >&2

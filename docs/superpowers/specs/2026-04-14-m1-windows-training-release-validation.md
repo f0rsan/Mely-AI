@@ -35,6 +35,7 @@
    - 如果 WiX 的 `light.exe` 因自包含 MSI 过大失败，构建脚本会自动切换到外置分卷 CAB 模式并重新生成 MSI。
    - 外置 CAB 回退会复用 Tauri 生成的 `.wxl` 本地化文件；若构建目录未保留该文件，会生成最小 fallback，避免 `!(loc...)` 变量导致 `light.exe` 二次失败。
    - 外置 CAB 模式下，`.msi` 与同目录 `.cab` 文件必须一起分发。
+   - 产物汇总阶段允许 `nsis/` 目录不存在；默认 MSI-only 构建不会因此失败。
 5. Windows 构建入口会先检查本地 `main` 是否落后于 `origin/main`：
    - 避免构建机继续运行旧版 `build_windows_llm_runtime.py`。
    - 如需离线或本地分支构建，可设置 `MELY_SKIP_GIT_SYNC_CHECK=1`。
