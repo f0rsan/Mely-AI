@@ -63,6 +63,9 @@ def test_windows_training_installer_blocks_stale_main_checkout():
 def test_windows_training_installer_retries_large_msi_with_external_cabs():
     script = _script_text()
 
+    assert "should_retry_wix_external_cabs" in script
+    assert "failed to run .*light\\\\.exe" in script
+    assert "switching to external CAB fallback" in script
     assert "rerun_wix_with_external_cabs" in script
     assert "patch_wix_for_external_cabs.py" in script
     assert "resolve_wix_localization.py" in script
@@ -71,3 +74,12 @@ def test_windows_training_installer_retries_large_msi_with_external_cabs():
     assert 'light_args+=(-loc "$wix_locale_file")' in script
     assert "External-CAB MSI produced" in script
     assert "keep the .cab files next to the .msi" in script
+
+
+def test_windows_training_installer_records_tauri_build_log_and_can_run_verbose():
+    script = _script_text()
+
+    assert 'TAURI_BUILD_LOG_PATH="$REPO_ROOT/build/windows-tauri-build.log"' in script
+    assert 'VERBOSE_TAURI_BUILD_LOG="${MELY_WINDOWS_VERBOSE_TAURI_BUILD:-0}"' in script
+    assert 'npx tauri build --bundles "$WINDOWS_BUNDLE_TARGETS" --config "$BUILD_TAURI_CONFIG_PATH" >"$TAURI_BUILD_LOG_PATH" 2>&1' in script
+    assert 'npx tauri build --bundles "$WINDOWS_BUNDLE_TARGETS" --config "$BUILD_TAURI_CONFIG_PATH" 2>&1 | tee "$TAURI_BUILD_LOG_PATH"' in script

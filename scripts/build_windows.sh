@@ -39,7 +39,9 @@ BUILD_TAURI_CONFIG_PATH="$REPO_ROOT/build/windows-tauri.build.json"
 CARGO_MANIFEST_PATH="$REPO_ROOT/src-tauri/Cargo.toml"
 CARGO_MANIFEST_BACKUP_PATH="$REPO_ROOT/build/windows-cargo.toml.backup"
 WINDOWS_BUNDLE_TARGETS="${MELY_WINDOWS_BUNDLE_TARGETS:-msi}"
+VERBOSE_TAURI_BUILD_LOG="${MELY_WINDOWS_VERBOSE_TAURI_BUILD:-0}"
 HOST_UNAME="$(uname -s)"
+TAURI_BUILD_LOG_PATH="$REPO_ROOT/build/windows-tauri-build.log"
 
 is_wsl() {
   if [ -n "${WSL_DISTRO_NAME:-}" ]; then
@@ -151,6 +153,25 @@ windows_bundle_targets_include() {
   local target="$1"
   local targets=",$WINDOWS_BUNDLE_TARGETS,"
   [[ "$targets" == *",$target,"* ]]
+}
+
+should_retry_wix_external_cabs() {
+  local tauri_log_path="$1"
+  if [ ! -f "$tauri_log_path" ]; then
+    return 1
+  fi
+
+  if grep -Eqi "failed to run .*light\\.exe|failed to bundle project .*light\\.exe|light\\.exe.*(error|failed)" "$tauri_log_path"; then
+    return 0
+  fi
+  return 1
+}
+
+print_tauri_build_log() {
+  local tauri_log_path="$1"
+  if [ -f "$tauri_log_path" ]; then
+    cat "$tauri_log_path"
+  fi
 }
 
 windows_env_path_to_shell_path() {
@@ -586,18 +607,35 @@ mkdir -p "$(dirname "$STAGED_RELEASE_SUMMARY_PATH")"
   echo "build_version=$BUILD_VERSION"
   echo "note=Bundled pre-build summary. Full release summary is generated under build/ after packaging."
 } > "$STAGED_RELEASE_SUMMARY_PATH"
+mkdir -p "$(dirname "$TAURI_BUILD_LOG_PATH")"
 echo "Using Windows installer version: $BUILD_VERSION"
 echo "Using Windows bundle target(s): $WINDOWS_BUNDLE_TARGETS"
-set +e
-npx tauri build --bundles "$WINDOWS_BUNDLE_TARGETS" --config "$BUILD_TAURI_CONFIG_PATH"
-TAURI_BUILD_STATUS=$?
-set -e
+
+if [ "$VERBOSE_TAURI_BUILD_LOG" = "1" ]; then
+  set +e
+  npx tauri build --bundles "$WINDOWS_BUNDLE_TARGETS" --config "$BUILD_TAURI_CONFIG_PATH" 2>&1 | tee "$TAURI_BUILD_LOG_PATH"
+  TAURI_BUILD_STATUS=${PIPESTATUS[0]}
+  set -e
+else
+  set +e
+  npx tauri build --bundles "$WINDOWS_BUNDLE_TARGETS" --config "$BUILD_TAURI_CONFIG_PATH" >"$TAURI_BUILD_LOG_PATH" 2>&1
+  TAURI_BUILD_STATUS=$?
+  set -e
+fi
+
 if [ "$TAURI_BUILD_STATUS" -ne 0 ]; then
-  if windows_bundle_targets_include "msi"; then
+  if windows_bundle_targets_include "msi" && should_retry_wix_external_cabs "$TAURI_BUILD_LOG_PATH"; then
+    echo "Tauri MSI bundler failed inside WiX light.exe; switching to external CAB fallback."
+    echo "Detailed Tauri build log: $TAURI_BUILD_LOG_PATH"
     rerun_wix_with_external_cabs "$BUILD_VERSION"
   else
+    echo "ERROR: Tauri build failed before the WiX fallback criteria were met." >&2
+    echo "Detailed Tauri build log: $TAURI_BUILD_LOG_PATH" >&2
+    print_tauri_build_log "$TAURI_BUILD_LOG_PATH" >&2
     exit "$TAURI_BUILD_STATUS"
   fi
+elif [ "$VERBOSE_TAURI_BUILD_LOG" != "1" ]; then
+  echo "Tauri build output log: $TAURI_BUILD_LOG_PATH"
 fi
 restore_cargo_manifest_if_needed
 trap - EXIT
