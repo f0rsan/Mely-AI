@@ -468,6 +468,35 @@ async def test_readiness_blocks_when_runtime_health_probe_fails(runtime_manager,
 
 
 @pytest.mark.asyncio
+async def test_runtime_health_traceback_is_hidden_from_readiness(runtime_manager, monkeypatch):
+    manager, data_root = runtime_manager
+    resource_root = Path(os.environ["MELY_LLM_RUNTIME_RESOURCE_ROOT"])
+    monkeypatch.setattr("app.services.llm_runtime_manager.sys.platform", "win32")
+    _seed_runtime_manifest(
+        data_root,
+        worker_script=resource_root / "tools" / "unsloth_worker.py",
+    )
+    _seed_training_snapshot(data_root)
+    (resource_root / "tools" / "verify_runtime_health.py").write_text(
+        (
+            "import sys\n"
+            "print('Traceback (most recent call last):', file=sys.stderr)\n"
+            "print(\"UnicodeEncodeError: 'gbk' codec can't encode character\", file=sys.stderr)\n"
+            "raise SystemExit(1)\n"
+        ),
+        encoding="utf-8",
+    )
+
+    readiness = await manager.get_readiness(base_model="qwen2.5:3b")
+
+    assert readiness.state == "runtime_broken"
+    assert readiness.blocking_reason is not None
+    assert "训练运行时健康检测失败" in readiness.blocking_reason
+    assert "Traceback" not in readiness.blocking_reason
+    assert "UnicodeEncodeError" not in readiness.blocking_reason
+
+
+@pytest.mark.asyncio
 async def test_runtime_health_probe_is_cached_between_readiness_polls(runtime_manager, monkeypatch):
     manager, data_root = runtime_manager
     monkeypatch.setattr("app.services.llm_runtime_manager.sys.platform", "win32")

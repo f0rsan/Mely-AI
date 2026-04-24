@@ -69,6 +69,11 @@ def check_module(module_name: str) -> dict[str, str]:
         }
 
 
+def dump_json(payload: dict[str, object]) -> None:
+    # Keep machine-readable output independent from the Windows console codepage.
+    print(json.dumps(payload, ensure_ascii=True, indent=2))
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     modules = [name.strip() for name in args.modules if name.strip()]
@@ -88,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     if args.json:
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        dump_json(payload)
     else:
         for item in results:
             if item["status"] == "ok":

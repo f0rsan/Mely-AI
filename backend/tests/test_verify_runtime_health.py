@@ -54,6 +54,41 @@ def test_json_output_is_not_polluted_by_import_warnings(monkeypatch, capsys):
     assert "redirects are currently not supported" in unsloth_check["stdout"]
 
 
+def test_json_output_survives_windows_gbk_stdout(monkeypatch):
+    module = _load_health_module()
+    monkeypatch.setitem(sys.modules, "torch", _fake_torch_module())
+
+    def fake_import(name: str):
+        if name == "unsloth":
+            print("🦥 Unsloth runtime ready")
+        return object()
+
+    class GbkStdout:
+        def __init__(self) -> None:
+            self.parts: list[str] = []
+
+        def write(self, text: str) -> int:
+            text.encode("gbk")
+            self.parts.append(text)
+            return len(text)
+
+        def flush(self) -> None:
+            pass
+
+    stdout = GbkStdout()
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(module.importlib, "import_module", fake_import)
+
+    exit_code = module.main(["--json"])
+    output = "".join(stdout.parts)
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert "\\ud83e\\udda5" in output
+    unsloth_check = next(item for item in payload["checks"] if item["name"] == "unsloth")
+    assert "🦥 Unsloth runtime ready" in unsloth_check["stdout"]
+
+
 def test_runtime_manager_parses_json_after_noisy_stdout():
     from app.services.llm_runtime_manager import LLMRuntimeManager
 

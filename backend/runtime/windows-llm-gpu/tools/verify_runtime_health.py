@@ -152,11 +152,18 @@ def build_payload() -> dict[str, object]:
     }
 
 
+def dump_json(payload: dict[str, object]) -> None:
+    # Runtime helper output is parsed by the backend and may be written through
+    # a Windows GBK console/pipe. Escaping keeps the JSON transport ASCII-only
+    # while preserving the decoded values for the caller.
+    print(json.dumps(payload, ensure_ascii=True))
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     payload = build_payload()
     if args.json:
-        print(json.dumps(payload, ensure_ascii=False))
+        dump_json(payload)
     else:
         for item in payload.get("checks", []):
             name = item.get("name", "unknown")

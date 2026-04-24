@@ -299,7 +299,9 @@ class ProtocolEmitter:
             "timestamp": _utc_now(),
             **payload,
         }
-        self._out.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+        # Keep stdout JSONL ASCII-only so Windows codepages cannot break the
+        # protocol when dependency output or errors contain emoji.
+        self._out.write(json.dumps(record, ensure_ascii=True, separators=(",", ":")) + "\n")
         self._out.flush()
 
     def status(

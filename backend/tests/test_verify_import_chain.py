@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import sys
 from pathlib import Path
 
 
@@ -64,3 +66,37 @@ def test_main_reports_deferred_gpu_check_without_raw_traceback(monkeypatch, caps
     assert "[deferred] unsloth" in output
     assert "full check is deferred to runtime readiness on the target GPU machine" in output
     assert "NotImplementedError" not in output
+
+
+def test_json_output_survives_windows_gbk_stdout(monkeypatch):
+    module = _load_verify_module()
+
+    def fake_import(name: str):
+        if name == "unsloth":
+            raise RuntimeError("🦥 import warning leaked into exception")
+        return object()
+
+    class GbkStdout:
+        def __init__(self) -> None:
+            self.parts: list[str] = []
+
+        def write(self, text: str) -> int:
+            text.encode("gbk")
+            self.parts.append(text)
+            return len(text)
+
+        def flush(self) -> None:
+            pass
+
+    stdout = GbkStdout()
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(module.importlib, "import_module", fake_import)
+
+    exit_code = module.main(["--modules", "unsloth", "--json"])
+    output = "".join(stdout.parts)
+    payload = json.loads(output)
+
+    assert exit_code == 1
+    assert "\\ud83e\\udda5" in output
+    assert payload["modules"][0]["status"] == "failed"
+    assert "🦥 import warning leaked into exception" in payload["modules"][0]["error"]

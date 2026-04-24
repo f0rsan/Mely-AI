@@ -27,6 +27,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def dump_json(payload: dict[str, object]) -> None:
+    # The backend consumes this JSON from a subprocess; ASCII-only output avoids
+    # Windows codepage failures when paths or tool output contain emoji.
+    print(json.dumps(payload, ensure_ascii=True))
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     cache_dir = Path(args.cache_dir).expanduser().resolve()
@@ -52,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
         "snapshotPath": str(snapshot_path),
         "preparedAt": utc_now(),
     }
-    print(json.dumps(payload, ensure_ascii=False))
+    dump_json(payload)
     return 0
 
 

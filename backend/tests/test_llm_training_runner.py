@@ -84,6 +84,33 @@ def _run_worker_with_stdin(payload: dict[str, Any], *extra_args: str) -> subproc
     )
 
 
+def test_worker_protocol_output_survives_windows_gbk_stdout(monkeypatch):
+    from app.services import unsloth_worker
+
+    class GbkStdout:
+        def __init__(self) -> None:
+            self.parts: list[str] = []
+
+        def write(self, text: str) -> int:
+            text.encode("gbk")
+            self.parts.append(text)
+            return len(text)
+
+        def flush(self) -> None:
+            pass
+
+    stdout = GbkStdout()
+    monkeypatch.setattr(unsloth_worker.sys, "__stdout__", stdout)
+
+    emitter = unsloth_worker.ProtocolEmitter(job_id="job-test-001")
+    emitter.status(status="running", message="🦥 正在加载训练运行时")
+    output = "".join(stdout.parts)
+    event = json.loads(output)
+
+    assert "\\ud83e\\udda5" in output
+    assert event["message"] == "🦥 正在加载训练运行时"
+
+
 def test_worker_dry_run_completes_with_jsonl_protocol(tmp_path: Path):
     payload = _base_payload(tmp_path)
     result = _run_worker_with_stdin(payload, "--dry-run")

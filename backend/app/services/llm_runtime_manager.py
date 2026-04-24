@@ -59,6 +59,14 @@ ALLOW_NON_WINDOWS_TRAINING_ENV = "MELY_LLM_ALLOW_NON_WINDOWS_TRAINING"
 OLLAMA_RUNTIME_PROBE_TIMEOUT_SECONDS = 4.0
 RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS = 45.0
 DEFAULT_RUNTIME_HEALTH_CACHE_TTL_SECONDS = 60.0
+RUNTIME_TECHNICAL_ERROR_SNIPPETS = (
+    "Traceback (most recent call last)",
+    "UnicodeEncodeError",
+    "UnicodeDecodeError",
+    "ModuleNotFoundError",
+    "ImportError",
+    "File \"",
+)
 
 
 def _env_float(name: str, default: float) -> float:
@@ -142,6 +150,15 @@ def _is_repair_recoverable(message: str) -> bool:
         return True
     unrecoverable_snippets = ("重新安装应用", "安装包缺少")
     return not any(snippet in normalized for snippet in unrecoverable_snippets)
+
+
+def _sanitize_runtime_health_message(message: str) -> str:
+    normalized = message.strip()
+    if not normalized:
+        return "训练运行时健康检测失败，请先执行“修复训练环境”后重试。"
+    if any(snippet in normalized for snippet in RUNTIME_TECHNICAL_ERROR_SNIPPETS):
+        return "训练运行时健康检测失败，请先执行“修复训练环境”后重试。"
+    return normalized
 
 
 def detect_missing_runtime_dependencies() -> list[str]:
@@ -617,7 +634,7 @@ class LLMRuntimeManager:
             return None, details
 
         payload_message = self._extract_runtime_health_error(payload or {})
-        message = payload_message or stderr or stdout
+        message = _sanitize_runtime_health_message(payload_message or stderr or stdout)
         if not message:
             message = f"训练运行时健康检测失败（退出码 {process.returncode}）。"
         details["status"] = "failed"
