@@ -40,6 +40,8 @@ def _seed_training_snapshot(data_root: Path) -> None:
     )
     snapshot_root.mkdir(parents=True, exist_ok=True)
     (snapshot_root / "config.json").write_text("{}", encoding="utf-8")
+    (snapshot_root / "tokenizer.json").write_text("{}", encoding="utf-8")
+    (snapshot_root / "tokenizer_config.json").write_text("{}", encoding="utf-8")
     (snapshot_root / "model-00001-of-00001.safetensors").write_text("stub", encoding="utf-8")
 
 

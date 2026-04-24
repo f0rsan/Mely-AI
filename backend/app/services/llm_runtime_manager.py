@@ -375,21 +375,64 @@ class LLMRuntimeManager:
             if not snapshot_dir.is_dir():
                 continue
 
-            config_path = snapshot_dir / "config.json"
-            if not config_path.exists():
+            if not self._snapshot_dir_has_required_files(snapshot_dir):
                 continue
+            return True
 
-            if (snapshot_dir / "model.safetensors.index.json").exists():
-                return True
-            if (snapshot_dir / "pytorch_model.bin.index.json").exists():
-                return True
-            if (snapshot_dir / "pytorch_model.bin").exists():
-                return True
-            if any(snapshot_dir.glob("*.safetensors")):
-                return True
-            if any(snapshot_dir.glob("*.bin")):
-                return True
+        return False
 
+    def _snapshot_dir_has_required_files(self, snapshot_dir: Path) -> bool:
+        if not (snapshot_dir / "config.json").exists():
+            return False
+        if not (snapshot_dir / "tokenizer_config.json").exists():
+            return False
+        if not self._snapshot_has_tokenizer_vocab(snapshot_dir):
+            return False
+        return self._snapshot_has_model_weights(snapshot_dir)
+
+    @staticmethod
+    def _snapshot_has_tokenizer_vocab(snapshot_dir: Path) -> bool:
+        if (snapshot_dir / "tokenizer.json").exists():
+            return True
+        if (snapshot_dir / "tokenizer.model").exists():
+            return True
+        if (snapshot_dir / "spiece.model").exists():
+            return True
+        if (snapshot_dir / "vocab.json").exists() and (snapshot_dir / "merges.txt").exists():
+            return True
+        return False
+
+    @staticmethod
+    def _index_referenced_files_exist(index_path: Path) -> bool:
+        try:
+            payload = json.loads(index_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        weight_map = payload.get("weight_map")
+        if not isinstance(weight_map, dict) or not weight_map:
+            return False
+        referenced_files = {
+            str(value).strip()
+            for value in weight_map.values()
+            if str(value).strip()
+        }
+        if not referenced_files:
+            return False
+        return all((index_path.parent / file_name).exists() for file_name in referenced_files)
+
+    def _snapshot_has_model_weights(self, snapshot_dir: Path) -> bool:
+        safetensors_index = snapshot_dir / "model.safetensors.index.json"
+        if safetensors_index.exists():
+            return self._index_referenced_files_exist(safetensors_index)
+        pytorch_index = snapshot_dir / "pytorch_model.bin.index.json"
+        if pytorch_index.exists():
+            return self._index_referenced_files_exist(pytorch_index)
+        if (snapshot_dir / "pytorch_model.bin").exists():
+            return True
+        if any(snapshot_dir.glob("*.safetensors")):
+            return True
+        if any(snapshot_dir.glob("*.bin")):
+            return True
         return False
 
     def _snapshot_ready(self, huggingface_model_id: str) -> bool:

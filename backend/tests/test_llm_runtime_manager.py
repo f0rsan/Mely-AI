@@ -38,6 +38,8 @@ def _seed_training_snapshot(data_root: Path) -> None:
     )
     snapshot_root.mkdir(parents=True, exist_ok=True)
     (snapshot_root / "config.json").write_text("{}", encoding="utf-8")
+    (snapshot_root / "tokenizer.json").write_text("{}", encoding="utf-8")
+    (snapshot_root / "tokenizer_config.json").write_text("{}", encoding="utf-8")
     (snapshot_root / "model-00001-of-00001.safetensors").write_text("stub", encoding="utf-8")
 
 
@@ -74,6 +76,8 @@ def _seed_runtime_resources(resource_root: Path) -> None:
             "target = Path(args.cache_dir) / ('models--' + args.repo_id.replace('/', '--')) / 'snapshots' / 'local'\n"
             "target.mkdir(parents=True, exist_ok=True)\n"
             "(target / 'config.json').write_text('{}', encoding='utf-8')\n"
+            "(target / 'tokenizer.json').write_text('{}', encoding='utf-8')\n"
+            "(target / 'tokenizer_config.json').write_text('{}', encoding='utf-8')\n"
             "(target / 'model-00001-of-00001.safetensors').write_text('stub', encoding='utf-8')\n"
         ),
         encoding="utf-8",
@@ -292,6 +296,37 @@ async def test_readiness_rejects_incomplete_training_snapshot(runtime_manager, m
     )
     incomplete_snapshot.mkdir(parents=True, exist_ok=True)
     (incomplete_snapshot / "config.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr("app.services.llm_runtime_manager.detect_missing_runtime_dependencies", lambda: [])
+    monkeypatch.setattr(
+        "app.services.llm_runtime_manager.check_ollama_runtime",
+        lambda: asyncio.sleep(
+            0,
+            result=SimpleNamespace(
+                installed=True,
+                running=True,
+                models=[SimpleNamespace(name="qwen2.5:3b")],
+                hint=None,
+            ),
+        ),
+    )
+
+    readiness = await manager.get_readiness(base_model="qwen2.5:3b")
+    assert readiness.state == "missing_training_base_snapshot"
+
+
+@pytest.mark.asyncio
+async def test_readiness_rejects_training_snapshot_without_tokenizer(runtime_manager, monkeypatch):
+    manager, data_root = runtime_manager
+    _seed_runtime_manifest(
+        data_root,
+        worker_script=Path(os.environ["MELY_LLM_RUNTIME_RESOURCE_ROOT"]) / "tools" / "unsloth_worker.py",
+    )
+    incomplete_snapshot = (
+        data_root / "cache" / "hf" / "models--Qwen--Qwen2.5-3B-Instruct" / "snapshots" / "partial"
+    )
+    incomplete_snapshot.mkdir(parents=True, exist_ok=True)
+    (incomplete_snapshot / "config.json").write_text("{}", encoding="utf-8")
+    (incomplete_snapshot / "model-00001-of-00001.safetensors").write_text("stub", encoding="utf-8")
     monkeypatch.setattr("app.services.llm_runtime_manager.detect_missing_runtime_dependencies", lambda: [])
     monkeypatch.setattr(
         "app.services.llm_runtime_manager.check_ollama_runtime",
